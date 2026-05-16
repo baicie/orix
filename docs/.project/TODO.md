@@ -116,7 +116,7 @@
 | 8.4  | frozen-lockfile 流程（resolve from lockfile） | `core` | ✅ |
 | 8.5  | force 流程（重新获取所有包） | `core` | ✅ |
 | 8.6  | CoreError 枚举（聚合所有子 crate 错误） | `core` | ✅ |
-| 8.7  | InstallReport / FetchReport / LinkReport 结构 | `core` | ⚠️ 部分完成 |
+| 8.7  | InstallReport / FetchReport / LinkReport 结构 | `core` | ✅ |
 
 ---
 
@@ -129,7 +129,7 @@
 | 9.3  | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ✅ |
 | 9.4  | 用户 ~/.npmrc 加载 | `config` | ✅ |
 | 9.5  | CLI 参数覆盖（最高优先级） | `config` | ✅ |
-| 9.6  | hoist-patterns / side-effects-cache 配置 | `config` | 🔴 待实施 |
+| 9.6  | hoist-patterns / side-effects-cache 配置 | `config` | ✅ |
 
 ---
 
@@ -174,11 +174,11 @@
 | ID   | 任务 | 状态 |
 |------|------|------|
 | 13.1 | `cargo xtask check` 完整（fmt + clippy + test） | ✅ |
-| 13.2 | `cargo deny check` CI 集成 | 🔴 待实施 |
+| 13.2 | `cargo deny check` CI 集成 | ✅ |
 | 13.3 | `cargo machete` 依赖检查 | ✅ |
 | 13.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ⚠️ 模板待替换 |
 | 13.5 | 文档：README.md | ✅ |
-| 13.6 | 文档：CONTRIBUTING.md | 🔴 待实施 |
+| 13.6 | 文档：CONTRIBUTING.md | ✅ |
 | 13.7 | 性能测试 / benchmark | 🔴 待实施 |
 
 ---
@@ -265,12 +265,12 @@ Phase 4  CAS Store           █████████░  89%
 Phase 5  Linker             ██████████ 100%
 Phase 6  Lockfile           ██████████ 100%
 Phase 7  Workspace          ██████████ 100%
-Phase 8  Pipeline           █████████░  86%
-Phase 9  Config            ████████░░  83%
+Phase 8  Pipeline           ██████████ 100%
+Phase 9  Config            ██████████ 100%
 Phase 10 Utils & Macros     ██████░░░░  67%
 Phase 11 Domain            ██████████ 100%
-Phase 12 测试               ██████░░░░  86%
-Phase 13 集成 & 质量       ████░░░░░░  57%
+Phase 12 测试               ███████░░░  86%
+Phase 13 集成 & 质量       █████░░░░░  71%
 ```
 
-**总体完成度：~87%**
+**总体完成度：~90%**

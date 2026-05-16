@@ -36,6 +36,10 @@ pub struct Config {
     pub engine_strict: bool,
     /// Color output.
     pub color: ColorChoice,
+    /// Glob patterns for packages hoisted to the root node_modules.
+    pub hoist_patterns: Vec<String>,
+    /// Whether to use the side-effects cache for lifecycle scripts.
+    pub side_effects_cache: bool,
     /// Project root.
     pub project_root: PathBuf,
 }
@@ -90,6 +94,8 @@ impl Config {
             save_exact: false,
             engine_strict: false,
             color: ColorChoice::Auto,
+            hoist_patterns: vec!["*".to_string()],
+            side_effects_cache: true,
             project_root,
         };
 
@@ -143,6 +149,15 @@ impl Config {
         if let Some(v) = first_env(["ORIX_IGNORE_SCRIPTS", "RPNPM_IGNORE_SCRIPTS"]) {
             self.ignore_scripts = v == "true" || v == "1";
         }
+        if let Some(v) = first_env(["ORIX_HOIST_PATTERNS", "RPNPM_HOIST_PATTERNS"]) {
+            self.hoist_patterns = v
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+        }
+        if let Some(v) = first_env(["ORIX_SIDE_EFFECTS_CACHE", "RPNPM_SIDE_EFFECTS_CACHE"]) {
+            self.side_effects_cache = v == "true" || v == "1";
+        }
     }
 
     fn merge_overrides(&mut self, overrides: &ConfigOverrides) {
@@ -188,6 +203,13 @@ impl Config {
             "ignore-scripts" => self.ignore_scripts = value == "true" || value == "1",
             "save-exact" => self.save_exact = value == "true" || value == "1",
             "engine-strict" => self.engine_strict = value == "true" || value == "1",
+            "hoist-patterns" => {
+                self.hoist_patterns = value
+                    .split_whitespace()
+                    .map(String::from)
+                    .collect();
+            }
+            "side-effects-cache" => self.side_effects_cache = value == "true" || value == "1",
             "color" => {
                 self.color = match value {
                     "always" => ColorChoice::Always,
@@ -220,6 +242,7 @@ fn first_env<const N: usize>(keys: [&str; N]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -287,6 +310,34 @@ mod tests {
         )?;
 
         assert_eq!(config.registry.as_str(), "https://cli.example.test/");
+        Ok(())
+    }
+
+    #[test]
+    fn hoist_patterns_default_to_star() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let config = Config::load(temp.path())?;
+        assert_eq!(config.hoist_patterns, vec!["*"]);
+        Ok(())
+    }
+
+    #[test]
+    fn hoist_patterns_parsed_from_npmrc() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        fs::write(temp.path().join(".npmrc"), "hoist-patterns=@types/* *babel* *jest*")?;
+        let config = Config::load(temp.path())?;
+        assert_eq!(
+            config.hoist_patterns,
+            vec!["@types/*", "*babel*", "*jest*"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn side_effects_cache_defaults_to_true() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let config = Config::load(temp.path())?;
+        assert!(config.side_effects_cache);
         Ok(())
     }
 }

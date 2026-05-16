@@ -43,3 +43,11 @@ jobs:
 
       - name: Docs
         run: cargo doc --workspace --all-features --no-deps
+
+      - name: Install tools
+        run: cargo install cargo-deny cargo-machete
+
+      - name: Security checks
+        run: |
+          cargo deny check
+          cargo machete --with-metadata

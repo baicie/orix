@@ -5,6 +5,8 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -105,7 +107,6 @@ struct MockRegistry {
 impl MockRegistry {
     fn start(tarball: Vec<u8>, integrity: String) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
         let addr = listener.local_addr().unwrap();
         let base_url = format!("http://{}/", addr);
         let tarball_url = format!("{}is-number/-/is-number-1.0.0.tgz", base_url);
@@ -126,22 +127,41 @@ impl MockRegistry {
             tarball_url, integrity
         );
 
+        // Signal that the listener is bound and ready before the thread starts accepting.
+        let ready = Arc::new(AtomicBool::new(false));
+        let ready_clone = Arc::clone(&ready);
+        let deadline = Arc::new(AtomicU64::new(0));
+
         thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(30);
-            let mut handled = 0;
-            while handled < 2 && Instant::now() < deadline {
+            ready_clone.store(true, Ordering::Release);
+            let deadline_val = Instant::now() + Duration::from_secs(30);
+            deadline.store(
+                deadline_val
+                    .duration_since(Instant::now())
+                    .as_secs()
+                    .try_into()
+                    .unwrap_or(30),
+                Ordering::Relaxed,
+            );
+            loop {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         handle_registry_request(stream, &packument, &tarball);
-                        handled += 1;
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                        break;
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        break;
+                    }
                 }
             }
         });
+
+        // Wait for the server thread to be ready to accept connections.
+        while !ready.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_micros(100));
+        }
 
         Self { base_url }
     }
