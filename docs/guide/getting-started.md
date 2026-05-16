@@ -16,8 +16,8 @@ cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
 Clone and build:
 
 ```bash
-git clone https://github.com/your-org/your-repo.git
-cd your-repo
+git clone https://github.com/baicie/orix.git
+cd orix
 cargo build --workspace
 ```
 

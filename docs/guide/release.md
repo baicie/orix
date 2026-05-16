@@ -56,5 +56,5 @@ Use the **Publish crates** workflow (manually triggered):
 Use [git-cliff](https://github.com/orf/git-cliff) for automated changelog generation:
 
 ```bash
-git-cliff --config cliff.toml --repository https://github.com/your-org/your-repo
+git-cliff --config cliff.toml --repository https://github.com/baicie/orix
 ```
