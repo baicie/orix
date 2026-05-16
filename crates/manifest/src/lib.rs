@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub use rpnpm_domain::{PackageName, Version, VersionConstraint};
+pub use orix_domain::{PackageName, Version, VersionConstraint};
 
 /// A parsed package.json manifest.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -24,13 +24,17 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
     /// Development dependencies.
-    #[serde(default)]
+    #[serde(rename = "devDependencies", alias = "dev_dependencies", default)]
     pub dev_dependencies: BTreeMap<String, String>,
     /// Peer dependencies.
-    #[serde(default)]
+    #[serde(rename = "peerDependencies", alias = "peer_dependencies", default)]
     pub peer_dependencies: BTreeMap<String, String>,
     /// Optional dependencies.
-    #[serde(default)]
+    #[serde(
+        rename = "optionalDependencies",
+        alias = "optional_dependencies",
+        default
+    )]
     pub optional_dependencies: BTreeMap<String, String>,
     /// Lifecycle scripts.
     #[serde(default)]
@@ -162,6 +166,9 @@ mod tests {
             name: Some("my-pkg".into()),
             version: Some("1.0.0".into()),
             dependencies: BTreeMap::from([("react".into(), "^18.0.0".into())]),
+            dev_dependencies: BTreeMap::from([("vite".into(), "^5.0.0".into())]),
+            optional_dependencies: BTreeMap::from([("fsevents".into(), "^2.3.3".into())]),
+            peer_dependencies: BTreeMap::from([("typescript".into(), ">=5.0.0".into())]),
             bin: BinField::Map(BTreeMap::from([("my-tool".into(), "./bin/cli.js".into())])),
             ..Default::default()
         };
@@ -170,7 +177,42 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(reparsed.name, manifest.name);
         assert_eq!(reparsed.dependencies, manifest.dependencies);
+        assert_eq!(reparsed.dev_dependencies, manifest.dev_dependencies);
+        assert_eq!(
+            reparsed.optional_dependencies,
+            manifest.optional_dependencies
+        );
+        assert_eq!(reparsed.peer_dependencies, manifest.peer_dependencies);
         assert!(!reparsed.bin.is_empty());
+    }
+
+    #[test]
+    fn test_reads_standard_package_json_dependency_fields() -> anyhow::Result<()> {
+        let json = r#"{
+            "name": "js-app",
+            "version": "1.0.0",
+            "dependencies": { "is-odd": "^3.0.1" },
+            "devDependencies": { "vite": "^5.0.0" },
+            "optionalDependencies": { "fsevents": "^2.3.3" },
+            "peerDependencies": { "typescript": ">=5.0.0" }
+        }"#;
+
+        let manifest: Manifest = serde_json::from_str(json)?;
+
+        assert_eq!(manifest.dependencies.get("is-odd"), Some(&"^3.0.1".into()));
+        assert_eq!(
+            manifest.dev_dependencies.get("vite"),
+            Some(&"^5.0.0".into())
+        );
+        assert_eq!(
+            manifest.optional_dependencies.get("fsevents"),
+            Some(&"^2.3.3".into())
+        );
+        assert_eq!(
+            manifest.peer_dependencies.get("typescript"),
+            Some(&">=5.0.0".into())
+        );
+        Ok(())
     }
 
     #[test]

@@ -8,15 +8,15 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{info, info_span};
 
-use rpnpm_fetcher::{Fetcher, TarballCache};
-use rpnpm_linker::{LinkReport, Linker};
-use rpnpm_lockfile::Lockfile;
-use rpnpm_manifest::Manifest;
-use rpnpm_resolver::{resolve_from_lockfile_packages, Resolver};
-use rpnpm_store::Store;
-use rpnpm_workspace::Workspace;
+use orix_fetcher::{Fetcher, TarballCache};
+use orix_linker::{LinkReport, Linker};
+use orix_lockfile::Lockfile;
+use orix_manifest::Manifest;
+use orix_resolver::{resolve_from_lockfile_packages, Resolver};
+use orix_store::Store;
+use orix_workspace::Workspace;
 
-pub use rpnpm_config::Config;
+pub use orix_config::Config;
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
@@ -39,7 +39,7 @@ pub struct InstallReport {
     /// Number of packages added.
     pub packages_added: usize,
     /// Fetch operation report.
-    pub fetch_report: rpnpm_fetcher::FetchReport,
+    pub fetch_report: orix_fetcher::FetchReport,
     /// Link operation report.
     pub link_report: LinkReport,
     /// Lockfile diff (if computed).
@@ -75,7 +75,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     if opts.frozen_lockfile && !config.lockfile_path().exists() {
         anyhow::bail!(
-            "No lockfile found at {}. Run rpnpm install without --frozen-lockfile first.",
+            "No lockfile found at {}. Run orix install without --frozen-lockfile first.",
             config.lockfile_path().display()
         );
     }
@@ -237,7 +237,7 @@ pub async fn add(
         Manifest::read(&manifest_path).with_context(|| "failed to read package.json")?;
 
     for pkg_spec in packages {
-        let (name, constraint) = rpnpm_resolver::parse_package_spec(pkg_spec)
+        let (name, constraint) = orix_resolver::parse_package_spec(pkg_spec)
             .with_context(|| format!("invalid package spec: {}", pkg_spec))?;
 
         match dep_type {

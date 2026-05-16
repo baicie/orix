@@ -7,7 +7,7 @@
 ## 管道架构
 
 ```
-rpnpm install
+orix install
 │
 ├─ Config.resolve()          # 加载 .npmrc、env、CLI 参数
 │
@@ -91,7 +91,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let config = Config::load(project_root)?;
     if opts.frozen_lockfile && !config.lockfile_path().exists() {
         anyhow::bail!(
-            "No lockfile found at {}. Run rpnpm install without --frozen-lockfile first.",
+            "No lockfile found at {}. Run orix install without --frozen-lockfile first.",
             config.lockfile_path().display()
         );
     }

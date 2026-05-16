@@ -1,4 +1,4 @@
-//! Shared domain types for rpnpm.
+//! Shared domain types for orix.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -436,8 +436,8 @@ pub fn symlink_available() -> bool {
     #[cfg(windows)]
     {
         let tmp = std::env::temp_dir();
-        let test_file = tmp.join(format!("rpnpm_link_test_{}", std::process::id()));
-        let test_link = tmp.join(format!("rpnpm_link_test_{}.lnk", std::process::id()));
+        let test_file = tmp.join(format!("orix_link_test_{}", std::process::id()));
+        let test_link = tmp.join(format!("orix_link_test_{}.lnk", std::process::id()));
         // Write a test file then try to symlink it.
         if std::fs::write(&test_file, b"test").is_ok() {
             let result = std::os::windows::fs::symlink_file(&test_file, &test_link);

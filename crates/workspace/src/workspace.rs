@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use rpnpm_manifest::Manifest;
+use orix_manifest::Manifest;
 
 use super::WorkspaceSpec;
 
@@ -57,7 +57,7 @@ impl Workspace {
         Ok(Self {
             root: root.clone(),
             packages,
-            lockfile_path: root.join("rpnpm-lock.yaml"),
+            lockfile_path: root.join("orix-lock.yaml"),
         })
     }
 

@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-core"
-description = "Install pipeline orchestration for rpnpm."
+name = "orix-core"
+description = "Install pipeline orchestration for orix."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,16 +17,16 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tracing = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-manifest = { workspace = true }
-rpnpm-config = { workspace = true }
-rpnpm-resolver = { workspace = true }
-rpnpm-registry = { workspace = true }
-rpnpm-fetcher = { workspace = true }
-rpnpm-store = { workspace = true }
-rpnpm-lockfile = { workspace = true }
-rpnpm-linker = { workspace = true }
-rpnpm-workspace = { workspace = true }
+orix-domain = { workspace = true }
+orix-manifest = { workspace = true }
+orix-config = { workspace = true }
+orix-resolver = { workspace = true }
+orix-registry = { workspace = true }
+orix-fetcher = { workspace = true }
+orix-store = { workspace = true }
+orix-lockfile = { workspace = true }
+orix-linker = { workspace = true }
+orix-workspace = { workspace = true }
 
 [lints]
 workspace = true

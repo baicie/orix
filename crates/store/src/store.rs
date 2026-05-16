@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-use rpnpm_domain::PackageId;
+use orix_domain::PackageId;
 
 use super::{sha256, IntegrityMeta, PruneReport};
 
@@ -174,10 +174,10 @@ impl Store {
             let entry = entry?;
             let name = entry.file_name().into_string().unwrap_or_default();
             if let Some((pkg_name, ver_str)) = name.rsplit_once('@') {
-                let name = rpnpm_domain::PackageName::from(pkg_name.to_lowercase());
-                let version = rpnpm_domain::Version::parse(ver_str)
+                let name = orix_domain::PackageName::from(pkg_name.to_lowercase());
+                let version = orix_domain::Version::parse(ver_str)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                ids.push(rpnpm_domain::PackageId::new(name, version));
+                ids.push(orix_domain::PackageId::new(name, version));
             }
         }
         Ok(ids)

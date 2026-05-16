@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-utils"
-description = "Shared utilities for the rpnpm package manager."
+name = "orix-utils"
+description = "Shared utilities for the orix package manager."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

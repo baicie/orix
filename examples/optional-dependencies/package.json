@@ -1,0 +1,15 @@
+{
+  "name": "orix-example-optional-dependencies",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example for optionalDependencies and platform-specific packages.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "detect-libc": "^2.0.3"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.3"
+  }
+}

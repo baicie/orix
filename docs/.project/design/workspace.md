@@ -58,7 +58,7 @@ impl Workspace {
             .with_context(|| "failed to parse pnpm-workspace.yaml")?;
 
         let packages = Self::find_packages(&root, &workspace_file.packages)?;
-        Ok(Self { root, packages, lockfile_path: root.join("rpnpm-lock.yaml") })
+        Ok(Self { root, packages, lockfile_path: root.join("orix-lock.yaml") })
     }
 
     fn find_packages(root: &Path, patterns: &[String]) -> Result<Vec<WorkspacePackage>> {
@@ -175,11 +175,11 @@ packages:
 
 ### 按包安装
 
-在 workspace 子目录内运行 `rpnpm install` 时：
+在 workspace 子目录内运行 `orix install` 时：
 
 ```
 cd packages/my-lib
-rpnpm install
+orix install
 ```
 
 1. 从最近的 `pnpm-workspace.yaml` 祖先加载工作区
@@ -190,19 +190,19 @@ rpnpm install
 
 ### 根目录安装
 
-从工作区根目录运行 `rpnpm install` 时：
+从工作区根目录运行 `orix install` 时：
 
 1. 扫描所有 workspace 包
 2. 收集整个工作区的所有依赖
 3. 去重——如果多个包使用 `react@18.2.0`，只安装一次
-4. 在工作区根目录生成一个共享的 `rpnpm-lock.yaml`
+4. 在工作区根目录生成一个共享的 `orix-lock.yaml`
 5. 在工作区根目录构建一个共享的 `.pnpm/` store
 6. 每个包的 `node_modules/` 符号链接到共享的 `.pnpm/`
 
 ### 带工作区的 Lockfile 结构
 
 ```yaml
-# 工作区根目录的 rpnpm-lock.yaml
+# 工作区根目录的 orix-lock.yaml
 lockfileVersion: 1
 
 importers:

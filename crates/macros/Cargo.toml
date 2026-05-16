@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-macros"
-description = "Procedural macros for the rpnpm package manager."
+name = "orix-macros"
+description = "Procedural macros for the orix package manager."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

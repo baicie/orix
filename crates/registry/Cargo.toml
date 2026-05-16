@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-registry"
+name = "orix-registry"
 description = "npm registry API client."
 version.workspace = true
 edition.workspace = true
@@ -16,7 +16,7 @@ reqwest = { workspace = true }
 url = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-rpnpm-domain = { workspace = true }
+orix-domain = { workspace = true }
 
 [lints]
 workspace = true

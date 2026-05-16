@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-linker"
+name = "orix-linker"
 description = "node_modules/.pnpm structure and symlink/hardlink generation."
 version.workspace = true
 edition.workspace = true
@@ -17,9 +17,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 walkdir = { workspace = true }
 rayon = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-store = { workspace = true }
-rpnpm-manifest = { workspace = true }
+orix-domain = { workspace = true }
+orix-store = { workspace = true }
+orix-manifest = { workspace = true }
 
 [lints]
 workspace = true

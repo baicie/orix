@@ -1,0 +1,12 @@
+{
+  "name": "orix-example-workspace-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Workspace root example for orix.",
+  "scripts": {
+    "start": "node apps/web/index.js"
+  },
+  "dependencies": {
+    "picocolors": "^1.1.1"
+  }
+}

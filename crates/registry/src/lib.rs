@@ -8,7 +8,7 @@ use anyhow::Result;
 use thiserror::Error;
 use url::Url;
 
-use rpnpm_domain::PackageName;
+use orix_domain::PackageName;
 
 /// Errors from the npm registry client.
 #[derive(Error, Debug)]
@@ -42,7 +42,7 @@ impl RegistryClient {
     #[allow(clippy::expect_used)]
     pub fn new(base_url: Url) -> Self {
         let http_client = reqwest::Client::builder()
-            .user_agent("rpnpm/0.1.0")
+            .user_agent("orix/0.1.0")
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
@@ -58,7 +58,7 @@ impl RegistryClient {
     #[allow(clippy::expect_used)]
     pub fn with_auth(base_url: Url, token: &str) -> Self {
         let http_client = reqwest::Client::builder()
-            .user_agent("rpnpm/0.1.0")
+            .user_agent("orix/0.1.0")
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()

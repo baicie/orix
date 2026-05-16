@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-pub use rpnpm_domain::PackageName;
+pub use orix_domain::PackageName;
 
 /// Application-wide configuration.
 #[derive(Clone, Debug)]
@@ -62,10 +62,10 @@ impl Config {
                 .expect("default registry URL is always valid"),
             store_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".rpnpm/store/v1"),
+                .join(".orix/store/v1"),
             cache_dir: dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("rpnpm/tarballs"),
+                .join("orix/tarballs"),
             auth_token: None,
             concurrency: 10,
             fetch_timeout_secs: 30,
@@ -107,21 +107,21 @@ impl Config {
     }
 
     fn merge_env(&mut self) {
-        if let Ok(v) = env::var("RPNPM_REGISTRY") {
+        if let Ok(v) = env::var("ORIX_REGISTRY") {
             if let Ok(u) = Url::parse(&v) {
                 self.registry = u;
             }
         }
-        if let Ok(v) = env::var("RPNPM_STORE") {
+        if let Ok(v) = env::var("ORIX_STORE") {
             self.store_dir = PathBuf::from(v);
         }
-        if let Ok(v) = env::var("RPNPM_CACHE") {
+        if let Ok(v) = env::var("ORIX_CACHE") {
             self.cache_dir = PathBuf::from(v);
         }
-        if let Ok(v) = env::var("RPNPM_CONCURRENCY") {
+        if let Ok(v) = env::var("ORIX_CONCURRENCY") {
             self.concurrency = v.parse().unwrap_or(self.concurrency);
         }
-        if let Ok(v) = env::var("RPNPM_IGNORE_SCRIPTS") {
+        if let Ok(v) = env::var("ORIX_IGNORE_SCRIPTS") {
             self.ignore_scripts = v == "true" || v == "1";
         }
     }
@@ -175,7 +175,7 @@ impl Config {
 
     /// Path to the lockfile for this project.
     pub fn lockfile_path(&self) -> PathBuf {
-        self.project_root.join("rpnpm-lock.yaml")
+        self.project_root.join("orix-lock.yaml")
     }
 
     /// Path to the node_modules directory for this project.

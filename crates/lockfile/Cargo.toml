@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-lockfile"
-description = "rpnpm-lock.yaml read/write/diff."
+name = "orix-lockfile"
+description = "orix-lock.yaml read/write/diff."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,8 +14,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-manifest = { workspace = true }
+orix-domain = { workspace = true }
+orix-manifest = { workspace = true }
 
 [lints]
 workspace = true

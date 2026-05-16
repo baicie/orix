@@ -1,4 +1,4 @@
-//! Install pipeline orchestration for rpnpm.
+//! Install pipeline orchestration for orix.
 
 pub use crate::pipeline::{add, remove, DepType, InstallOpts, InstallReport, RemoveReport};
 
@@ -6,14 +6,14 @@ pub mod error;
 pub mod pipeline;
 
 pub use error::CoreError;
-pub use rpnpm_config::Config;
-pub use rpnpm_domain::{
+pub use orix_config::Config;
+pub use orix_domain::{
     DependencyGraph, PackageId, PackageName, ResolvedPackage, Version, VersionConstraint,
 };
-pub use rpnpm_fetcher::{FetchReport, Fetcher, TarballCache};
-pub use rpnpm_linker::{LinkReport, Linker};
-pub use rpnpm_lockfile::Lockfile;
-pub use rpnpm_manifest::Manifest;
-pub use rpnpm_resolver::Resolver;
-pub use rpnpm_store::Store;
-pub use rpnpm_workspace::Workspace;
+pub use orix_fetcher::{FetchReport, Fetcher, TarballCache};
+pub use orix_linker::{LinkReport, Linker};
+pub use orix_lockfile::Lockfile;
+pub use orix_manifest::Manifest;
+pub use orix_resolver::Resolver;
+pub use orix_store::Store;
+pub use orix_workspace::Workspace;

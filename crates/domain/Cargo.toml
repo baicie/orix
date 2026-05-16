@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-domain"
-description = "Shared domain types for rpnpm."
+name = "orix-domain"
+description = "Shared domain types for orix."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

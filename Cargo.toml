@@ -71,20 +71,20 @@ assert_cmd = "2"
 predicates = "3"
 pretty_assertions = "1"
 
-# ── rpnpm crate aliases ───────────────────────────────────────────────────────
-rpnpm-cli = { path = "crates/cli", version = "0.1.0" }
-rpnpm-core = { path = "crates/core", version = "0.1.0" }
-rpnpm-config = { path = "crates/config", version = "0.1.0" }
-rpnpm-utils = { path = "crates/utils", version = "0.1.0" }
-rpnpm-domain = { path = "crates/domain", version = "0.1.0" }
-rpnpm-manifest = { path = "crates/manifest", version = "0.1.0" }
-rpnpm-resolver = { path = "crates/resolver", version = "0.1.0" }
-rpnpm-registry = { path = "crates/registry", version = "0.1.0" }
-rpnpm-fetcher = { path = "crates/fetcher", version = "0.1.0" }
-rpnpm-store = { path = "crates/store", version = "0.1.0" }
-rpnpm-lockfile = { path = "crates/lockfile", version = "0.1.0" }
-rpnpm-linker = { path = "crates/linker", version = "0.1.0" }
-rpnpm-workspace = { path = "crates/workspace", version = "0.1.0" }
+# ── orix crate aliases (path must match actual package name) ──────────────────
+orix-cli = { path = "crates/cli", version = "0.1.0" }
+orix-core = { path = "crates/core", version = "0.1.0" }
+orix-config = { path = "crates/config", version = "0.1.0" }
+orix-utils = { path = "crates/utils", version = "0.1.0" }
+orix-domain = { path = "crates/domain", version = "0.1.0" }
+orix-manifest = { path = "crates/manifest", version = "0.1.0" }
+orix-resolver = { path = "crates/resolver", version = "0.1.0" }
+orix-registry = { path = "crates/registry", version = "0.1.0" }
+orix-fetcher = { path = "crates/fetcher", version = "0.1.0" }
+orix-store = { path = "crates/store", version = "0.1.0" }
+orix-lockfile = { path = "crates/lockfile", version = "0.1.0" }
+orix-linker = { path = "crates/linker", version = "0.1.0" }
+orix-workspace = { path = "crates/workspace", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

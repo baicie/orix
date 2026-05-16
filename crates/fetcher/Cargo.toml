@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-fetcher"
+name = "orix-fetcher"
 description = "Tarball download, integrity verification, and extraction."
 version.workspace = true
 edition.workspace = true
@@ -25,9 +25,9 @@ rayon = { workspace = true }
 subtle = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-registry = { workspace = true }
-rpnpm-store = { workspace = true }
+orix-domain = { workspace = true }
+orix-registry = { workspace = true }
+orix-store = { workspace = true }
 
 [lints]
 workspace = true

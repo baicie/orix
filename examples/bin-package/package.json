@@ -1,0 +1,15 @@
+{
+  "name": "orix-example-bin-package",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example for package bin metadata.",
+  "bin": {
+    "orix-example-hello": "./bin/hello.js"
+  },
+  "scripts": {
+    "start": "node ./bin/hello.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  }
+}

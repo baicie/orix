@@ -23,7 +23,7 @@ impl TarballCache {
         Self {
             root,
             client: reqwest::Client::builder()
-                .user_agent("rpnpm/0.1.0")
+                .user_agent("orix/0.1.0")
                 .timeout(std::time::Duration::from_secs(60))
                 .build()
                 .expect("reqwest client should always build successfully"),

@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-store"
+name = "orix-store"
 description = "Content-addressable package cache."
 version.workspace = true
 edition.workspace = true
@@ -19,7 +19,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 walkdir = { workspace = true }
 rayon = { workspace = true }
-rpnpm-domain = { workspace = true }
+orix-domain = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-resolver"
+name = "orix-resolver"
 description = "Dependency resolution with semver matching."
 version.workspace = true
 edition.workspace = true
@@ -17,10 +17,10 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-registry = { workspace = true }
-rpnpm-manifest = { workspace = true }
-rpnpm-lockfile = { workspace = true }
+orix-domain = { workspace = true }
+orix-registry = { workspace = true }
+orix-manifest = { workspace = true }
+orix-lockfile = { workspace = true }
 
 [lints]
 workspace = true

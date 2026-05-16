@@ -6,13 +6,13 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 
-use rpnpm_domain::{
+use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, Version,
     VersionConstraint,
 };
-use rpnpm_lockfile::PackageLock;
-use rpnpm_manifest::Manifest;
-use rpnpm_registry::{Packument, RegistryClient};
+use orix_lockfile::PackageLock;
+use orix_manifest::Manifest;
+use orix_registry::{Packument, RegistryClient};
 use url::Url;
 
 /// An optional dependency that was skipped due to platform mismatch.

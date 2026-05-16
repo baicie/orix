@@ -1,6 +1,6 @@
 # 设计概览
 
-本文档包含 rpnpm 各核心组件的详细设计文档。
+本文档包含 orix 各核心组件的详细设计文档。
 
 ## Crate 架构
 
@@ -13,7 +13,7 @@ crates/
 ├── registry         # npm registry API（packument, tarball 元数据）
 ├── fetcher          # tarball 下载，完整性验证，解压
 ├── store            # 内容可寻址包缓存
-├── lockfile         # rpnpm-lock.yaml 读写/diff
+├── lockfile         # orix-lock.yaml 读写/diff
 ├── linker           # node_modules/.pnpm 结构 + 符号链接/硬链接生成
 ├── workspace        # workspace 发现，pnpm-workspace.yaml 解析
 └── core             # 安装管道编排
@@ -26,7 +26,7 @@ crates/
 | [CAS Store](./store.md) | `crates/store` | 内容可寻址全局包缓存。按 SHA-256 哈希对文件去重。 |
 | [Linker](./linker.md) | `crates/linker` | 构建 `node_modules/.pnpm/` 和符号链接树。平台感知（Windows junction 回退）。 |
 | [Resolver](./resolver.md) | `crates/resolver` | 通过 npm registry 查询将 `package.json` 依赖转换为完全解析的依赖图。 |
-| [Lockfile](./lockfile.md) | `crates/lockfile` | 管理 `rpnpm-lock.yaml`：读写、diff、冻结 lockfile 验证。 |
+| [Lockfile](./lockfile.md) | `crates/lockfile` | 管理 `orix-lock.yaml`：读写、diff、冻结 lockfile 验证。 |
 | [Registry & Fetcher](./fetcher.md) | `crates/registry` + `crates/fetcher` | npm registry API 的 HTTP 客户端；tarball 下载、完整性验证、解压。 |
 | [Workspace](./workspace.md) | `crates/workspace` | Monorepo 支持：`pnpm-workspace.yaml` 解析，`workspace:*` 协议解析。 |
 | [CLI & Config](./cli-config.md) | `crates/cli` + `crates/config` | CLI 命令（`install`、`add`、`remove`、`store`），从 `.npmrc` 和环境变量加载配置。 |

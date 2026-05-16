@@ -1,4 +1,4 @@
-//! Integration tests for the rpnpm CLI.
+//! Integration tests for the orix CLI.
 
 #![allow(clippy::unwrap_used)]
 
@@ -7,7 +7,7 @@ use predicates::str::contains;
 
 #[test]
 fn cli_help_works() {
-    let mut cmd = Command::cargo_bin("rpnpm").unwrap();
+    let mut cmd = Command::cargo_bin("orix").unwrap();
     cmd.arg("--help")
         .assert()
         .success()

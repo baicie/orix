@@ -1,4 +1,4 @@
-//! xtask — development automation for rpnpm.
+//! xtask — development automation for orix.
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};

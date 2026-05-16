@@ -10,67 +10,67 @@
 
 ```bash
 # 从 lockfile 安装所有依赖（快速，冻结）
-rpnpm install
+orix install
 
 # 安装并更新 lockfile 以匹配 package.json
-rpnpm install
+orix install
 
 # 冻结 lockfile（CI/CD）
-rpnpm install --frozen-lockfile
+orix install --frozen-lockfile
 
 # 优先使用离线缓存
-rpnpm install --offline
+orix install --offline
 
 # 强制重新获取所有包
-rpnpm install --force
+orix install --force
 
 # 安装到特定目录（用于 workspace 中的子包）
-rpnpm install --dir packages/my-lib
+orix install --dir packages/my-lib
 ```
 
 ### Add（添加）
 
 ```bash
 # 添加生产依赖
-rpnpm add react
-rpnpm add react@18
-rpnpm add "react@^18.2.0"
-rpnpm add react react-dom
+orix add react
+orix add react@18
+orix add "react@^18.2.0"
+orix add react react-dom
 
 # 作为 dev 依赖添加
-rpnpm add -D vite
+orix add -D vite
 
 # 作为可选依赖添加
-rpnpm add -O @emotion/css
+orix add -O @emotion/css
 ```
 
 ### Remove（移除）
 
 ```bash
-rpnpm remove react
-rpnpm remove react react-dom
-rpnpm remove --dir packages/my-lib react
+orix remove react
+orix remove react react-dom
+orix remove --dir packages/my-lib react
 ```
 
 ### Store（Store 管理）
 
 ```bash
 # 清理未使用的包
-rpnpm store prune
+orix store prune
 
 # 显示 store 状态
-rpnpm store status
+orix store status
 
 # store 目录路径
-rpnpm store path
+orix store path
 ```
 
 ### 其他
 
 ```bash
-rpnpm --version
-rpnpm --help
-rpnpm import              # 从 package-lock.json 或 yarn.lock 导入
+orix --version
+orix --help
+orix import              # 从 package-lock.json 或 yarn.lock 导入
 ```
 
 ## CLI 参数
@@ -79,7 +79,7 @@ rpnpm import              # 从 package-lock.json 或 yarn.lock 导入
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "rpnpm")]
+#[command(name = "orix")]
 #[command(version, about = "Fast, disk-space efficient package manager")]
 struct Cli {
     /// 全局：覆盖 registry URL
@@ -209,7 +209,7 @@ fetch-timeout=30000
 
 # 缓存设置
 cache-dir=~/.npm
-store-dir=~/.rpnpm/store
+store-dir=~/.orix/store
 
 # 链接设置
 public-hoist-pattern[]=*_eslint-plugin_*
@@ -310,10 +310,10 @@ impl Default for Config {
             registry: Url::parse("https://registry.npmjs.org/").unwrap(),
             store_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".rpnpm/store/v1"),
+                .join(".orix/store/v1"),
             cache_dir: dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("rpnpm/tarballs"),
+                .join("orix/tarballs"),
             auth_token: None,
             concurrency: 10,
             fetch_timeout: Duration::from_secs(30),
@@ -333,7 +333,7 @@ impl Default for Config {
 CLI 在安装期间显示结构化进度：
 
 ```
-rpnpm install
+orix install
 │
 ├─resolve       2/2    ████████████████████ done
 ├─fetch         3/3    ████████████████████ done

@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use walkdir::WalkDir;
 
-use rpnpm_domain::DependencyGraph;
-use rpnpm_store::Store;
+use orix_domain::DependencyGraph;
+use orix_store::Store;
 
 use super::LinkReport;
 

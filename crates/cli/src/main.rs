@@ -1,4 +1,4 @@
-//! rpnpm CLI entry point.
+//! orix CLI entry point.
 
 use std::path::PathBuf;
 
@@ -6,22 +6,22 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use rpnpm_core::{add, pipeline, remove, InstallOpts};
+use orix_core::{add, pipeline, remove, InstallOpts};
 
 #[derive(Parser)]
-#[command(name = "rpnpm")]
+#[command(name = "orix")]
 #[command(
     version,
     about = "Fast, disk-space efficient package manager written in Rust"
 )]
 struct Cli {
-    #[arg(long, global = true, env = "RPNPM_REGISTRY")]
+    #[arg(long, global = true, env = "ORIX_REGISTRY")]
     registry: Option<String>,
 
-    #[arg(long, global = true, default_value = "info", env = "RPNPM_LOG")]
+    #[arg(long, global = true, default_value = "info", env = "ORIX_LOG")]
     log: String,
 
-    #[arg(long, short = 'C', default_value = ".", env = "RPNPM_DIR")]
+    #[arg(long, short = 'C', default_value = ".", env = "ORIX_DIR")]
     dir: PathBuf,
 
     #[arg(long, global = true, default_value = "auto")]
@@ -153,7 +153,7 @@ async fn main() -> Result<()> {
         }
 
         Command::StorePath => {
-            let config = rpnpm_core::Config::load(&dir)?;
+            let config = orix_core::Config::load(&dir)?;
             println!("{}", config.store_dir.display());
         }
 

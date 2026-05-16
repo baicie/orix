@@ -1,4 +1,4 @@
-//! rpnpm-lock.yaml management.
+//! orix-lock.yaml management.
 
 use std::collections::BTreeMap;
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Lockfile format version.
 pub const LOCKFILE_VERSION: i32 = 1;
 
-/// The lockfile root — mirrors pnpm's rpnpm-lock.yaml structure.
+/// The lockfile root — mirrors pnpm's orix-lock.yaml structure.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Lockfile {
     /// Lockfile version number.
@@ -162,8 +162,8 @@ impl Lockfile {
     /// Update the lockfile from a manifest and resolved dependency graph.
     pub fn update(
         &self,
-        manifest: &rpnpm_manifest::Manifest,
-        graph: &rpnpm_domain::DependencyGraph,
+        manifest: &orix_manifest::Manifest,
+        graph: &orix_domain::DependencyGraph,
         importer_id: &str,
     ) -> Self {
         use std::collections::BTreeMap;

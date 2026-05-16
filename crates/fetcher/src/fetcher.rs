@@ -6,8 +6,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
-use rpnpm_domain::DependencyGraph;
-use rpnpm_store::Store;
+use orix_domain::DependencyGraph;
+use orix_store::Store;
 
 use crate::{extract_tarball, TarballCache};
 

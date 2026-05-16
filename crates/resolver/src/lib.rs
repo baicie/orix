@@ -7,7 +7,7 @@ mod resolver;
 pub use resolver::{resolve_from_lockfile_packages, Resolver, SkippedOptionalDep};
 
 use anyhow::Result;
-use rpnpm_domain::{PackageName, VersionConstraint};
+use orix_domain::{PackageName, VersionConstraint};
 
 /// Parse a string like "react@^18.2.0" into (name, constraint).
 pub fn parse_package_spec(spec: &str) -> Result<(PackageName, VersionConstraint)> {
@@ -31,7 +31,7 @@ pub fn parse_package_spec(spec: &str) -> Result<(PackageName, VersionConstraint)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rpnpm_domain::ConstraintKind;
+    use orix_domain::ConstraintKind;
 
     #[test]
     #[allow(clippy::expect_used)]

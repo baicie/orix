@@ -210,11 +210,11 @@ pub struct LinkReport {
 
 ## 卸载/更新时的清理
 
-运行 `rpnpm remove <pkg>` 时：
+运行 `orix remove <pkg>` 时：
 
 1. 删除 `node_modules/<pkg>` 符号链接
 2. 删除 `node_modules/.pnpm/<pkg>@<ver>/` 目录树
-3. 更新 `rpnpm-lock.yaml`
+3. 更新 `orix-lock.yaml`
 4. 如果包不再被使用，可选触发 store 清理
 
 ## 与 Store 的交互

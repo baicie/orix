@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-workspace"
+name = "orix-workspace"
 description = "Monorepo workspace support and pnpm-workspace.yaml parsing."
 version.workspace = true
 edition.workspace = true
@@ -15,8 +15,8 @@ thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
 glob = { workspace = true }
-rpnpm-domain = { workspace = true }
-rpnpm-manifest = { workspace = true }
+orix-domain = { workspace = true }
+orix-manifest = { workspace = true }
 
 [lints]
 workspace = true

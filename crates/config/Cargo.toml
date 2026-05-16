@@ -1,5 +1,5 @@
 [package]
-name = "rpnpm-config"
+name = "orix-config"
 description = ".npmrc loading and configuration management."
 version.workspace = true
 edition.workspace = true
@@ -16,7 +16,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 dirs = { workspace = true }
-rpnpm-domain = { workspace = true }
+orix-domain = { workspace = true }
 
 [lints]
 workspace = true
