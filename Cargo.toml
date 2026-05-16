@@ -5,6 +5,15 @@ members = [
   "crates/config",
   "crates/utils",
   "crates/macros",
+  "crates/domain",
+  "crates/manifest",
+  "crates/resolver",
+  "crates/registry",
+  "crates/fetcher",
+  "crates/store",
+  "crates/lockfile",
+  "crates/linker",
+  "crates/workspace",
   "xtask",
 ]
 resolver = "2"
@@ -23,25 +32,59 @@ keywords = ["rust", "cli", "workspace"]
 categories = ["command-line-utilities"]
 
 [workspace.dependencies]
-your-cli = { path = "crates/cli", version = "0.1.0" }
-your-core = { path = "crates/core", version = "0.1.0" }
-your-config = { path = "crates/config", version = "0.1.0" }
-your-utils = { path = "crates/utils", version = "0.1.0" }
-your-macros = { path = "crates/macros", version = "0.1.0" }
-
+# ── Core deps ─────────────────────────────────────────────────────────────────
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 toml = "0.8"
+
+# ── Async runtime ─────────────────────────────────────────────────────────────
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "process", "signal"] }
+
+# ── Logging ───────────────────────────────────────────────────────────────────
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# ── Networking ─────────────────────────────────────────────────────────────────
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# ── Package management ─────────────────────────────────────────────────────────
+semver = "1"
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
+hex = "0.4"
+walkdir = "2"
+rayon = "1"
+url = "2"
+glob = "0.3"
+dirs = "5"
+tempfile = "3"
+subtle = "2"
+
+# ── Testing ───────────────────────────────────────────────────────────────────
 which = "6"
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
+pretty_assertions = "1"
+
+# ── rpnpm crate aliases ───────────────────────────────────────────────────────
+rpnpm-cli = { path = "crates/cli", version = "0.1.0" }
+rpnpm-core = { path = "crates/core", version = "0.1.0" }
+rpnpm-config = { path = "crates/config", version = "0.1.0" }
+rpnpm-utils = { path = "crates/utils", version = "0.1.0" }
+rpnpm-domain = { path = "crates/domain", version = "0.1.0" }
+rpnpm-manifest = { path = "crates/manifest", version = "0.1.0" }
+rpnpm-resolver = { path = "crates/resolver", version = "0.1.0" }
+rpnpm-registry = { path = "crates/registry", version = "0.1.0" }
+rpnpm-fetcher = { path = "crates/fetcher", version = "0.1.0" }
+rpnpm-store = { path = "crates/store", version = "0.1.0" }
+rpnpm-lockfile = { path = "crates/lockfile", version = "0.1.0" }
+rpnpm-linker = { path = "crates/linker", version = "0.1.0" }
+rpnpm-workspace = { path = "crates/workspace", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

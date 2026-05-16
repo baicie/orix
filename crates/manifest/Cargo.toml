@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-config"
-description = ".npmrc loading and configuration management."
+name = "rpnpm-manifest"
+description = "package.json parsing and validation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,9 +14,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-url = { workspace = true }
-dirs = { workspace = true }
 rpnpm-domain = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

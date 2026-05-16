@@ -1,14 +1,19 @@
 [package]
-name = "rpnpm-utils"
-description = "Shared utilities for the rpnpm package manager."
+name = "rpnpm-domain"
+description = "Shared domain types for rpnpm."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 authors.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+semver = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,3 +1,5 @@
+//! xtask — development automation for rpnpm.
+
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::process::{Command, Stdio};
@@ -31,14 +33,42 @@ fn main() -> Result<()> {
     match cli.command {
         Task::Check => {
             run("cargo", &["fmt", "--all", "--", "--check"])?;
-            run("cargo", &["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"])?;
+            run(
+                "cargo",
+                &[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--all-features",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            )?;
             run("cargo", &["test", "--workspace", "--all-features"])?;
-            run("cargo", &["doc", "--workspace", "--all-features", "--no-deps"])?;
+            run(
+                "cargo",
+                &["doc", "--workspace", "--all-features", "--no-deps"],
+            )?;
         }
         Task::Fmt => run("cargo", &["fmt", "--all"])?,
-        Task::Lint => run("cargo", &["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"])?,
+        Task::Lint => run(
+            "cargo",
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )?,
         Task::Test => run("cargo", &["test", "--workspace", "--all-features"])?,
-        Task::Doc => run("cargo", &["doc", "--workspace", "--all-features", "--no-deps"])?,
+        Task::Doc => run(
+            "cargo",
+            &["doc", "--workspace", "--all-features", "--no-deps"],
+        )?,
         Task::Security => {
             run_optional("cargo-deny", &["check"])?;
             run_optional("cargo-audit", &["audit"])?;

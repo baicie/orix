@@ -1,6 +1,6 @@
 [package]
-name = "rpnpm-config"
-description = ".npmrc loading and configuration management."
+name = "rpnpm-registry"
+description = "npm registry API client."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,10 +12,10 @@ authors.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
+reqwest = { workspace = true }
 url = { workspace = true }
-dirs = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 rpnpm-domain = { workspace = true }
 
 [lints]
