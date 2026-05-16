@@ -3,44 +3,57 @@
 ## Quick Start
 
 ```bash
-# 1. Preview the entire release flow (no changes made)
+# 1. Preview the release plan (no changes made)
 cargo xtask release --dry-run
 
 # 2. Run full checks before releasing
 cargo xtask check
 
-# 3. Execute the release (publish crates + git tag + push)
+# 3. Execute the release
 cargo xtask release
-
-# Or publish crates separately
-make publish                    # show publish plan
-make publish orix_dry_run=0     # actually publish
 ```
 
 ## Release Flow
 
 ```
-cargo xtask release
-  → [1/4] cargo xtask check     (fmt + clippy + test + doc)
-  → [2/4] cargo publish         (14 crates in topological order)
-  → [3/4] git tag v0.1.0
-  → [4/4] git push origin v0.1.0
+cargo xtask release [--version X.Y.Z] [--dry-run] [--crates-only] [--skip-crates] [--force]
+  → [1/5] cargo xtask check      (fmt + clippy + test)
+  → [2/5] cargo publish          (14 crates in topological order)
+  → [3/5] git tag vX.Y.Z
+  → [4/5] git push origin vX.Y.Z
+  → [5/5] GitHub Release artifacts
 ```
 
 Push of the tag triggers GitHub Actions (`release.yml`):
 
-1. Runs CI checks on Linux / Windows / macOS (x64 + ARM64)
+1. CI checks on Linux / Windows / macOS
 2. Builds release binaries for all platforms
-3. Creates a GitHub Release with attached `.tar.gz` / `.zip` artifacts
+3. Creates GitHub Release with attached `.tar.gz` / `.zip` artifacts
 
 ## Options
 
 | Flag | Effect |
 |------|--------|
-| `--dry-run` | Preview steps 2-4 without making changes |
+| `--dry-run` | Preview all steps without making changes |
 | `--crates-only` | Only publish crates, skip git tag and push |
 | `--skip-crates` | Only create and push git tag, skip crates.io publish |
+| `--force` | Yank existing crates at this version first, then re-publish |
+| `--version X.Y.Z` | Override version from Cargo.toml (also sets the git tag) |
 | `--tag-prefix PREFIX` | Custom tag prefix (default: `v`) |
+
+## Version Override
+
+By default, version is read from `version` in `Cargo.toml`.
+
+```bash
+# Release 0.2.0 (updates Cargo.toml and all crate versions)
+cargo xtask release --version 0.2.0
+
+# Preview what would happen
+cargo xtask release --dry-run --version 0.2.0
+```
+
+`--version` validates semver format and updates all crate `Cargo.toml` files.
 
 ## Publishing to crates.io
 
@@ -53,36 +66,51 @@ resolver → linker → workspace → fetcher → config → core → cli → ma
 
 ### Prerequisites
 
-Set your crates.io token:
-
 ```bash
 export CARGO_REGISTRY_TOKEN=<your-token>
 ```
 
-Or use `cargo login <token>` once to store it in `~/.cargo/credentials.toml`.
-
-### Dry Run (recommended)
+### Show Publish Plan
 
 ```bash
-# Show what would be published
 cargo xtask publish-crates --dry-run
 # or
 make publish
 ```
 
-### For Real
+### Publish for Real
 
 ```bash
+cargo xtask publish-crates
+# or
 make publish orix_dry_run=0
 ```
 
+### Force Re-publish Same Version
+
+When you need to re-publish the same version (e.g. security fix):
+
+```bash
+# Step 1: yank the existing version
+cargo xtask yank 0.1.0
+# or specific crates
+cargo xtask yank 0.1.0 --crates orix-cli --crates orix-core
+
+# Step 2: re-publish
+cargo xtask publish-crates --force --version 0.1.0
+# or the shorthand in release
+cargo xtask release --force --version 0.1.0
+```
+
+The `--force` flag combines both steps automatically.
+
 ## Changelog
 
-Use [git-cliff](https://github.com/orf/git-cliff) for automated changelog generation:
+Use [git-cliff](https://github.com/orf/git-cliff) for automated changelog:
 
 ```bash
 cargo install git-cliff
 git-cliff --config cliff.toml --repository https://github.com/baicie/orix
 ```
 
-The GitHub Actions release workflow generates release notes automatically via `orhun/git-cliff-action`.
+GitHub Actions release workflow generates release notes automatically via `orhun/git-cliff-action`.

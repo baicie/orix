@@ -12,5 +12,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+reqwest = { workspace = true, features = ["blocking"] }
 semver.workspace = true
 which.workspace = true
