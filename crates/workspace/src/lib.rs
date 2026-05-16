@@ -4,7 +4,7 @@
 
 mod workspace;
 
-pub use workspace::{Workspace, WorkspacePackage};
+pub use workspace::{detect_workspace_cycles, Workspace, WorkspacePackage};
 
 use std::path::PathBuf;
 

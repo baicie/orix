@@ -15,7 +15,7 @@ use orix_lockfile::{resolve_from_lockfile_packages, Lockfile};
 use orix_manifest::Manifest;
 use orix_resolver::Resolver;
 use orix_store::Store;
-use orix_workspace::Workspace;
+use orix_workspace::{detect_workspace_cycles, Workspace};
 
 pub use orix_config::Config;
 use orix_config::ConfigOverrides;
@@ -132,6 +132,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     if let Some(ref ws) = workspace {
         info!(packages = ws.packages.len(), "discovered workspace");
+        let cycle = detect_workspace_cycles(ws);
+        if !cycle.is_empty() {
+            anyhow::bail!(
+                "circular workspace dependency detected: {}",
+                cycle.join(" -> ")
+            );
+        }
     }
 
     let old_lockfile = if config.lockfile_path().exists() {

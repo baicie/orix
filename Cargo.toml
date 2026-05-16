@@ -23,12 +23,12 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
-repository = "https://github.com/your-org/your-repo"
-homepage = "https://github.com/your-org/your-repo"
-documentation = "https://docs.rs/your-project"
+repository = "https://github.com/your-org/orix"
+homepage = "https://github.com/your-org/orix"
+documentation = "https://docs.rs/orix"
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
-keywords = ["rust", "cli", "workspace"]
+keywords = ["rust", "cli", "package-manager", "pnpm"]
 categories = ["command-line-utilities"]
 
 [workspace.dependencies]

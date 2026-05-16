@@ -16,8 +16,6 @@
 | 1.3  | CLI 输出美化（进度条、树状输出、颜色） | `cli` | ✅ |
 | 1.4  | 错误信息格式化（人类可读错误 + hint） | `cli` | ✅ |
 
-**1.3/1.4 细节：** 当前 `cli/src/main.rs` 已有基础命令框架，但进度条、树状输出、彩色输出、友好的错误提示（如 "Package not found: ..."）需要完善。
-
 ---
 
 ## Phase 2 — Registry Resolver
@@ -33,8 +31,6 @@
 | 2.7  | packument HTTP 缓存（TTL 5min） | `resolver` | ✅ |
 | 2.8  | Registry 认证 token（Bearer token from .npmrc） | `registry` | ✅ |
 
-**2.4/2.5 细节：** 平台过滤在设计文档中提及 MVP 只记录 warning，不硬性失败。peerDependencies 在设计文档中明确 MVP 不强制解析。
-
 ---
 
 ## Phase 3 — Fetcher
@@ -42,7 +38,7 @@
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
 | 3.1  | tarball 下载（reqwest） | `fetcher` | ✅ |
-| 3.2  | integrity 验证（sha512 / sha1，常数时间比较） | `fetcher` | ✅ |
+| 3.2  | integrity 验证（sha512 /sha1，常数时间比较） | `fetcher` | ✅ |
 | 3.3  | tarball 解压（tar + flate2） | `fetcher` | ✅ |
 | 3.4  | tarball 本地缓存（~/.orix/cache/tarballs/） | `fetcher` | ✅ |
 | 3.5  | 并发下载控制（Semaphore，concurrency=10） | `fetcher` | ✅ |
@@ -75,11 +71,9 @@
 | 5.2  | 根依赖 symlink（node_modules/react -> .pnpm/...） | `linker` | ✅ |
 | 5.3  | 子依赖 symlink（.pnpm/pkg/node_modules/dep -> ../../dep@ver/...） | `linker` | ✅ |
 | 5.4  | 相对路径计算（platform 内依赖链接公式） | `linker` | ✅ |
-| 5.5  | Windows junction 回退（symlink 失败时） | `linker` | ⚠️ 部分完成 |
+| 5.5  | Windows junction 回退（symlink 失败时） | `linker` | ✅ |
 | 5.6  | 布局验证（validate_layout，检测 broken symlink） | `linker` | ✅ |
 | 5.7  | `orix remove` 清理（unlink + 删除 .pnpm 条目 + 清理 lockfile 孤立包） | `linker` + `core` + `lockfile` | ✅ |
-
-**5.6 细节：** `linker/src/linker.rs` 中 `validate_layout` 方法需要完整实现，遍历 node_modules/ 检测 broken symlink 并验证直接依赖可解析。
 
 ---
 
@@ -108,7 +102,7 @@
 | 7.5  | workspace:file:../utils 协议 | `workspace` | ✅ |
 | 7.6  | 本地包 symlink（link_local_package） | `linker` + `core` | ✅ |
 | 7.7  | 根目录 workspace 安装（收集所有包依赖并合并） | `resolver` + `core` | ✅ |
-| 7.8  | 循环 workspace 依赖检测 | `workspace` | 🔴 待实施 |
+| 7.8  | 循环 workspace 依赖检测 | `workspace` | ✅ |
 
 ---
 
@@ -181,9 +175,9 @@
 |------|------|------|
 | 13.1 | `cargo xtask check` 完整（fmt + clippy + test） | ✅ |
 | 13.2 | `cargo deny check` CI 集成 | 🔴 待实施 |
-| 13.3 | `cargo machete` 依赖检查 | 🔴 待实施 |
+| 13.3 | `cargo machete` 依赖检查 | ✅ |
 | 13.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ⚠️ 模板待替换 |
-| 13.5 | 文档：README.md | 🔴 待实施 |
+| 13.5 | 文档：README.md | ✅ |
 | 13.6 | 文档：CONTRIBUTING.md | 🔴 待实施 |
 | 13.7 | 性能测试 / benchmark | 🔴 待实施 |
 
@@ -210,7 +204,7 @@
 ```
 1.3  CLI 进度条输出 ✅
 1.4  人类可读错误信息 ✅
-13.5 README.md
+13.5 README.md ✅
 ```
 
 ### P2 — Store 管理命令
@@ -225,7 +219,7 @@
 7.4  workspace 协议变体（^/~/>=） ✅
 7.6  本地包 symlink ✅
 7.7  根目录 workspace 安装 ✅
-7.8  循环依赖检测
+7.8  循环依赖检测 ✅
 ```
 
 ### P4 — 细节打磨
@@ -237,6 +231,7 @@
 3.6  下载重试 + 指数退避 ✅
 3.7  offline 模式 ✅
 4.5  Store 原子写入 ✅
+5.5  Windows junction 回退 ✅
 5.6  布局验证 ✅
 5.7  remove 清理 ✅
 6.4  lockfile diff ✅
@@ -254,7 +249,7 @@
 11.5 tarball URL builder ✅
 12.7 Windows CI 测试
 13.2 cargo deny
-13.3 cargo machete
+13.3 cargo machete ✅
 13.7 benchmark
 ```
 
@@ -267,15 +262,15 @@ Phase 1  CLI + manifest      ██████████ 100%
 Phase 2  Resolver            ██████████ 100%
 Phase 3  Fetcher            ██████████ 100%
 Phase 4  CAS Store           █████████░  89%
-Phase 5  Linker             █████████░  86%
+Phase 5  Linker             ██████████ 100%
 Phase 6  Lockfile           ██████████ 100%
-Phase 7  Workspace          █████████░  88%
+Phase 7  Workspace          ██████████ 100%
 Phase 8  Pipeline           █████████░  86%
 Phase 9  Config            ████████░░  83%
 Phase 10 Utils & Macros     ██████░░░░  67%
 Phase 11 Domain            ██████████ 100%
-Phase 12 测试               ░░░░░░░░░░   0%
-Phase 13 集成 & 质量       ██░░░░░░░░  10%
+Phase 12 测试               ██████░░░░  86%
+Phase 13 集成 & 质量       ████░░░░░░  57%
 ```
 
-**总体完成度：~83%**
+**总体完成度：~87%**

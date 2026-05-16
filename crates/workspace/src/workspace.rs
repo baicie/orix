@@ -124,3 +124,159 @@ impl Workspace {
         }
     }
 }
+
+#[allow(dead_code)]
+/// Cycle detection result: a list of packages involved in a dependency cycle.
+pub type CycleReport = Vec<String>;
+
+/// Detects circular workspace dependencies using DFS with three-color marking.
+///
+/// Returns an empty `Vec` if no cycles exist, or the packages involved in the
+/// first cycle found.
+///
+/// Color state: 0 = unvisited (white), 1 = in-progress (gray), 2 = done (black).
+pub fn detect_workspace_cycles(workspace: &Workspace) -> Vec<String> {
+    use std::collections::HashMap;
+
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+    for pkg in &workspace.packages {
+        if let Some(ref name) = pkg.manifest.name {
+            let deps: Vec<String> = pkg
+                .manifest
+                .dependencies
+                .keys()
+                .chain(pkg.manifest.dev_dependencies.keys())
+                .chain(pkg.manifest.optional_dependencies.keys())
+                .filter(|k| {
+                    workspace
+                        .packages
+                        .iter()
+                        .any(|p| p.manifest.name.as_ref() == Some(k))
+                })
+                .cloned()
+                .collect();
+            adj.insert(name.clone(), deps);
+        }
+    }
+
+    let mut color: HashMap<String, u8> = HashMap::new();
+    let mut parent: HashMap<String, String> = HashMap::new();
+    let mut cycle: Vec<String> = Vec::new();
+
+    fn dfs(
+        name: &str,
+        adj: &HashMap<String, Vec<String>>,
+        color: &mut HashMap<String, u8>,
+        parent: &mut HashMap<String, String>,
+        cycle: &mut Vec<String>,
+    ) -> bool {
+        color.insert(name.to_string(), 1);
+        if let Some(neighbors) = adj.get(name) {
+            for neighbor in neighbors {
+                let n_color = *color.get(neighbor).unwrap_or(&0);
+                if n_color == 1 {
+                    let mut cur = name.to_string();
+                    cycle.clear();
+                    cycle.push(cur.clone());
+                    while let Some(p) = parent.get(&cur) {
+                        cycle.push(p.clone());
+                        cur = p.clone();
+                        if p == neighbor {
+                            break;
+                        }
+                    }
+                    cycle.reverse();
+                    return true;
+                }
+                if n_color == 0 {
+                    parent.insert(neighbor.clone(), name.to_string());
+                    if dfs(neighbor, adj, color, parent, cycle) {
+                        return true;
+                    }
+                }
+            }
+        }
+        color.insert(name.to_string(), 2);
+        false
+    }
+
+    for pkg in &workspace.packages {
+        if let Some(ref name) = pkg.manifest.name {
+            if *color.get(name).unwrap_or(&0) == 0
+                && dfs(name, &adj, &mut color, &mut parent, &mut cycle)
+            {
+                return cycle;
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ws_with_pkgs(pkg_specs: Vec<(&str, Vec<&str>)>) -> Workspace {
+        let packages: Vec<WorkspacePackage> = pkg_specs
+            .into_iter()
+            .map(|(name, deps)| {
+                let manifest = orix_manifest::Manifest {
+                    name: Some(name.to_string()),
+                    version: Some("1.0.0".to_string()),
+                    dependencies: deps
+                        .into_iter()
+                        .map(|d| (d.to_string(), "*".to_string()))
+                        .collect(),
+                    ..Default::default()
+                };
+                WorkspacePackage {
+                    relative_path: PathBuf::from(name),
+                    abs_path: PathBuf::from(name),
+                    manifest,
+                }
+            })
+            .collect();
+        Workspace {
+            root: PathBuf::from("."),
+            packages,
+            lockfile_path: PathBuf::from("orix-lock.yaml"),
+        }
+    }
+
+    #[test]
+    fn detect_no_cycle_in_linear_deps() {
+        let result = detect_workspace_cycles(&ws_with_pkgs(vec![
+            ("pkg-a", vec!["pkg-b"]),
+            ("pkg-b", vec!["pkg-c"]),
+            ("pkg-c", vec![]),
+        ]));
+        assert!(result.is_empty(), "no cycle expected, got {:?}", result);
+    }
+
+    #[test]
+    fn detect_self_cycle() {
+        let result = detect_workspace_cycles(&ws_with_pkgs(vec![("pkg-a", vec!["pkg-a"])]));
+        assert!(!result.is_empty(), "self-cycle should be detected");
+        assert!(result.contains(&"pkg-a".to_string()));
+    }
+
+    #[test]
+    fn detect_two_node_cycle() {
+        let result = detect_workspace_cycles(&ws_with_pkgs(vec![
+            ("pkg-a", vec!["pkg-b"]),
+            ("pkg-b", vec!["pkg-a"]),
+        ]));
+        assert!(!result.is_empty(), "cycle should be detected");
+    }
+
+    #[test]
+    fn no_false_positive_on_external_deps() {
+        let result = detect_workspace_cycles(&ws_with_pkgs(vec![("pkg-a", vec!["lodash"])]));
+        assert!(
+            result.is_empty(),
+            "external deps should not cause cycle: {:?}",
+            result
+        );
+    }
+}
