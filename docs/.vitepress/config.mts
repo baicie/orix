@@ -55,6 +55,23 @@ export default defineConfig({
           ],
         },
       ],
+      "/design/": [
+        {
+          text: "Design",
+          collapsed: false,
+          items: [
+            { text: "Overview", link: "/design/" },
+            { text: "CAS Store", link: "/design/store" },
+            { text: "Linker", link: "/design/linker" },
+            { text: "Resolver", link: "/design/resolver" },
+            { text: "Lockfile", link: "/design/lockfile" },
+            { text: "Registry & Fetcher", link: "/design/fetcher" },
+            { text: "Workspace", link: "/design/workspace" },
+            { text: "CLI & Config", link: "/design/cli-config" },
+            { text: "Install Pipeline", link: "/design/core" },
+          ],
+        },
+      ],
       "/": [
         {
           text: "Introduction",
@@ -71,13 +88,28 @@ export default defineConfig({
             { text: "Publishing", link: "/guide/publishing" },
           ],
         },
-        {
-          text: "Architecture",
-          collapsed: false,
-          items: [
-            { text: "Overview", link: "/architecture" },
-          ],
-        },
+      {
+        text: "Architecture",
+        collapsed: false,
+        items: [
+          { text: "Overview", link: "/architecture" },
+        ],
+      },
+      {
+        text: "Design",
+        collapsed: false,
+        items: [
+          { text: "Overview", link: "/design/" },
+          { text: "CAS Store", link: "/design/store" },
+          { text: "Linker", link: "/design/linker" },
+          { text: "Resolver", link: "/design/resolver" },
+          { text: "Lockfile", link: "/design/lockfile" },
+          { text: "Registry & Fetcher", link: "/design/fetcher" },
+          { text: "Workspace", link: "/design/workspace" },
+          { text: "CLI & Config", link: "/design/cli-config" },
+          { text: "Install Pipeline", link: "/design/core" },
+        ],
+      },
         {
           text: "API Reference",
           collapsed: false,
