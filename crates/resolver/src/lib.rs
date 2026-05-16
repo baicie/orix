@@ -4,7 +4,7 @@
 
 mod resolver;
 
-pub use resolver::{resolve_from_lockfile_packages, Resolver, SkippedOptionalDep};
+pub use resolver::{Resolver, SkippedOptionalDep};
 
 use anyhow::Result;
 use orix_domain::{PackageName, VersionConstraint};

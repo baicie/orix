@@ -284,11 +284,7 @@ impl Linker {
     /// Create a top-level symlink for a local workspace package.
     /// Links `node_modules/<pkg_name>` directly to the local source directory,
     /// bypassing the .pnpm/ store. Returns the number of symlinks created (0 or 1).
-    pub fn link_local_package(
-        &self,
-        pkg_name: &str,
-        local_source: &Path,
-    ) -> Result<usize> {
+    pub fn link_local_package(&self, pkg_name: &str, local_source: &Path) -> Result<usize> {
         let link_path = Self::package_path_in_node_modules(&self.node_modules, pkg_name);
 
         if link_path.exists() {

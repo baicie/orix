@@ -1,14 +1,16 @@
 //! orix CLI entry point.
 
-#![allow(clippy::unwrap_used)]
-
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, EnvFilter};
 
-use orix_core::{add, pipeline, remove, store_path, store_prune, store_verify, InstallOpts};
+use orix_core::{
+    add, install, pipeline, remove, store_path, store_prune, store_verify, InstallEvent,
+    InstallOpts,
+};
 
 mod errors;
 mod progress;
@@ -118,6 +120,7 @@ async fn main() -> Result<()> {
                 force: args.force,
                 ignore_scripts: args.ignore_scripts,
                 concurrency: args.concurrency,
+                progress_tx: None,
             };
 
             run_install(&dir, &install_opts).await?;
@@ -230,67 +233,75 @@ const CROSS: &str = "\u{2717}";
 const INFO: &str = "\u{2139}";
 const REMOVE: &str = "\u{2716}";
 
-/// Run the install command with progress reporting.
-async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
-    use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
-    let mp = MultiProgress::new();
-
-    // Phase indicator
-    let phase_pb = mp.add(ProgressBar::new_spinner());
-    phase_pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.cyan} {msg}")
-            .unwrap(),
-    );
-    phase_pb.set_message("Resolving dependencies...");
-
-    // Download progress bar
-    let dl_pb = mp.add(ProgressBar::new(0));
-    dl_pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:40}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("=>-"),
-    );
-    dl_pb.set_message("");
-
-    let report = pipeline::install(project_root, opts).await;
-
-    phase_pb.finish_and_clear();
-    dl_pb.finish_and_clear();
-
-    match report {
-        Ok(r) => {
-            if r.fetch_report.failures.is_empty() {
-                println!(" {} Packages installed: {}", CHECKMARK, r.packages_added);
-            } else {
-                println!(
-                    " {} Packages installed: {} ({}/{} failed)",
-                    CHECKMARK,
-                    r.packages_added,
-                    r.fetch_report.failures.len(),
-                    r.fetch_report.success + r.fetch_report.failures.len()
-                );
-                for f in &r.fetch_report.failures {
-                    eprintln!("{} {}", CROSS, f);
+/// Spawns a task that drains install events from the channel and renders them.
+fn spawn_event_renderer(mut rx: mpsc::Receiver<InstallEvent>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut renderer = progress::ProgressRenderer::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                InstallEvent::FetchingPackage(name) => {
+                    renderer.fetched_package(name);
+                }
+                _ => {
+                    renderer.handle(event);
                 }
             }
-            if let Some(diff) = r.lockfile_diff {
-                if !diff.added.is_empty() {
-                    println!(" {} Added: {}", INFO, diff.added.join(", "));
-                }
-                if !diff.removed.is_empty() {
-                    println!(" {} Removed: {}", INFO, diff.removed.join(", "));
-                }
-            }
-            println!(" {} Duration: {:.2}s", INFO, r.duration_secs);
-            Ok(())
         }
-        Err(e) => {
-            let friendly = errors::format_error(&e, project_root);
-            eprintln!("{}", friendly);
-            Err(e)
+    })
+}
+
+/// Run the install command with a live progress renderer.
+async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
+    let (tx, rx) = mpsc::channel::<InstallEvent>(100);
+
+    let mut install_opts = opts.clone();
+    install_opts.progress_tx = Some(tx);
+
+    // Start the event renderer task.
+    let renderer_handle = spawn_event_renderer(rx);
+
+    // Run install; the pipeline sends events through `progress_tx`.
+    let report = install(project_root, &install_opts).await?;
+
+    // Drop the sender so the channel closes and the renderer task exits cleanly.
+    drop(install_opts.progress_tx);
+
+    // Wait for the renderer to finish draining any remaining events.
+    renderer_handle.await?;
+
+    print_summary(&report);
+    Ok(())
+}
+
+fn print_summary(report: &orix_core::InstallReport) {
+    println!();
+
+    if report.fetch_report.failures.is_empty() {
+        println!(
+            " {} Packages installed: {}",
+            CHECKMARK, report.packages_added
+        );
+    } else {
+        println!(
+            " {} Packages installed: {} ({}/{} failed)",
+            CHECKMARK,
+            report.packages_added,
+            report.fetch_report.failures.len(),
+            report.fetch_report.success + report.fetch_report.failures.len()
+        );
+        for f in &report.fetch_report.failures {
+            eprintln!("{} {}", CROSS, f);
         }
     }
+
+    if let Some(diff) = &report.lockfile_diff {
+        if !diff.added.is_empty() {
+            println!(" {} Added: {}", INFO, diff.added.join(", "));
+        }
+        if !diff.removed.is_empty() {
+            println!(" {} Removed: {}", INFO, diff.removed.join(", "));
+        }
+    }
+
+    println!(" {} Duration: {:.2}s", INFO, report.duration_secs);
 }

@@ -73,6 +73,7 @@ pretty_assertions = "1"
 
 # ── CLI UI ──────────────────────────────────────────────────────────────────────
 indicatif = "0.17"
+clearscreen = "3"
 
 # ── orix crate aliases (path must match actual package name) ──────────────────
 orix-cli = { path = "crates/cli", version = "0.1.0" }

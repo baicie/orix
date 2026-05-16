@@ -25,6 +25,7 @@ rayon = { workspace = true }
 subtle = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
+tracing = { workspace = true }
 orix-domain = { workspace = true }
 orix-registry = { workspace = true }
 orix-store = { workspace = true }

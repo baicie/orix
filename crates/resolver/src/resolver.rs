@@ -5,12 +5,12 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
+use tracing::warn;
 
 use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, Version,
     VersionConstraint,
 };
-use orix_lockfile::PackageLock;
 use orix_manifest::Manifest;
 use orix_registry::{Packument, RegistryClient};
 use orix_workspace::{Workspace, WorkspaceSpec};
@@ -81,22 +81,21 @@ impl Resolver {
 
     /// Resolve dependencies from multiple manifests (used for workspace root installation).
     /// Collects and deduplicates constraints from all manifests, then resolves them as a batch.
-    pub async fn resolve_manifests(
-        &mut self,
-        manifests: &[&Manifest],
-    ) -> Result<DependencyGraph> {
+    pub async fn resolve_manifests(&mut self, manifests: &[&Manifest]) -> Result<DependencyGraph> {
         let mut graph = DependencyGraph::new();
         let mut to_resolve: Vec<(PackageName, VersionConstraint)> = Vec::new();
 
         for manifest in manifests {
             for (name, raw) in &manifest.dependencies {
-                let constraint = VersionConstraint::parse(raw)
-                    .with_context(|| format!("invalid dependency constraint '{}': {}", name, raw))?;
+                let constraint = VersionConstraint::parse(raw).with_context(|| {
+                    format!("invalid dependency constraint '{}': {}", name, raw)
+                })?;
                 to_resolve.push((PackageName::from(name.as_str()), constraint));
             }
             for (name, raw) in &manifest.dev_dependencies {
-                let constraint = VersionConstraint::parse(raw)
-                    .with_context(|| format!("invalid devDependency constraint '{}': {}", name, raw))?;
+                let constraint = VersionConstraint::parse(raw).with_context(|| {
+                    format!("invalid devDependency constraint '{}': {}", name, raw)
+                })?;
                 to_resolve.push((PackageName::from(name.as_str()), constraint));
             }
             for (name, raw) in &manifest.optional_dependencies {
@@ -200,7 +199,8 @@ impl Resolver {
             to_resolve.push((PackageName::from(name.as_str()), constraint));
         }
 
-        self.resolve_batch(&mut graph, to_resolve, workspace).await?;
+        self.resolve_batch(&mut graph, to_resolve, workspace)
+            .await?;
         Ok(graph)
     }
 
@@ -267,6 +267,14 @@ impl Resolver {
                 .iter()
                 .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
                 .collect();
+
+            if !peer_deps.is_empty() {
+                warn!(
+                    package = %pkg_id,
+                    count = peer_deps.len(),
+                    "peerDependencies are not resolved in MVP mode"
+                );
+            }
 
             // Build depnodes: transitive dependencies this package declares.
             let depnodes: Vec<String> = deps
@@ -338,66 +346,6 @@ impl Resolver {
                 .with_context(|| format!("tag '{}' not found in packument", tag)),
         }
     }
-}
-
-/// Resolve dependencies from a lockfile packages section (frozen/install-from-lock workflow).
-pub fn resolve_from_lockfile_packages(
-    packages: &std::collections::BTreeMap<String, PackageLock>,
-) -> DependencyGraph {
-    let mut graph = DependencyGraph::new();
-
-    for (key, pkg) in packages {
-        let tarball = match pkg.resolution.as_ref().and_then(|r| r.tarball.clone()) {
-            Some(t) => t,
-            None => continue,
-        };
-
-        let integrity = pkg.integrity.clone().unwrap_or_default();
-        let key_str = key.trim_start_matches('/');
-        let (name_str, ver_str) = key_str.rsplit_once('@').unwrap_or((key_str, ""));
-
-        let name = PackageName::from(name_str);
-        let version = match Version::parse(ver_str) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let pkg_id = PackageId::new(name.clone(), version);
-
-        let deps: Vec<(PackageName, String)> = pkg
-            .dependencies
-            .iter()
-            .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-            .collect();
-        let opt_deps: Vec<(PackageName, String)> = pkg
-            .optional_dependencies
-            .iter()
-            .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-            .collect();
-
-        let depnodes: Vec<String> = deps
-            .iter()
-            .chain(opt_deps.iter())
-            .map(|(n, _)| n.to_string())
-            .collect();
-
-        let resolved = ResolvedPackage {
-            id: pkg_id.clone(),
-            integrity,
-            tarball,
-            dependencies: deps,
-            dev_dependencies: Vec::new(),
-            optional_dependencies: opt_deps,
-            peer_dependencies: Vec::new(),
-            engines: pkg.engines.clone(),
-            os: pkg.os.clone().unwrap_or_default(),
-            cpu: pkg.cpu.clone().unwrap_or_default(),
-            depnodes,
-        };
-        graph.insert(resolved);
-    }
-
-    graph
 }
 
 #[cfg(test)]

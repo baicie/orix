@@ -16,10 +16,11 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 indicatif = { workspace = true }
+clearscreen = { workspace = true }
 orix-core = { workspace = true }
 orix-config = { workspace = true }
 

@@ -5,8 +5,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
+use tracing::{info_span, warn};
 
-use orix_domain::DependencyGraph;
+use orix_domain::{check_platform_compatibility, DependencyGraph};
 use orix_store::Store;
 
 use crate::{extract_tarball, TarballCache};
@@ -45,6 +46,9 @@ impl Fetcher {
     }
 
     /// Fetch all packages in the dependency graph into the store.
+    ///
+    /// Packages with platform/os/cpu restrictions that don't match the current machine
+    /// are skipped with a warning (MVP behavior — no hard failure).
     pub async fn fetch_all(
         &self,
         graph: &DependencyGraph,
@@ -54,6 +58,18 @@ impl Fetcher {
         let mut handles = Vec::new();
 
         for pkg in graph.packages() {
+            let span = info_span!("fetch", package = %pkg.id);
+
+            // Platform compatibility check: skip with warning if incompatible.
+            if let Some(mismatch) = check_platform_compatibility(&pkg.os, &pkg.cpu) {
+                warn!(
+                    package = %pkg.id,
+                    reason = %mismatch,
+                    "Skipping platform-incompatible package"
+                );
+                continue;
+            }
+
             let sem = Arc::clone(&sem);
             let cache = Arc::clone(&self.cache);
             let store = Arc::clone(&self.store);
@@ -66,6 +82,7 @@ impl Fetcher {
 
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await?;
+                let _guard = span.enter();
                 let tarball = cache
                     .get_or_fetch(&tarball_url, &integrity, offline, force)
                     .await?;

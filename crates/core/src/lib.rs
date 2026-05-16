@@ -1,8 +1,8 @@
 //! Install pipeline orchestration for orix.
 
 pub use crate::pipeline::{
-    add, remove, store_path, store_prune, store_verify, DepType, InstallOpts, InstallReport,
-    RemoveReport,
+    add, install, remove, store_path, store_prune, store_verify, DepType, InstallEvent,
+    InstallOpts, InstallReport, RemoveReport,
 };
 
 pub mod error;

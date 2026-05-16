@@ -30,6 +30,10 @@ pub struct Config {
     pub fetch_retries: u32,
     /// Run lifecycle scripts (default: false, MVP skips all scripts).
     pub ignore_scripts: bool,
+    /// Save exact versions instead of caret/tilde in package.json.
+    pub save_exact: bool,
+    /// Fail install if engine constraints are not met.
+    pub engine_strict: bool,
     /// Color output.
     pub color: ColorChoice,
     /// Project root.
@@ -83,6 +87,8 @@ impl Config {
             fetch_timeout_secs: 30,
             fetch_retries: 3,
             ignore_scripts: true,
+            save_exact: false,
+            engine_strict: false,
             color: ColorChoice::Auto,
             project_root,
         };
@@ -180,6 +186,8 @@ impl Config {
             }
             "concurrency" => self.concurrency = value.parse().unwrap_or(self.concurrency),
             "ignore-scripts" => self.ignore_scripts = value == "true" || value == "1",
+            "save-exact" => self.save_exact = value == "true" || value == "1",
+            "engine-strict" => self.engine_strict = value == "true" || value == "1",
             "color" => {
                 self.color = match value {
                     "always" => ColorChoice::Always,

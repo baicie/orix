@@ -6,18 +6,38 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tracing::{info, info_span};
 
 use orix_fetcher::{Fetcher, TarballCache};
 use orix_linker::{LinkReport, Linker};
-use orix_lockfile::Lockfile;
+use orix_lockfile::{resolve_from_lockfile_packages, Lockfile};
 use orix_manifest::Manifest;
-use orix_resolver::{resolve_from_lockfile_packages, Resolver};
+use orix_resolver::Resolver;
 use orix_store::Store;
 use orix_workspace::Workspace;
 
 pub use orix_config::Config;
 use orix_config::ConfigOverrides;
+
+/// Progress event emitted during install.
+#[derive(Debug, Clone)]
+pub enum InstallEvent {
+    /// Total number of packages to resolve.
+    ResolvingTotal(usize),
+    /// A package is being resolved.
+    ResolvingPackage(String),
+    /// Total number of packages to fetch.
+    FetchingTotal(usize),
+    /// A package is being downloaded.
+    FetchingPackage(String),
+    /// A package failed to download.
+    FetchFailure(String),
+    /// Packages are being linked.
+    Linking,
+    /// Lockfile is being written.
+    WritingLockfile,
+}
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
@@ -34,6 +54,9 @@ pub struct InstallOpts {
     pub ignore_scripts: bool,
     /// Number of concurrent download tasks.
     pub concurrency: usize,
+    /// Channel to send progress events to the CLI renderer.
+    #[doc(hidden)]
+    pub progress_tx: Option<mpsc::Sender<InstallEvent>>,
 }
 
 /// Report from an install operation.
@@ -71,6 +94,12 @@ pub struct LockfileDiffReport {
     pub changed: Vec<String>,
     /// Importers whose specifiers changed.
     pub importers_changed: Vec<String>,
+}
+
+fn send_event(tx: &Option<mpsc::Sender<InstallEvent>>, event: InstallEvent) {
+    if let Some(sender) = tx {
+        let _ = sender.try_send(event);
+    }
 }
 
 /// Top-level install orchestration.
@@ -126,13 +155,38 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         }
     } else {
         // Normal mode: resolve from registry, with workspace awareness
-        let mut resolver = Resolver::new(config.registry.clone());
+        let mut resolver = if let Some(ref token) = config.auth_token {
+            info!(registry = %config.registry, "using authenticated registry");
+            Resolver::with_auth(config.registry.clone(), token)
+        } else {
+            Resolver::new(config.registry.clone())
+        };
 
-        // When running from workspace root, collect all manifests and resolve together
+        // Collect root-level deps for progress reporting
+        let root_deps: Vec<_> = manifest
+            .dependencies
+            .keys()
+            .chain(manifest.dev_dependencies.keys())
+            .cloned()
+            .collect();
+        send_event(
+            &opts.progress_tx,
+            InstallEvent::ResolvingTotal(root_deps.len()),
+        );
+        for name in &root_deps {
+            send_event(
+                &opts.progress_tx,
+                InstallEvent::ResolvingPackage(name.clone()),
+            );
+        }
+
         let graph = if let Some(ref ws) = workspace {
             let mut manifests: Vec<&Manifest> = vec![&manifest];
             manifests.extend(ws.packages.iter().map(|p| &p.manifest));
-            info!(manifests = manifests.len(), "resolving workspace manifests together");
+            info!(
+                manifests = manifests.len(),
+                "resolving workspace manifests together"
+            );
             resolver
                 .resolve_manifests(&manifests)
                 .await
@@ -158,10 +212,23 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         opts.concurrency
     };
 
+    send_event(&opts.progress_tx, InstallEvent::FetchingTotal(graph.len()));
+    for pkg in graph.packages() {
+        let name = pkg.id.name.to_string();
+        send_event(&opts.progress_tx, InstallEvent::FetchingPackage(name));
+    }
+
     let fetch_report = fetcher
         .fetch_all(&graph, concurrency)
         .await
         .with_context(|| "failed to fetch packages")?;
+
+    for failure in &fetch_report.failures {
+        send_event(
+            &opts.progress_tx,
+            InstallEvent::FetchFailure(failure.clone()),
+        );
+    }
 
     info!(
         success = fetch_report.success,
@@ -171,6 +238,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     // Write lockfile (unless frozen)
     let lockfile_diff: Option<LockfileDiffReport> = if !opts.frozen_lockfile {
+        send_event(&opts.progress_tx, InstallEvent::WritingLockfile);
         let base_lockfile = old_lockfile
             .as_ref()
             .cloned()
@@ -206,6 +274,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         None
     };
 
+    send_event(&opts.progress_tx, InstallEvent::Linking);
     let direct_deps: HashSet<String> = manifest
         .dependencies
         .keys()

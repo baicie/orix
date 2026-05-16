@@ -13,8 +13,8 @@
 |------|------|-------|------|
 | 1.1  | Manifest 解析 package.json（name, version, dependencies, devDependencies, scripts 等） | `manifest` | ✅ |
 | 1.2  | CLI 命令行参数解析（install / add / remove / store） | `cli` | ✅ |
-| 1.3  | CLI 输出美化（进度条、树状输出、颜色） | `cli` | ⚠️ 部分完成 |
-| 1.4  | 错误信息格式化（人类可读错误 + hint） | `cli` | ⚠️ stub |
+| 1.3  | CLI 输出美化（进度条、树状输出、颜色） | `cli` | ✅ |
+| 1.4  | 错误信息格式化（人类可读错误 + hint） | `cli` | ✅ |
 
 **1.3/1.4 细节：** 当前 `cli/src/main.rs` 已有基础命令框架，但进度条、树状输出、彩色输出、友好的错误提示（如 "Package not found: ..."）需要完善。
 
@@ -27,11 +27,11 @@
 | 2.1  | Registry packument API（GET /<package>） | `registry` | ✅ |
 | 2.2  | semver 版本选择（^ / ~ / >= / latest / exact） | `resolver` | ✅ |
 | 2.3  | 带记忆化的 DFS 递归解析 | `resolver` | ✅ |
-| 2.4  | platform/os/cpu 过滤 | `resolver` | ⚠️ stub |
-| 2.5  | peerDependencies MVP 处理（跳过，报 warning） | `resolver` | ⚠️ stub |
+| 2.4  | platform/os/cpu 过滤 | `resolver` | ✅ |
+| 2.5  | peerDependencies MVP 处理（跳过，报 warning） | `resolver` | ✅ |
 | 2.6  | workspace:* 协议解析 | `resolver` | ✅ |
 | 2.7  | packument HTTP 缓存（TTL 5min） | `resolver` | ✅ |
-| 2.8  | Registry 认证 token（Bearer token from .npmrc） | `registry` | ⚠️ stub |
+| 2.8  | Registry 认证 token（Bearer token from .npmrc） | `registry` | ✅ |
 
 **2.4/2.5 细节：** 平台过滤在设计文档中提及 MVP 只记录 warning，不硬性失败。peerDependencies 在设计文档中明确 MVP 不强制解析。
 
@@ -120,7 +120,7 @@
 | 8.2  | core::add()（修改 package.json + install） | `core` | ✅ |
 | 8.3  | core::remove()（修改 package.json + install） | `core` | ✅ |
 | 8.4  | frozen-lockfile 流程（resolve from lockfile） | `core` | ✅ |
-| 8.5  | force 流程（重新获取所有包） | `core` | ⚠️ stub |
+| 8.5  | force 流程（重新获取所有包） | `core` | ✅ |
 | 8.6  | CoreError 枚举（聚合所有子 crate 错误） | `core` | ✅ |
 | 8.7  | InstallReport / FetchReport / LinkReport 结构 | `core` | ⚠️ 部分完成 |
 
@@ -131,7 +131,7 @@
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
 | 9.1  | Config 结构体（registry, store_dir, cache_dir, etc.） | `config` | ✅ |
-| 9.2  | .npmrc 文件解析 | `config` | ⚠️ 部分完成 |
+| 9.2  | .npmrc 文件解析 | `config` | ✅ |
 | 9.3  | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ✅ |
 | 9.4  | 用户 ~/.npmrc 加载 | `config` | ✅ |
 | 9.5  | CLI 参数覆盖（最高优先级） | `config` | ✅ |
@@ -208,8 +208,8 @@
 
 ### P1 — CLI 体验完善
 ```
-1.3  CLI 进度条输出
-1.4  人类可读错误信息
+1.3  CLI 进度条输出 ✅
+1.4  人类可读错误信息 ✅
 13.5 README.md
 ```
 
@@ -222,23 +222,27 @@
 
 ### P3 — Workspace 完整支持
 ```
-7.4  workspace 协议变体（^/~/>=）
-7.6  本地包 symlink
-7.7  根目录 workspace 安装
+7.4  workspace 协议变体（^/~/>=） ✅
+7.6  本地包 symlink ✅
+7.7  根目录 workspace 安装 ✅
 7.8  循环依赖检测
 ```
 
 ### P4 — 细节打磨
 ```
+2.4  platform/os/cpu 过滤 ✅
+2.5  peerDependencies MVP ✅
 2.6  packument HTTP 缓存 ✅
-2.8  Registry 认证 token ✅ (已支持)
+2.8  Registry 认证 token ✅
 3.6  下载重试 + 指数退避 ✅
 3.7  offline 模式 ✅
 4.5  Store 原子写入 ✅
 5.6  布局验证 ✅
-5.7  remove 清理
+5.7  remove 清理 ✅
 6.4  lockfile diff ✅
 6.6  lockfile 原子写入 ✅
+8.5  force 流程 ✅
+9.2  .npmrc 解析 ✅
 9.3  环境变量覆盖 ✅
 ```
 
@@ -259,19 +263,19 @@
 ## 当前进度总览
 
 ```
-Phase 1  CLI + manifest      ████████░░  63%
-Phase 2  Resolver             ███████░░░  69%
-Phase 3  Fetcher             ██████████ 100%
-Phase 4  CAS Store           ██████████  94%
-Phase 5  Linker              █████████░  86%
+Phase 1  CLI + manifest      ██████████ 100%
+Phase 2  Resolver            ██████████ 100%
+Phase 3  Fetcher            ██████████ 100%
+Phase 4  CAS Store           █████████░  89%
+Phase 5  Linker             █████████░  86%
 Phase 6  Lockfile           ██████████ 100%
-Phase 7  Workspace          ██████░░░░  63%
+Phase 7  Workspace          █████████░  88%
 Phase 8  Pipeline           █████████░  86%
-Phase 9  Config              ███░░░░░░  33%
-Phase 10 Utils & Macros     ██░░░░░░░░  15%
-Phase 11 Domain             █████████░  90%
-Phase 12 测试                ░░░░░░░░░░   0%
-Phase 13 集成 & 质量         ██░░░░░░░░  10%
+Phase 9  Config            ████████░░  83%
+Phase 10 Utils & Macros     ██████░░░░  67%
+Phase 11 Domain            ██████████ 100%
+Phase 12 测试               ░░░░░░░░░░   0%
+Phase 13 集成 & 质量       ██░░░░░░░░  10%
 ```
 
-**总体完成度：~73%**
+**总体完成度：~83%**

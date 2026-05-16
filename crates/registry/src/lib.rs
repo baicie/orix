@@ -64,19 +64,20 @@ impl RegistryClient {
     /// Create a new registry client with authentication.
     #[allow(clippy::expect_used)]
     pub fn with_auth(base_url: Url, token: &str) -> Self {
-        let http_client = reqwest::Client::builder()
-            .user_agent("orix/0.1.0")
-            .timeout(std::time::Duration::from_secs(30))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .expect("reqwest client should always build successfully");
-
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
             reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
                 .expect("token is a valid header value"),
         );
+
+        let http_client = reqwest::Client::builder()
+            .user_agent("orix/0.1.0")
+            .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("reqwest client should always build successfully");
 
         Self {
             base_url,
