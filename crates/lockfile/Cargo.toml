@@ -17,5 +17,8 @@ serde_yaml = { workspace = true }
 orix-domain = { workspace = true }
 orix-manifest = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

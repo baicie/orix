@@ -1,7 +1,7 @@
 //! Install pipeline orchestration.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -17,10 +17,13 @@ use orix_store::Store;
 use orix_workspace::Workspace;
 
 pub use orix_config::Config;
+use orix_config::ConfigOverrides;
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
 pub struct InstallOpts {
+    /// Registry URL override from CLI.
+    pub registry: Option<String>,
     /// Require a lockfile and fail if it doesn't match package.json.
     pub frozen_lockfile: bool,
     /// Only use locally cached packages.
@@ -64,6 +67,10 @@ pub struct LockfileDiffReport {
     pub added: Vec<String>,
     /// Packages removed since the previous lockfile.
     pub removed: Vec<String>,
+    /// Packages changed since the previous lockfile.
+    pub changed: Vec<String>,
+    /// Importers whose specifiers changed.
+    pub importers_changed: Vec<String>,
 }
 
 /// Top-level install orchestration.
@@ -71,7 +78,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let _span = info_span!("install", root = %project_root.display());
     let start = Instant::now();
 
-    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    let config = Config::load_with_overrides(
+        project_root,
+        &ConfigOverrides {
+            registry: opts.registry.clone(),
+        },
+    )
+    .with_context(|| "failed to load configuration")?;
 
     if opts.frozen_lockfile && !config.lockfile_path().exists() {
         anyhow::bail!(
@@ -160,16 +173,19 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         let diff_report = LockfileDiffReport {
             added: diff.added.clone(),
             removed: diff.removed.clone(),
+            changed: diff.changed.clone(),
+            importers_changed: diff.importers_changed.clone(),
         };
 
         updated_lockfile
             .write(&config.lockfile_path())
             .with_context(|| "failed to write lockfile")?;
 
-        if !diff.added.is_empty() || !diff.removed.is_empty() {
+        if !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty() {
             info!(
                 added = diff.added.len(),
                 removed = diff.removed.len(),
+                changed = diff.changed.len(),
                 "lockfile updated"
             );
         } else {
@@ -192,6 +208,15 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let link_report = linker
         .link_graph(&graph, &direct_deps)
         .with_context(|| "failed to link packages")?;
+    let layout_report = linker
+        .validate_layout(&direct_deps)
+        .with_context(|| "failed to validate node_modules layout")?;
+    if !layout_report.is_ok() {
+        anyhow::bail!(
+            "node_modules layout validation failed: {}",
+            layout_report.broken.join("; ")
+        );
+    }
 
     let duration = start.elapsed();
     info!(duration_ms = duration.as_millis(), "install complete");
@@ -203,6 +228,36 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         lockfile_diff,
         duration_secs: duration.as_secs_f64(),
     })
+}
+
+/// Return the resolved store path for this project.
+pub fn store_path(project_root: &Path) -> Result<PathBuf> {
+    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    Ok(config.store_dir)
+}
+
+/// Prune packages from the store that are not referenced by this project's lockfile.
+pub fn store_prune(project_root: &Path, dry_run: bool) -> Result<orix_store::PruneReport> {
+    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    let lockfile_path = config.lockfile_path();
+    if !lockfile_path.exists() {
+        anyhow::bail!(
+            "No lockfile found at {}. Run orix install before pruning the store.",
+            lockfile_path.display()
+        );
+    }
+
+    let lockfile = Lockfile::read(&lockfile_path).with_context(|| "failed to read lockfile")?;
+    let referenced: HashSet<_> = lockfile.package_ids()?.into_iter().collect();
+    let store = Store::open(config.store_dir).with_context(|| "failed to open store")?;
+    store.prune(&referenced, dry_run, true)
+}
+
+/// Verify all packages and content-addressable files in the store.
+pub fn store_verify(project_root: &Path) -> Result<orix_store::VerifyReport> {
+    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    let store = Store::open(config.store_dir).with_context(|| "failed to open store")?;
+    store.verify()
 }
 
 /// Add one or more packages to the project.

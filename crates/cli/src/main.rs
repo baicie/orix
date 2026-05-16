@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use orix_core::{add, pipeline, remove, InstallOpts};
+use orix_core::{add, pipeline, remove, store_path, store_prune, store_verify, InstallOpts};
 
 #[derive(Parser)]
 #[command(name = "orix")]
@@ -99,13 +99,17 @@ async fn main() -> Result<()> {
         cli.dir.canonicalize().unwrap_or(cli.dir)
     };
 
-    let opts = InstallOpts::default();
+    let opts = InstallOpts {
+        registry: cli.registry.clone(),
+        ..InstallOpts::default()
+    };
 
     match cli.command {
         Command::Install(args) => {
             let report = pipeline::install(
                 &dir,
                 &InstallOpts {
+                    registry: cli.registry.clone(),
                     frozen_lockfile: args.frozen_lockfile,
                     offline: args.offline,
                     force: args.force,
@@ -153,17 +157,40 @@ async fn main() -> Result<()> {
         }
 
         Command::StorePath => {
-            let config = orix_core::Config::load(&dir)?;
-            println!("{}", config.store_dir.display());
+            println!("{}", store_path(&dir)?.display());
         }
 
         Command::StorePrune { dry_run } => {
-            println!("Store prune: dry_run={}", dry_run);
-            println!("(store prune not yet implemented)");
+            let report = store_prune(&dir, dry_run)?;
+            if dry_run {
+                println!(
+                    "Would remove {} packages and {} content files",
+                    report.packages_removed, report.files_removed
+                );
+            } else {
+                println!(
+                    "Removed {} packages and {} content files",
+                    report.packages_removed, report.files_removed
+                );
+            }
+            println!("Bytes reclaimed: {}", report.bytes_reclaimed);
         }
 
         Command::StoreVerify => {
-            println!("Store verify not yet implemented");
+            let report = store_verify(&dir)?;
+            println!("Packages checked: {}", report.packages_checked);
+            println!("Files checked: {}", report.files_checked);
+            if report.is_ok() {
+                println!("Store verified");
+            } else {
+                for missing in &report.missing {
+                    eprintln!("missing: {}", missing);
+                }
+                for corrupted in &report.corrupted {
+                    eprintln!("corrupted: {}", corrupted);
+                }
+                anyhow::bail!("store verification failed");
+            }
         }
     }
 

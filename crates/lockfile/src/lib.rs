@@ -1,6 +1,7 @@
 //! orix-lock.yaml management.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const LOCKFILE_VERSION: i32 = 1;
 
 /// The lockfile root — mirrors pnpm's orix-lock.yaml structure.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lockfile {
     /// Lockfile version number.
     #[serde(rename = "lockfileVersion")]
@@ -23,7 +24,7 @@ pub struct Lockfile {
 }
 
 /// Dependency resolutions for one importer (root or workspace package).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImporterLock {
     /// Resolved production dependencies.
     #[serde(default)]
@@ -40,7 +41,7 @@ pub struct ImporterLock {
 }
 
 /// A single resolved dependency entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedDep {
     /// Resolved version string.
     pub version: String,
@@ -74,7 +75,7 @@ pub struct ResolvedDep {
 }
 
 /// A resolved package entry in the lockfile.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageLock {
     /// Registry package ID.
     #[serde(rename = "id", default)]
@@ -108,7 +109,7 @@ pub struct PackageLock {
 }
 
 /// Resolution details for a package.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageResolution {
     /// Tarball URL.
     pub tarball: Option<String>,
@@ -128,6 +129,8 @@ pub struct LockfileDiff {
     pub added: Vec<String>,
     /// Packages removed since the old lockfile.
     pub removed: Vec<String>,
+    /// Packages whose lockfile entry changed while keeping the same package key.
+    pub changed: Vec<String>,
     /// Importers whose specifiers changed.
     pub importers_changed: Vec<String>,
 }
@@ -144,18 +147,25 @@ impl Lockfile {
     }
 
     /// Read a lockfile from a YAML file.
-    pub fn read(path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn read(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         serde_yaml::from_str(&content)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e).into())
     }
 
     /// Write the lockfile to a YAML file atomically.
-    pub fn write(&self, path: &std::path::Path) -> anyhow::Result<()> {
+    pub fn write(&self, path: &Path) -> anyhow::Result<()> {
         let yaml = serde_yaml::to_string(self)?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &yaml)?;
-        std::fs::rename(&tmp, path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let tmp = temporary_lockfile_path(path);
+        if let Err(error) = std::fs::write(&tmp, &yaml).and_then(|()| std::fs::rename(&tmp, path)) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(error.into());
+        }
+
         Ok(())
     }
 
@@ -328,16 +338,52 @@ impl Lockfile {
         let old_keys: HashSet<_> = old.packages.keys().collect();
         let new_keys: HashSet<_> = new.packages.keys().collect();
 
+        let mut added: Vec<_> = new_keys
+            .difference(&old_keys)
+            .map(|k| (*k).clone())
+            .collect();
+        let mut removed: Vec<_> = old_keys
+            .difference(&new_keys)
+            .map(|k| (*k).clone())
+            .collect();
+        let mut changed: Vec<_> = old_keys
+            .intersection(&new_keys)
+            .filter_map(|key| {
+                if old.packages.get(*key) != new.packages.get(*key) {
+                    Some((*key).clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut importers_changed: Vec<_> = old
+            .importers
+            .keys()
+            .chain(new.importers.keys())
+            .filter(|importer_id| {
+                old.importers
+                    .get(*importer_id)
+                    .map(|importer| &importer.specifiers)
+                    != new
+                        .importers
+                        .get(*importer_id)
+                        .map(|importer| &importer.specifiers)
+            })
+            .cloned()
+            .collect();
+
+        added.sort();
+        removed.sort();
+        changed.sort();
+        importers_changed.sort();
+        importers_changed.dedup();
+
         LockfileDiff {
-            added: new_keys
-                .difference(&old_keys)
-                .map(|k| (*k).clone())
-                .collect(),
-            removed: old_keys
-                .difference(&new_keys)
-                .map(|k| (*k).clone())
-                .collect(),
-            importers_changed: Vec::new(),
+            added,
+            removed,
+            changed,
+            importers_changed,
         }
     }
 
@@ -375,6 +421,32 @@ impl Lockfile {
 
         Ok(())
     }
+
+    /// Return all package IDs referenced by the lockfile package section.
+    pub fn package_ids(&self) -> anyhow::Result<Vec<orix_domain::PackageId>> {
+        self.packages
+            .keys()
+            .map(|key| {
+                let key = key.trim_start_matches('/');
+                let (name, version) = key
+                    .rsplit_once('@')
+                    .ok_or_else(|| anyhow::anyhow!("invalid lockfile package key '{}'", key))?;
+                Ok(orix_domain::PackageId::new(
+                    orix_domain::PackageName::from(name.to_string()),
+                    orix_domain::Version::parse(version)?,
+                ))
+            })
+            .collect()
+    }
+}
+
+fn temporary_lockfile_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("orix-lock.yaml");
+    let tmp_name = format!(".{}.{}.tmp", file_name, std::process::id());
+    path.with_file_name(tmp_name)
 }
 
 fn validate_dependency_group(
@@ -420,6 +492,7 @@ fn validate_dependency_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Version};
     use orix_manifest::Manifest;
 
     fn resolved_dep(version: &str, specifier: &str) -> ResolvedDep {
@@ -435,6 +508,49 @@ mod tests {
             dependencies: BTreeMap::new(),
             optional_dependencies: BTreeMap::new(),
         }
+    }
+
+    fn package_lock(name: &str, version: &str, integrity: &str) -> PackageLock {
+        PackageLock {
+            id: Some(format!("registry.npmjs.org/{}/{}", name, version)),
+            local: None,
+            integrity: Some(integrity.to_string()),
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            resolution: Some(PackageResolution {
+                tarball: Some(format!(
+                    "https://registry.npmjs.org/{}/-/{}-{}.tgz",
+                    name, name, version
+                )),
+                integrity: Some(integrity.to_string()),
+                resolution_type: None,
+                path: None,
+            }),
+            dependencies: BTreeMap::new(),
+            optional_dependencies: BTreeMap::new(),
+            engines: None,
+            os: None,
+            cpu: None,
+        }
+    }
+
+    fn resolved_package(name: &str, version: &str) -> anyhow::Result<ResolvedPackage> {
+        Ok(ResolvedPackage {
+            id: PackageId::new(PackageName::from(name), Version::parse(version)?),
+            integrity: format!("sha512-{}", version),
+            tarball: format!(
+                "https://registry.npmjs.org/{}/-/{}-{}.tgz",
+                name, name, version
+            ),
+            dependencies: Vec::new(),
+            dev_dependencies: Vec::new(),
+            optional_dependencies: Vec::new(),
+            peer_dependencies: Vec::new(),
+            engines: None,
+            os: Vec::new(),
+            cpu: Vec::new(),
+            depnodes: Vec::new(),
+        })
     }
 
     #[test]
@@ -500,5 +616,98 @@ mod tests {
 
         let result = lockfile.validate_frozen(&manifest, ".");
         assert!(matches!(result, Err(error) if error.to_string().contains("not declared")));
+    }
+
+    #[test]
+    fn write_and_read_roundtrip_preserves_lockfile() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("nested").join("orix-lock.yaml");
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
+            "/react@18.2.0".to_string(),
+            package_lock("react", "18.2.0", "sha512-a"),
+        );
+
+        lockfile.write(&path)?;
+        let read = Lockfile::read(&path)?;
+
+        assert_eq!(read, lockfile);
+        Ok(())
+    }
+
+    #[test]
+    fn diff_reports_added_removed_changed_and_importer_specifiers() {
+        let mut old = Lockfile::empty();
+        old.packages.insert(
+            "/react@18.2.0".to_string(),
+            package_lock("react", "18.2.0", "sha512-old"),
+        );
+        old.packages.insert(
+            "/vite@5.0.0".to_string(),
+            package_lock("vite", "5.0.0", "sha512-vite"),
+        );
+        let mut old_importer = ImporterLock::default();
+        old_importer
+            .specifiers
+            .insert("react".to_string(), "^18.0.0".to_string());
+        old.importers.insert(".".to_string(), old_importer);
+
+        let mut new = Lockfile::empty();
+        new.packages.insert(
+            "/react@18.2.0".to_string(),
+            package_lock("react", "18.2.0", "sha512-new"),
+        );
+        new.packages.insert(
+            "/lodash@4.17.21".to_string(),
+            package_lock("lodash", "4.17.21", "sha512-lodash"),
+        );
+        let mut new_importer = ImporterLock::default();
+        new_importer
+            .specifiers
+            .insert("react".to_string(), "^18.2.0".to_string());
+        new.importers.insert(".".to_string(), new_importer);
+
+        let diff = Lockfile::diff(&old, &new);
+
+        assert_eq!(diff.added, vec!["/lodash@4.17.21"]);
+        assert_eq!(diff.removed, vec!["/vite@5.0.0"]);
+        assert_eq!(diff.changed, vec!["/react@18.2.0"]);
+        assert_eq!(diff.importers_changed, vec!["."]);
+    }
+
+    #[test]
+    fn update_writes_importer_specifiers() -> anyhow::Result<()> {
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("react".to_string(), "^18.2.0".to_string());
+        manifest
+            .dev_dependencies
+            .insert("vite".to_string(), "^5.0.0".to_string());
+        manifest
+            .optional_dependencies
+            .insert("fsevents".to_string(), "^2.3.3".to_string());
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("react", "18.2.0")?);
+        graph.insert(resolved_package("vite", "5.0.0")?);
+        graph.insert(resolved_package("fsevents", "2.3.3")?);
+
+        let lockfile = Lockfile::empty().update(&manifest, &graph, ".");
+        let importer = lockfile
+            .importers
+            .get(".")
+            .ok_or_else(|| anyhow::anyhow!("missing root importer"))?;
+
+        assert_eq!(
+            importer.specifiers.get("react"),
+            Some(&"^18.2.0".to_string())
+        );
+        assert_eq!(importer.specifiers.get("vite"), Some(&"^5.0.0".to_string()));
+        assert_eq!(
+            importer.specifiers.get("fsevents"),
+            Some(&"^2.3.3".to_string())
+        );
+        Ok(())
     }
 }

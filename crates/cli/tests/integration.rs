@@ -46,10 +46,11 @@ fn install_fetches_package_from_mock_registry() {
     .unwrap();
 
     let mut cmd = Command::cargo_bin("orix").unwrap();
-    cmd.arg("-C")
+    cmd.arg("--registry")
+        .arg(registry.base_url())
+        .arg("-C")
         .arg(project.path())
         .arg("install")
-        .env("ORIX_REGISTRY", registry.base_url())
         .env("ORIX_STORE", store.path())
         .env("ORIX_CACHE", cache.path())
         .env("ORIX_LOG", "error")
@@ -64,6 +65,37 @@ fn install_fetches_package_from_mock_registry() {
         .join("is-number")
         .join("package.json")
         .exists());
+
+    let mut path_cmd = Command::cargo_bin("orix").unwrap();
+    path_cmd
+        .arg("-C")
+        .arg(project.path())
+        .arg("store-path")
+        .env("ORIX_STORE", store.path())
+        .assert()
+        .success()
+        .stdout(contains(store.path().display().to_string()));
+
+    let mut verify_cmd = Command::cargo_bin("orix").unwrap();
+    verify_cmd
+        .arg("-C")
+        .arg(project.path())
+        .arg("store-verify")
+        .env("ORIX_STORE", store.path())
+        .assert()
+        .success()
+        .stdout(contains("Store verified"));
+
+    let mut prune_cmd = Command::cargo_bin("orix").unwrap();
+    prune_cmd
+        .arg("-C")
+        .arg(project.path())
+        .arg("store-prune")
+        .arg("--dry-run")
+        .env("ORIX_STORE", store.path())
+        .assert()
+        .success()
+        .stdout(contains("Would remove 0 packages"));
 }
 
 struct MockRegistry {
@@ -127,7 +159,9 @@ fn handle_registry_request(mut stream: TcpStream, packument: &str, tarball: &[u8
 
     if first_line.starts_with("GET /is-number/-/is-number-1.0.0.tgz ") {
         write_response(&mut stream, "application/octet-stream", tarball);
-    } else if first_line.starts_with("GET /is-number/ ") {
+    } else if first_line.starts_with("GET /is-number ")
+        || first_line.starts_with("GET /is-number/ ")
+    {
         write_response(&mut stream, "application/json", packument.as_bytes());
     } else {
         let body = b"not found";

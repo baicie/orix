@@ -42,3 +42,23 @@ pub struct PruneReport {
     /// Number of bytes reclaimed.
     pub bytes_reclaimed: u64,
 }
+
+/// Report from a store verification operation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerifyReport {
+    /// Number of packages checked.
+    pub packages_checked: usize,
+    /// Number of files checked.
+    pub files_checked: usize,
+    /// Missing package/content files.
+    pub missing: Vec<String>,
+    /// Files whose content hash does not match integrity metadata.
+    pub corrupted: Vec<String>,
+}
+
+impl VerifyReport {
+    /// Returns true when no missing or corrupted files were found.
+    pub fn is_ok(&self) -> bool {
+        self.missing.is_empty() && self.corrupted.is_empty()
+    }
+}

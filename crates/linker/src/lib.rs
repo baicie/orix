@@ -18,3 +18,19 @@ pub struct LinkReport {
     /// Estimated bytes saved by hardlinking.
     pub bytes_saved: u64,
 }
+
+/// Report from validating a generated node_modules layout.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LayoutReport {
+    /// Broken links or missing expected package entries.
+    pub broken: Vec<String>,
+    /// Non-fatal layout observations.
+    pub warnings: Vec<String>,
+}
+
+impl LayoutReport {
+    /// Returns true when no broken layout entries were found.
+    pub fn is_ok(&self) -> bool {
+        self.broken.is_empty()
+    }
+}

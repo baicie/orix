@@ -21,5 +21,8 @@ walkdir = { workspace = true }
 rayon = { workspace = true }
 orix-domain = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

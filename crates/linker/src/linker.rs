@@ -1,6 +1,6 @@
 //! Linker implementation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 use orix_domain::DependencyGraph;
 use orix_store::Store;
 
-use super::LinkReport;
+use super::{LayoutReport, LinkReport};
 
 /// The linker creates the pnpm-style node_modules structure using hardlinks and symlinks.
 pub struct Linker {
@@ -52,10 +52,10 @@ impl Linker {
 
         for pkg in graph.packages() {
             let pkg_key = pkg.id.key();
-            let pkg_dir = pnpm_dir
-                .join(&pkg_key)
-                .join("node_modules")
-                .join(pkg.id.name.as_str());
+            let pkg_dir = Self::package_path_in_node_modules(
+                &pnpm_dir.join(&pkg_key).join("node_modules"),
+                pkg.id.name.as_str(),
+            );
 
             fs::create_dir_all(&pkg_dir)?;
 
@@ -101,10 +101,15 @@ impl Linker {
                 if let Some(dep_key) = name_to_key.get(dep_name.as_str()) {
                     let symlink_target = PathBuf::from("..")
                         .join("..")
+                        .join("..")
+                        .join("..")
                         .join(dep_key)
                         .join("node_modules")
                         .join(dep_name.as_str());
-                    let symlink_path = pkg_dir.join("node_modules").join(dep_name.as_str());
+                    let symlink_path = Self::package_path_in_node_modules(
+                        &pkg_dir.join("node_modules"),
+                        dep_name.as_str(),
+                    );
 
                     if !symlink_path.exists() {
                         if let Some(parent) = symlink_path.parent() {
@@ -126,13 +131,14 @@ impl Linker {
                 continue;
             }
 
-            let target = pnpm_dir
-                .join(pkg.id.key())
-                .join("node_modules")
-                .join(pkg.id.name.as_str());
-            let link = self.node_modules.join(pkg.id.name.as_str());
+            let target = pnpm_dir.join(pkg.id.key()).join("node_modules");
+            let target = Self::package_path_in_node_modules(&target, pkg.id.name.as_str());
+            let link = Self::package_path_in_node_modules(&self.node_modules, pkg.id.name.as_str());
 
             if !link.exists() {
+                if let Some(parent) = link.parent() {
+                    fs::create_dir_all(parent)?;
+                }
                 Self::create_symlink(&target, &link)?;
                 report.symlinks_created += 1;
             }
@@ -272,6 +278,190 @@ impl Linker {
         if self.node_modules.exists() {
             fs::remove_dir_all(&self.node_modules)?;
         }
+        Ok(())
+    }
+
+    /// Validate that direct dependencies and generated symlinks are resolvable.
+    pub fn validate_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
+        let mut report = LayoutReport::default();
+
+        if !self.node_modules.exists() {
+            report
+                .broken
+                .push(format!("missing {}", self.node_modules.display()));
+            return Ok(report);
+        }
+
+        for dep in direct_deps {
+            let path = Self::package_path_in_node_modules(&self.node_modules, dep);
+            if !path.exists() {
+                report
+                    .broken
+                    .push(format!("missing direct dependency {}", path.display()));
+            }
+        }
+
+        for entry in WalkDir::new(&self.node_modules)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_symlink() {
+                continue;
+            }
+
+            let link_path = entry.path();
+            let target = fs::read_link(link_path)?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                link_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new(""))
+                    .join(target)
+            };
+
+            if !resolved.exists() {
+                report.broken.push(format!(
+                    "broken symlink {} -> {}",
+                    link_path.display(),
+                    resolved.display()
+                ));
+            }
+        }
+
+        Ok(report)
+    }
+
+    fn package_path_in_node_modules(root: &Path, package_name: &str) -> PathBuf {
+        package_name
+            .split('/')
+            .fold(root.to_path_buf(), |path, part| path.join(part))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Version};
+
+    fn pkg_id(name: &str, version: &str) -> anyhow::Result<PackageId> {
+        Ok(PackageId::new(
+            PackageName::from(name),
+            Version::parse(version)?,
+        ))
+    }
+
+    fn resolved_package(
+        name: &str,
+        version: &str,
+        dependencies: Vec<(&str, &str)>,
+    ) -> anyhow::Result<ResolvedPackage> {
+        Ok(ResolvedPackage {
+            id: pkg_id(name, version)?,
+            integrity: String::new(),
+            tarball: String::new(),
+            dependencies: dependencies
+                .into_iter()
+                .map(|(name, version)| (PackageName::from(name), version.to_string()))
+                .collect(),
+            dev_dependencies: Vec::new(),
+            optional_dependencies: Vec::new(),
+            peer_dependencies: Vec::new(),
+            engines: None,
+            os: Vec::new(),
+            cpu: Vec::new(),
+            depnodes: Vec::new(),
+        })
+    }
+
+    fn write_package(root: &Path, name: &str, version: &str) -> anyhow::Result<()> {
+        fs::create_dir_all(root)?;
+        fs::write(
+            root.join("package.json"),
+            format!(r#"{{"name":"{}","version":"{}"}}"#, name, version),
+        )?;
+        fs::write(root.join("index.js"), "module.exports = 1;\n")?;
+        Ok(())
+    }
+
+    fn import_package(
+        store: &Store,
+        temp_root: &Path,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<PackageId> {
+        let source = temp_root.join(format!("{}-{}", name.replace('/', "-"), version));
+        write_package(&source, name, version)?;
+        let id = pkg_id(name, version)?;
+        store.import_package(&id, &source, Vec::new(), None)?;
+        Ok(id)
+    }
+
+    #[test]
+    fn link_graph_creates_valid_layout_for_direct_and_transitive_deps() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "react", "18.2.0")?;
+        import_package(&store, temp.path(), "scheduler", "0.23.0")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package(
+            "react",
+            "18.2.0",
+            vec![("scheduler", "0.23.0")],
+        )?);
+        graph.insert(resolved_package("scheduler", "0.23.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["react".to_string()]);
+        linker.link_graph(&graph, &direct_deps)?;
+
+        let report = linker.validate_layout(&direct_deps)?;
+
+        assert!(report.is_ok());
+        assert!(temp.path().join("node_modules").join("react").exists());
+        assert!(!temp.path().join("node_modules").join("scheduler").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_layout_reports_missing_direct_dependency() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        fs::create_dir_all(temp.path().join("node_modules"))?;
+        let direct_deps = HashSet::from(["react".to_string()]);
+
+        let report = linker.validate_layout(&direct_deps)?;
+
+        assert!(!report.is_ok());
+        assert_eq!(report.broken.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_supports_scoped_direct_dependencies() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "@scope/pkg", "1.0.0")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("@scope/pkg", "1.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["@scope/pkg".to_string()]);
+        linker.link_graph(&graph, &direct_deps)?;
+
+        let report = linker.validate_layout(&direct_deps)?;
+
+        assert!(report.is_ok());
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join("@scope")
+            .join("pkg")
+            .exists());
         Ok(())
     }
 }

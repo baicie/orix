@@ -18,5 +18,8 @@ url = { workspace = true }
 dirs = { workspace = true }
 orix-domain = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

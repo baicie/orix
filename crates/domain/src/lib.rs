@@ -6,6 +6,8 @@ use std::ops::Deref;
 
 use semver::{Version as SemverVersion, VersionReq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use thiserror::Error;
+use url::Url;
 
 /// A normalized package name (always lowercase).
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
@@ -23,6 +25,41 @@ impl PackageName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Parse and validate an npm package name.
+    pub fn parse(name: &str) -> Result<Self, PackageNameError> {
+        let normalized = normalize_package_name(name)?;
+        Ok(Self(Cow::Owned(normalized)))
+    }
+
+    /// Return the package scope without the leading `@`, if present.
+    pub fn scope(&self) -> Option<&str> {
+        self.0
+            .strip_prefix('@')
+            .and_then(|name| name.split_once('/').map(|(scope, _)| scope))
+    }
+
+    /// Return the package name without its scope.
+    pub fn unscoped(&self) -> &str {
+        self.0
+            .strip_prefix('@')
+            .and_then(|name| name.split_once('/').map(|(_, unscoped)| unscoped))
+            .unwrap_or(&self.0)
+    }
+}
+
+/// Package name validation errors.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PackageNameError {
+    /// Package name was empty.
+    #[error("package name is empty")]
+    EmptyName,
+    /// Scoped package name was malformed.
+    #[error("invalid scoped package name: {0}")]
+    InvalidScope(String),
+    /// Package name contains invalid characters or path traversal.
+    #[error("invalid package name: {0}")]
+    InvalidCharacter(String),
 }
 
 impl From<String> for PackageName {
@@ -60,6 +97,49 @@ impl fmt::Display for PackageName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+fn normalize_package_name(name: &str) -> Result<String, PackageNameError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(PackageNameError::EmptyName);
+    }
+    if name.contains('\\') || name.contains("..") {
+        return Err(PackageNameError::InvalidCharacter(name.to_string()));
+    }
+
+    if let Some(scoped) = name.strip_prefix('@') {
+        let Some((scope, package)) = scoped.split_once('/') else {
+            return Err(PackageNameError::InvalidScope(name.to_string()));
+        };
+        if scope.is_empty() || package.is_empty() || package.contains('/') {
+            return Err(PackageNameError::InvalidScope(name.to_string()));
+        }
+        validate_package_segment(scope, name)?;
+        validate_package_segment(package, name)?;
+        Ok(format!(
+            "@{}/{}",
+            scope.to_lowercase(),
+            package.to_lowercase()
+        ))
+    } else {
+        if name.contains('/') {
+            return Err(PackageNameError::InvalidCharacter(name.to_string()));
+        }
+        validate_package_segment(name, name)?;
+        Ok(name.to_lowercase())
+    }
+}
+
+fn validate_package_segment(segment: &str, original: &str) -> Result<(), PackageNameError> {
+    if segment.is_empty()
+        || segment == "."
+        || segment == ".."
+        || segment.chars().any(|ch| ch.is_control())
+    {
+        return Err(PackageNameError::InvalidCharacter(original.to_string()));
+    }
+    Ok(())
 }
 
 // ─── Version ───────────────────────────────────────────────────────────────────
@@ -458,6 +538,116 @@ pub fn symlink_available() -> bool {
     }
 }
 
+// ─── Integrity ────────────────────────────────────────────────────────────────
+
+/// Parsed npm Subresource Integrity metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Integrity {
+    /// Digest entries in the order they appeared in the source string.
+    pub algorithms: Vec<IntegrityDigest>,
+}
+
+/// A single algorithm/digest pair from an integrity string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IntegrityDigest {
+    /// Digest algorithm.
+    pub algorithm: IntegrityAlgorithm,
+    /// Base64-encoded digest.
+    pub digest_base64: String,
+}
+
+/// Supported integrity algorithms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IntegrityAlgorithm {
+    /// Legacy SHA-1 integrity.
+    Sha1,
+    /// Modern SHA-512 integrity.
+    Sha512,
+}
+
+/// Integrity parsing errors.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum IntegrityError {
+    /// Integrity string was empty.
+    #[error("integrity string is empty")]
+    Empty,
+    /// Integrity digest did not contain a supported algorithm.
+    #[error("unsupported integrity algorithm: {0}")]
+    UnsupportedAlgorithm(String),
+    /// Integrity digest did not contain a base64 payload.
+    #[error("invalid integrity digest: {0}")]
+    InvalidDigest(String),
+}
+
+impl Integrity {
+    /// Parse an npm integrity string such as `sha512-... sha1-...`.
+    pub fn parse(input: &str) -> Result<Self, IntegrityError> {
+        let input = input.trim();
+        if input.is_empty() {
+            return Err(IntegrityError::Empty);
+        }
+
+        let algorithms: Result<Vec<_>, _> = input
+            .split_whitespace()
+            .map(|part| {
+                let (algorithm, digest) = part
+                    .split_once('-')
+                    .ok_or_else(|| IntegrityError::InvalidDigest(part.to_string()))?;
+                if digest.is_empty() {
+                    return Err(IntegrityError::InvalidDigest(part.to_string()));
+                }
+
+                let algorithm = match algorithm {
+                    "sha512" => IntegrityAlgorithm::Sha512,
+                    "sha1" => IntegrityAlgorithm::Sha1,
+                    other => return Err(IntegrityError::UnsupportedAlgorithm(other.to_string())),
+                };
+
+                Ok(IntegrityDigest {
+                    algorithm,
+                    digest_base64: digest.to_string(),
+                })
+            })
+            .collect();
+
+        Ok(Self {
+            algorithms: algorithms?,
+        })
+    }
+
+    /// Return the strongest digest available.
+    pub fn strongest(&self) -> Option<&IntegrityDigest> {
+        self.algorithms.iter().max_by_key(|digest| digest.algorithm)
+    }
+}
+
+// ─── Registry URL helpers ─────────────────────────────────────────────────────
+
+/// Build the packument metadata URL for a package name.
+pub fn package_metadata_url(registry: &Url, name: &PackageName) -> anyhow::Result<Url> {
+    let mut registry = registry.clone();
+    if !registry.path().ends_with('/') {
+        let path = format!("{}/", registry.path());
+        registry.set_path(&path);
+    }
+
+    let encoded_name = name.as_str().replace('/', "%2f");
+    Ok(registry.join(&encoded_name)?)
+}
+
+/// Build the conventional npm tarball URL for a package.
+pub fn default_tarball_url(registry: &Url, id: &PackageId) -> anyhow::Result<Url> {
+    let mut registry = registry.clone();
+    if !registry.path().ends_with('/') {
+        let path = format!("{}/", registry.path());
+        registry.set_path(&path);
+    }
+
+    let unscoped = id.name.unscoped();
+    let path = format!("{}/-/{}-{}.tgz", id.name.as_str(), unscoped, id.version);
+    Ok(registry.join(&path)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,6 +657,69 @@ mod tests {
         let constraint = VersionConstraint::parse("next")?;
 
         assert!(matches!(constraint.kind, ConstraintKind::Tag(tag) if tag == "next"));
+        Ok(())
+    }
+
+    #[test]
+    fn package_name_parse_normalizes_scoped_names() -> anyhow::Result<()> {
+        let name = PackageName::parse("@Scope/Package")?;
+
+        assert_eq!(name.as_str(), "@scope/package");
+        assert_eq!(name.scope(), Some("scope"));
+        assert_eq!(name.unscoped(), "package");
+        Ok(())
+    }
+
+    #[test]
+    fn package_name_parse_rejects_path_like_names() {
+        let result = PackageName::parse("../pkg");
+
+        assert!(matches!(result, Err(PackageNameError::InvalidCharacter(_))));
+    }
+
+    #[test]
+    fn integrity_parse_returns_strongest_digest() -> anyhow::Result<()> {
+        let integrity = Integrity::parse("sha1-abc sha512-def")?;
+
+        assert_eq!(
+            integrity.strongest().map(|digest| digest.algorithm),
+            Some(IntegrityAlgorithm::Sha512)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn integrity_parse_rejects_unknown_algorithm() {
+        let result = Integrity::parse("md5-abc");
+
+        assert!(matches!(
+            result,
+            Err(IntegrityError::UnsupportedAlgorithm(algorithm)) if algorithm == "md5"
+        ));
+    }
+
+    #[test]
+    fn package_metadata_url_encodes_scoped_package_slash() -> anyhow::Result<()> {
+        let registry = Url::parse("https://registry.npmjs.org")?;
+        let name = PackageName::parse("@scope/pkg")?;
+
+        let url = package_metadata_url(&registry, &name)?;
+
+        assert_eq!(url.as_str(), "https://registry.npmjs.org/@scope%2fpkg");
+        Ok(())
+    }
+
+    #[test]
+    fn default_tarball_url_uses_unscoped_tarball_name() -> anyhow::Result<()> {
+        let registry = Url::parse("https://registry.npmjs.org/")?;
+        let id = PackageId::new(PackageName::parse("@scope/pkg")?, Version::parse("1.2.3")?);
+
+        let url = default_tarball_url(&registry, &id)?;
+
+        assert_eq!(
+            url.as_str(),
+            "https://registry.npmjs.org/@scope/pkg/-/pkg-1.2.3.tgz"
+        );
         Ok(())
     }
 }

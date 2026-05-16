@@ -61,9 +61,9 @@
 | 4.4  | 包硬链接策略（hardlink → copy → warn） | `store` | ✅ |
 | 4.5  | Store 原子写入（临时文件 → rename） | `store` | ⚠️ stub |
 | 4.6  | 并发安全（读写锁） | `store` | ⚠️ stub |
-| 4.7  | `orix store prune` 清理未引用包 | `store` + `cli` | 🔴 待实施 |
-| 4.8  | `orix store verify` store 完整性校验 | `store` + `cli` | 🔴 待实施 |
-| 4.9  | `orix store path` 打印 store 路径 | `cli` | 🔴 待实施 |
+| 4.7  | `orix store prune` 清理未引用包 | `store` + `cli` | ✅ |
+| 4.8  | `orix store verify` store 完整性校验 | `store` + `cli` | ✅ |
+| 4.9  | `orix store path` 打印 store 路径 | `cli` | ✅ |
 
 ---
 
@@ -76,7 +76,7 @@
 | 5.3  | 子依赖 symlink（.pnpm/pkg/node_modules/dep -> ../../dep@ver/...） | `linker` | ✅ |
 | 5.4  | 相对路径计算（platform 内依赖链接公式） | `linker` | ✅ |
 | 5.5  | Windows junction 回退（symlink 失败时） | `linker` | ⚠️ 部分完成 |
-| 5.6  | 布局验证（validate_layout，检测 broken symlink） | `linker` | ⚠️ stub |
+| 5.6  | 布局验证（validate_layout，检测 broken symlink） | `linker` | ✅ |
 | 5.7  | `orix remove` 清理（unlink + 删除 .pnpm 条目） | `linker` | ⚠️ stub |
 
 **5.6 细节：** `linker/src/linker.rs` 中 `validate_layout` 方法需要完整实现，遍历 node_modules/ 检测 broken symlink 并验证直接依赖可解析。
@@ -90,10 +90,10 @@
 | 6.1  | orix-lock.yaml 读写（serde_yaml） | `lockfile` | ✅ |
 | 6.2  | importers / packages 分离结构 | `lockfile` | ✅ |
 | 6.3  | Lockfile.update()（合并新解析结果） | `lockfile` | ✅ |
-| 6.4  | Lockfile.diff()（计算 added/removed/changed） | `lockfile` | ⚠️ stub |
+| 6.4  | Lockfile.diff()（计算 added/removed/changed） | `lockfile` | ✅ |
 | 6.5  | frozen-lockfile 验证（--frozen-lockfile） | `lockfile` | ✅ |
-| 6.6  | Lockfile 原子写入（临时文件 → rename） | `lockfile` | ⚠️ stub |
-| 6.7  | 解析结果写入 importer specifiers | `lockfile` | ⚠️ stub |
+| 6.6  | Lockfile 原子写入（临时文件 → rename） | `lockfile` | ✅ |
+| 6.7  | 解析结果写入 importer specifiers | `lockfile` | ✅ |
 
 ---
 
@@ -132,9 +132,9 @@
 |------|------|-------|------|
 | 9.1  | Config 结构体（registry, store_dir, cache_dir, etc.） | `config` | ✅ |
 | 9.2  | .npmrc 文件解析 | `config` | ⚠️ 部分完成 |
-| 9.3  | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ⚠️ stub |
-| 9.4  | 用户 ~/.npmrc 加载 | `config` | ⚠️ stub |
-| 9.5  | CLI 参数覆盖（最高优先级） | `config` | ⚠️ stub |
+| 9.3  | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ✅ |
+| 9.4  | 用户 ~/.npmrc 加载 | `config` | ✅ |
+| 9.5  | CLI 参数覆盖（最高优先级） | `config` | ✅ |
 | 9.6  | hoist-patterns / side-effects-cache 配置 | `config` | 🔴 待实施 |
 
 ---
@@ -143,8 +143,8 @@
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 10.1 | 包名规范化（normalize_name → 小写 + 规范化斜杠） | `utils` | ⚠️ stub |
-| 10.2 | 路径工具函数 | `utils` | 🔴 待实施 |
+| 10.1 | 包名规范化（normalize_name → 小写 + 规范化斜杠） | `utils` | ✅ |
+| 10.2 | 路径工具函数 | `utils` | ✅ |
 | 10.3 | 过程宏（预留） | `macros` | ⚠️ stub |
 
 ---
@@ -156,8 +156,8 @@
 | 11.1 | PackageId / Version / PackageName / VersionConstraint | `domain` | ✅ |
 | 11.2 | ResolvedPackage / DependencyGraph | `domain` | ✅ |
 | 11.3 | PackageKey / ImporterId 类型别名 | `domain` | ✅ |
-| 11.4 | Integritty string 解析器 | `domain` | 🔴 待实施 |
-| 11.5 | tarball URL builder | `domain` | 🔴 待实施 |
+| 11.4 | Integritty string 解析器 | `domain` | ✅ |
+| 11.5 | tarball URL builder | `domain` | ✅ |
 
 ---
 
@@ -167,9 +167,9 @@
 |------|------|-------|------|
 | 12.1 | manifest 解析测试（fixture: valid/invalid package.json） | `manifest` | ✅ |
 | 12.2 | resolver 单元测试（semver 选择逻辑） | `resolver` | ✅ |
-| 12.3 | store 文件去重测试 | `store` | 🔴 待实施 |
-| 12.4 | linker 布局算法测试 | `linker` | 🔴 待实施 |
-| 12.5 | lockfile 读写/diff 测试 | `lockfile` | 🔴 待实施 |
+| 12.3 | store 文件去重测试 | `store` | ✅ |
+| 12.4 | linker 布局算法测试 | `linker` | ✅ |
+| 12.5 | lockfile 读写/diff 测试 | `lockfile` | ✅ |
 | 12.6 | integration tests（真实 npm 包安装测试） | `tests/` | ✅ |
 | 12.7 | Windows CI 测试（symlink / junction 行为） | CI | 🔴 待实施 |
 
@@ -215,9 +215,9 @@
 
 ### P2 — Store 管理命令
 ```
-4.7  store prune
-4.8  store verify
-4.9  store path
+4.7  store prune ✅
+4.8  store verify ✅
+4.9  store path ✅
 ```
 
 ### P3 — Workspace 完整支持
@@ -234,19 +234,19 @@
 2.8  Registry 认证 token
 3.6  下载重试 + 指数退避
 3.7  offline 模式
-5.6  布局验证
+5.6  布局验证 ✅
 5.7  remove 清理
-6.4  lockfile diff
-6.6  lockfile 原子写入
-9.3  环境变量覆盖
+6.4  lockfile diff ✅
+6.6  lockfile 原子写入 ✅
+9.3  环境变量覆盖 ✅
 ```
 
 ### P5 — 可选增强
 ```
-10.1 包名规范化
-10.2 路径工具函数
-11.4 integrity string 解析
-11.5 tarball URL builder
+10.1 包名规范化 ✅
+10.2 路径工具函数 ✅
+11.4 integrity string 解析 ✅
+11.5 tarball URL builder ✅
 12.7 Windows CI 测试
 13.2 cargo deny
 13.3 cargo machete

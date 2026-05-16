@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 
 use orix_domain::PackageId;
 
-use super::{sha256, IntegrityMeta, PruneReport};
+use super::{sha256, IntegrityMeta, PruneReport, VerifyReport};
 
 pub const STORE_VERSION: &str = "v1";
 
@@ -170,17 +170,84 @@ impl Store {
     /// List all packages currently in the store.
     pub fn list_packages(&self) -> Result<Vec<PackageId>> {
         let mut ids = Vec::new();
-        for entry in fs::read_dir(&self.packages_root)? {
-            let entry = entry?;
-            let name = entry.file_name().into_string().unwrap_or_default();
-            if let Some((pkg_name, ver_str)) = name.rsplit_once('@') {
-                let name = orix_domain::PackageName::from(pkg_name.to_lowercase());
-                let version = orix_domain::Version::parse(ver_str)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                ids.push(orix_domain::PackageId::new(name, version));
+        for entry in WalkDir::new(&self.packages_root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() || entry.file_name() != "integrity.json" {
+                continue;
             }
+
+            let content = fs::read_to_string(entry.path())?;
+            let meta: IntegrityMeta = serde_json::from_str(&content).with_context(|| {
+                format!(
+                    "failed to parse integrity metadata at {}",
+                    entry.path().display()
+                )
+            })?;
+            let name = orix_domain::PackageName::from(meta.name);
+            let version = orix_domain::Version::parse(&meta.version)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            ids.push(orix_domain::PackageId::new(name, version));
         }
         Ok(ids)
+    }
+
+    /// Verify that every package entry and content-addressable file matches integrity metadata.
+    pub fn verify(&self) -> Result<VerifyReport> {
+        let mut report = VerifyReport::default();
+
+        for pkg_id in self.list_packages()? {
+            report.packages_checked += 1;
+            let package_path = self.package_path(&pkg_id);
+            let meta = match self.get_integrity(&pkg_id) {
+                Ok(meta) => meta,
+                Err(error) => {
+                    report.corrupted.push(format!("{}: {}", pkg_id, error));
+                    continue;
+                }
+            };
+
+            for (rel_path, hash) in meta.files {
+                report.files_checked += 1;
+                let expected_hash = hash.trim_start_matches("sha256:");
+                let package_file = package_path.join(&rel_path);
+                if !package_file.exists() {
+                    report
+                        .missing
+                        .push(format!("{}: missing package file {}", pkg_id, rel_path));
+                    continue;
+                }
+
+                let content = fs::read(&package_file)?;
+                let actual_hash = sha256(&content);
+                if actual_hash != expected_hash {
+                    report.corrupted.push(format!(
+                        "{}: package file {} hash mismatch",
+                        pkg_id, rel_path
+                    ));
+                }
+
+                let content_file = self.file_path(expected_hash);
+                if !content_file.exists() {
+                    report.missing.push(format!(
+                        "{}: missing content file sha256:{}",
+                        pkg_id, expected_hash
+                    ));
+                    continue;
+                }
+
+                let content_file_hash = sha256(&fs::read(&content_file)?);
+                if content_file_hash != expected_hash {
+                    report.corrupted.push(format!(
+                        "{}: content file sha256:{} hash mismatch",
+                        pkg_id, expected_hash
+                    ));
+                }
+            }
+        }
+
+        Ok(report)
     }
 
     /// Prune unreferenced packages from the store.
@@ -256,7 +323,9 @@ impl Store {
             if !entry.file_type().is_file() {
                 continue;
             }
-            let hash = entry.file_name().to_string_lossy().into_owned();
+            let Some(hash) = self.content_hash_for_entry(entry.path()) else {
+                continue;
+            };
             if !referenced_files.contains(&hash) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 fs::remove_file(entry.path())?;
@@ -286,7 +355,9 @@ impl Store {
             .filter_map(|e| e.ok())
         {
             if entry.file_type().is_file() {
-                let hash = entry.file_name().to_string_lossy().into_owned();
+                let Some(hash) = self.content_hash_for_entry(entry.path()) else {
+                    continue;
+                };
                 if !referenced_files.contains(&hash) {
                     count += 1;
                 }
@@ -304,6 +375,76 @@ impl Store {
             .filter(|m| m.is_file())
             .map(|m| m.len())
             .sum()
+    }
+
+    fn content_hash_for_entry(&self, path: &Path) -> Option<String> {
+        let rel = path.strip_prefix(&self.files_root).ok()?;
+        let mut components = rel.components();
+        let prefix = components.next()?.as_os_str().to_str()?;
+        let rest = components.next()?.as_os_str().to_str()?;
+        if components.next().is_some() {
+            return None;
+        }
+        Some(format!("{}{}", prefix, rest))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orix_domain::{PackageName, Version};
+
+    fn pkg_id(name: &str, version: &str) -> anyhow::Result<PackageId> {
+        Ok(PackageId::new(
+            PackageName::from(name),
+            Version::parse(version)?,
+        ))
+    }
+
+    fn write_fixture_package(root: &Path, content: &str) -> anyhow::Result<()> {
+        fs::create_dir_all(root)?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"fixture","version":"1.0.0"}"#,
+        )?;
+        fs::write(root.join("index.js"), content)?;
+        Ok(())
+    }
+
+    #[test]
+    fn import_package_deduplicates_identical_file_content() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let pkg_a_dir = temp.path().join("pkg-a");
+        let pkg_b_dir = temp.path().join("pkg-b");
+        write_fixture_package(&pkg_a_dir, "module.exports = 1;\n")?;
+        write_fixture_package(&pkg_b_dir, "module.exports = 1;\n")?;
+
+        store.import_package(&pkg_id("a", "1.0.0")?, &pkg_a_dir, Vec::new(), None)?;
+        store.import_package(&pkg_id("b", "1.0.0")?, &pkg_b_dir, Vec::new(), None)?;
+
+        let report = store.verify()?;
+
+        assert!(report.is_ok());
+        assert_eq!(report.packages_checked, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn verify_reports_missing_package_file() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let pkg_dir = temp.path().join("pkg");
+        let id = pkg_id("fixture", "1.0.0")?;
+        write_fixture_package(&pkg_dir, "module.exports = 1;\n")?;
+        store.import_package(&id, &pkg_dir, Vec::new(), None)?;
+        fs::remove_file(store.package_path(&id).join("index.js"))?;
+
+        let report = store.verify()?;
+
+        assert!(!report.is_ok());
+        assert_eq!(report.missing.len(), 1);
+        Ok(())
     }
 }
 

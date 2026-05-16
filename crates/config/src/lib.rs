@@ -36,6 +36,13 @@ pub struct Config {
     pub project_root: PathBuf,
 }
 
+/// Explicit configuration overrides, usually produced by CLI arguments.
+#[derive(Clone, Debug, Default)]
+pub struct ConfigOverrides {
+    /// Registry base URL override.
+    pub registry: Option<String>,
+}
+
 /// Color output preference.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -52,6 +59,11 @@ pub enum ColorChoice {
 impl Config {
     /// Load configuration by merging defaults, .npmrc files, and environment variables.
     pub fn load(project_root: &Path) -> Result<Self> {
+        Self::load_with_overrides(project_root, &ConfigOverrides::default())
+    }
+
+    /// Load configuration and then apply explicit overrides such as CLI arguments.
+    pub fn load_with_overrides(project_root: &Path, overrides: &ConfigOverrides) -> Result<Self> {
         let project_root = project_root
             .canonicalize()
             .unwrap_or_else(|_| project_root.to_path_buf());
@@ -88,6 +100,7 @@ impl Config {
         }
 
         config.merge_env();
+        config.merge_overrides(overrides);
 
         Ok(config)
     }
@@ -107,22 +120,30 @@ impl Config {
     }
 
     fn merge_env(&mut self) {
-        if let Ok(v) = env::var("ORIX_REGISTRY") {
+        if let Some(v) = first_env(["ORIX_REGISTRY", "RPNPM_REGISTRY"]) {
             if let Ok(u) = Url::parse(&v) {
                 self.registry = u;
             }
         }
-        if let Ok(v) = env::var("ORIX_STORE") {
+        if let Some(v) = first_env(["ORIX_STORE", "RPNPM_STORE"]) {
             self.store_dir = PathBuf::from(v);
         }
-        if let Ok(v) = env::var("ORIX_CACHE") {
+        if let Some(v) = first_env(["ORIX_CACHE", "RPNPM_CACHE"]) {
             self.cache_dir = PathBuf::from(v);
         }
-        if let Ok(v) = env::var("ORIX_CONCURRENCY") {
+        if let Some(v) = first_env(["ORIX_CONCURRENCY", "RPNPM_CONCURRENCY"]) {
             self.concurrency = v.parse().unwrap_or(self.concurrency);
         }
-        if let Ok(v) = env::var("ORIX_IGNORE_SCRIPTS") {
+        if let Some(v) = first_env(["ORIX_IGNORE_SCRIPTS", "RPNPM_IGNORE_SCRIPTS"]) {
             self.ignore_scripts = v == "true" || v == "1";
+        }
+    }
+
+    fn merge_overrides(&mut self, overrides: &ConfigOverrides) {
+        if let Some(registry) = &overrides.registry {
+            if let Ok(url) = Url::parse(registry) {
+                self.registry = url;
+            }
         }
     }
 
@@ -181,5 +202,83 @@ impl Config {
     /// Path to the node_modules directory for this project.
     pub fn node_modules_dir(&self) -> PathBuf {
         self.project_root.join("node_modules")
+    }
+}
+
+fn first_env<const N: usize>(keys: [&str; N]) -> Option<String> {
+    keys.into_iter().find_map(|key| env::var(key).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = env::var(key).ok();
+            env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn load_supports_rpnpm_env_aliases() -> anyhow::Result<()> {
+        let _lock = ENV_LOCK
+            .lock()
+            .map_err(|error| anyhow::anyhow!("env lock poisoned: {}", error))?;
+        let temp = tempfile::tempdir()?;
+        let _orix_registry = EnvGuard::remove("ORIX_REGISTRY");
+        let _orix_store = EnvGuard::remove("ORIX_STORE");
+        let _registry = EnvGuard::set("RPNPM_REGISTRY", "https://registry.example.test/");
+        let _store = EnvGuard::set("RPNPM_STORE", "D:/orix-store-test");
+
+        let config = Config::load(temp.path())?;
+
+        assert_eq!(config.registry.as_str(), "https://registry.example.test/");
+        assert_eq!(config.store_dir, PathBuf::from("D:/orix-store-test"));
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_overrides_win_over_environment() -> anyhow::Result<()> {
+        let _lock = ENV_LOCK
+            .lock()
+            .map_err(|error| anyhow::anyhow!("env lock poisoned: {}", error))?;
+        let temp = tempfile::tempdir()?;
+        let _registry = EnvGuard::set("ORIX_REGISTRY", "https://env.example.test/");
+
+        let config = Config::load_with_overrides(
+            temp.path(),
+            &ConfigOverrides {
+                registry: Some("https://cli.example.test/".to_string()),
+            },
+        )?;
+
+        assert_eq!(config.registry.as_str(), "https://cli.example.test/");
+        Ok(())
     }
 }

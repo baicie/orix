@@ -8,7 +8,7 @@ use anyhow::Result;
 use thiserror::Error;
 use url::Url;
 
-use orix_domain::PackageName;
+use orix_domain::{package_metadata_url, PackageName};
 
 /// Errors from the npm registry client.
 #[derive(Error, Debug)]
@@ -79,7 +79,7 @@ impl RegistryClient {
 
     /// Fetch the full packument for a package name.
     pub async fn fetch_packument(&self, name: &PackageName) -> Result<Packument> {
-        let url = self.base_url.join(&format!("{}/", name.as_str()))?;
+        let url = package_metadata_url(&self.base_url, name)?;
         let resp = self
             .http_client
             .get(url)

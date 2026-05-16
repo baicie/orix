@@ -929,6 +929,7 @@ dependencies = [
  "orix-domain",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "url",
 ]
@@ -964,6 +965,7 @@ dependencies = [
  "semver",
  "serde",
  "thiserror 2.0.18",
+ "url",
 ]
 
 [[package]]
@@ -1001,6 +1003,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
@@ -1015,6 +1018,7 @@ dependencies = [
  "orix-manifest",
  "serde",
  "serde_yaml",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
@@ -1075,6 +1079,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
@@ -1083,6 +1088,9 @@ dependencies = [
 [[package]]
 name = "orix-utils"
 version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "orix-workspace"
