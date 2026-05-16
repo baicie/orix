@@ -107,20 +107,20 @@ fn main() -> Result<()> {
 
     match cli.command {
         Task::Check => {
-            run("cargo", &["fmt", "--all", "--", "--check"])?;
+            run("cargo", ["fmt", "--all", "--", "--check"])?;
             run_clippy()?;
-            run("cargo", &["test", "--workspace", "--all-features"])?;
+            run("cargo", ["test", "--workspace", "--all-features"])?;
             run(
                 "cargo",
-                &["doc", "--workspace", "--all-features", "--no-deps"],
+                ["doc", "--workspace", "--all-features", "--no-deps"],
             )?;
         }
-        Task::Fmt => run("cargo", &["fmt", "--all"])?,
+        Task::Fmt => run("cargo", ["fmt", "--all"])?,
         Task::Lint => run_clippy()?,
-        Task::Test => run("cargo", &["test", "--workspace", "--all-features"])?,
+        Task::Test => run("cargo", ["test", "--workspace", "--all-features"])?,
         Task::Doc => run(
             "cargo",
-            &["doc", "--workspace", "--all-features", "--no-deps"],
+            ["doc", "--workspace", "--all-features", "--no-deps"],
         )?,
         Task::Security => {
             run_optional("cargo-deny", &["check"])?;
@@ -197,9 +197,9 @@ fn run_release(
         eprintln!("\n[1/5] Skipping checks (--dry-run). Run `cargo xtask check` manually.");
     } else {
         eprintln!("\n[1/5] Running checks...");
-        run("cargo", &["fmt", "--all", "--", "--check"])?;
+        run("cargo", ["fmt", "--all", "--", "--check"])?;
         run_clippy()?;
-        run("cargo", &["test", "--workspace", "--all-features"])?;
+        run("cargo", ["test", "--workspace", "--all-features"])?;
     }
 
     if !crates_only && !skip_crates {
@@ -214,15 +214,15 @@ fn run_release(
     if !crates_only {
         eprintln!("\n[3/5] Tagging commit: {tag}");
         if !dry_run {
-            run("git", &["tag", &tag])?;
-            run("git", &["tag", "-l", &format!("{tag_prefix}*")])?;
+            run("git", ["tag", &tag])?;
+            run("git", ["tag", "-l", &format!("{tag_prefix}*")])?;
         } else {
             eprintln!("  (dry-run) would run: git tag {tag}");
         }
 
         eprintln!("\n[4/5] Pushing tag to origin...");
         if !dry_run {
-            run("git", &["push", "origin", &tag])?;
+            run("git", ["push", "origin", &tag])?;
         } else {
             eprintln!("  (dry-run) would run: git push origin {tag}");
         }
@@ -257,16 +257,14 @@ fn run_release(
 fn run_publish_crates(version: &str, force: bool, dry_run: bool) -> Result<()> {
     let token_var = "CARGO_REGISTRY_TOKEN";
 
-    if !dry_run {
-        if std::env::var(token_var).is_err() {
-            bail!("{token_var} is not set. Set it with:\n  export {token_var}=<your-token>");
-        }
+    if !dry_run && std::env::var(token_var).is_err() {
+        bail!("{token_var} is not set. Set it with:\n  export {token_var}=<your-token>");
     }
 
     // Step 1: yank existing versions if --force
     if force && !dry_run {
         eprintln!("\n  --force: yanking existing crates at version {version} first...");
-        run_yank(&CRATE_PUBLISH_ORDER.to_vec(), version)?;
+        run_yank(CRATE_PUBLISH_ORDER, version)?;
     }
 
     // Step 2: update version in Cargo.toml files if --version override was given
@@ -289,7 +287,7 @@ fn run_publish_crates(version: &str, force: bool, dry_run: bool) -> Result<()> {
             eprintln!("\n[{idx}/{total}] Would publish {name} at {version}{extra}");
         } else {
             eprintln!("\n[{idx}/{total}] Publishing {name} at {version}...");
-            run("cargo", &["publish", "-p", name])?;
+            run("cargo", ["publish", "-p", name])?;
         }
     }
 
@@ -423,7 +421,7 @@ where
 fn run_clippy() -> Result<()> {
     run(
         "cargo",
-        &[
+        [
             "clippy",
             "--workspace",
             "--all-targets",
