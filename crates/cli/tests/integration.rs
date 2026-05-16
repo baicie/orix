@@ -5,10 +5,10 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use assert_cmd::Command;
 use flate2::write::GzEncoder;
@@ -130,19 +130,9 @@ impl MockRegistry {
         // Signal that the listener is bound and ready before the thread starts accepting.
         let ready = Arc::new(AtomicBool::new(false));
         let ready_clone = Arc::clone(&ready);
-        let deadline = Arc::new(AtomicU64::new(0));
 
         thread::spawn(move || {
             ready_clone.store(true, Ordering::Release);
-            let deadline_val = Instant::now() + Duration::from_secs(30);
-            deadline.store(
-                deadline_val
-                    .duration_since(Instant::now())
-                    .as_secs()
-                    .try_into()
-                    .unwrap_or(30),
-                Ordering::Relaxed,
-            );
             loop {
                 match listener.accept() {
                     Ok((stream, _)) => {

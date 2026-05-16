@@ -482,4 +482,68 @@ mod tests {
             .exists());
         Ok(())
     }
+
+    #[test]
+    fn unlink_removes_node_modules_directory() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let nm_dir = temp.path().join("node_modules");
+        fs::create_dir_all(&nm_dir)?;
+        fs::write(nm_dir.join("dummy.txt"), b"placeholder")?;
+
+        let linker = Linker::new(store, nm_dir.clone());
+        linker.unlink()?;
+
+        assert!(!nm_dir.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn unlink_does_not_error_when_node_modules_missing() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let nm_dir = temp.path().join("nonexistent_node_modules");
+
+        let linker = Linker::new(store, nm_dir);
+        linker.unlink()?; // Should succeed without error
+
+        Ok(())
+    }
+
+    #[test]
+    fn link_local_package_creates_symlink_to_source_directory() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let nm_dir = temp.path().join("node_modules");
+        let source_dir = temp.path().join("packages").join("local-pkg");
+        fs::create_dir_all(&source_dir)?;
+        fs::write(
+            source_dir.join("package.json"),
+            r#"{"name":"local-pkg","version":"1.0.0"}"#,
+        )?;
+
+        let linker = Linker::new(store, nm_dir.clone());
+        let created = linker.link_local_package("local-pkg", &source_dir)?;
+
+        assert_eq!(created, 1);
+        assert!(nm_dir.join("local-pkg").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn link_local_package_skips_existing_symlink() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let nm_dir = temp.path().join("node_modules");
+        fs::create_dir_all(&nm_dir)?;
+        let source_dir = temp.path().join("packages").join("local-pkg");
+        fs::create_dir_all(&source_dir)?;
+
+        let linker = Linker::new(store, nm_dir.clone());
+        linker.link_local_package("local-pkg", &source_dir)?;
+        let created = linker.link_local_package("local-pkg", &source_dir)?;
+
+        assert_eq!(created, 0); // Second call should not create again
+        Ok(())
+    }
 }

@@ -874,4 +874,124 @@ mod tests {
         assert!(lockfile.packages.contains_key("/react@18.2.0"));
         assert!(!lockfile.packages.contains_key("/vite@5.0.0"));
     }
+
+    #[test]
+    fn resolve_from_lockfile_packages_builds_graph() {
+        let mut packages = BTreeMap::new();
+        packages.insert(
+            "/react@18.2.0".to_string(),
+            PackageLock {
+                resolution: Some(PackageResolution {
+                    tarball: Some("https://registry.npmjs.org/react/-/react-18.2.0.tgz"
+                        .to_string()),
+                    integrity: Some("sha512-abc".to_string()),
+                    resolution_type: None,
+                    path: None,
+                }),
+                dependencies: BTreeMap::from([("scheduler".to_string(), "0.23.0".to_string())]),
+                optional_dependencies: BTreeMap::from([("fsevents".to_string(), "2.3.3".to_string())]),
+                id: None,
+                local: None,
+                integrity: None,
+                name: None,
+                version: None,
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+        packages.insert(
+            "/scheduler@0.23.0".to_string(),
+            PackageLock {
+                resolution: Some(PackageResolution {
+                    tarball: Some(
+                        "https://registry.npmjs.org/scheduler/-/scheduler-0.23.0.tgz"
+                            .to_string(),
+                    ),
+                    integrity: Some("sha512-xyz".to_string()),
+                    resolution_type: None,
+                    path: None,
+                }),
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+                id: None,
+                local: None,
+                integrity: None,
+                name: None,
+                version: None,
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+
+        let graph = resolve_from_lockfile_packages(&packages);
+
+        assert_eq!(graph.len(), 2);
+        let pkg_ids: Vec<_> = graph.packages().map(|p| p.id.key()).collect();
+        assert!(
+            pkg_ids.iter().any(|k| k.contains("react@18.2.0")),
+            "expected react@18.2.0 in {:?}",
+            pkg_ids
+        );
+        assert!(
+            pkg_ids.iter().any(|k| k.contains("scheduler@0.23.0")),
+            "expected scheduler@0.23.0 in {:?}",
+            pkg_ids
+        );
+    }
+
+    #[test]
+    fn resolve_from_lockfile_packages_skips_packages_without_tarball() {
+        let mut packages = BTreeMap::new();
+        packages.insert(
+            "/react@18.2.0".to_string(),
+            PackageLock {
+                resolution: Some(PackageResolution {
+                    tarball: Some("https://registry.npmjs.org/react.tgz".to_string()),
+                    integrity: None,
+                    resolution_type: None,
+                    path: None,
+                }),
+                id: None,
+                local: None,
+                integrity: None,
+                name: None,
+                version: None,
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+        // No tarball — should be skipped
+        packages.insert(
+            "/vite@5.0.0".to_string(),
+            PackageLock {
+                resolution: Some(PackageResolution {
+                    tarball: None,
+                    integrity: None,
+                    resolution_type: None,
+                    path: None,
+                }),
+                id: None,
+                local: None,
+                integrity: None,
+                name: None,
+                version: None,
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+
+        let graph = resolve_from_lockfile_packages(&packages);
+
+        assert_eq!(graph.len(), 1);
+        assert!(graph.packages().any(|p| p.id.name.as_str() == "react"));
+        assert!(!graph.packages().any(|p| p.id.name.as_str() == "vite"));
+    }
 }
