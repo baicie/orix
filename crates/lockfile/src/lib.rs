@@ -882,14 +882,18 @@ mod tests {
             "/react@18.2.0".to_string(),
             PackageLock {
                 resolution: Some(PackageResolution {
-                    tarball: Some("https://registry.npmjs.org/react/-/react-18.2.0.tgz"
-                        .to_string()),
+                    tarball: Some(
+                        "https://registry.npmjs.org/react/-/react-18.2.0.tgz".to_string(),
+                    ),
                     integrity: Some("sha512-abc".to_string()),
                     resolution_type: None,
                     path: None,
                 }),
                 dependencies: BTreeMap::from([("scheduler".to_string(), "0.23.0".to_string())]),
-                optional_dependencies: BTreeMap::from([("fsevents".to_string(), "2.3.3".to_string())]),
+                optional_dependencies: BTreeMap::from([(
+                    "fsevents".to_string(),
+                    "2.3.3".to_string(),
+                )]),
                 id: None,
                 local: None,
                 integrity: None,
@@ -905,8 +909,7 @@ mod tests {
             PackageLock {
                 resolution: Some(PackageResolution {
                     tarball: Some(
-                        "https://registry.npmjs.org/scheduler/-/scheduler-0.23.0.tgz"
-                            .to_string(),
+                        "https://registry.npmjs.org/scheduler/-/scheduler-0.23.0.tgz".to_string(),
                     ),
                     integrity: Some("sha512-xyz".to_string()),
                     resolution_type: None,

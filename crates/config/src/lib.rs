@@ -150,10 +150,7 @@ impl Config {
             self.ignore_scripts = v == "true" || v == "1";
         }
         if let Some(v) = first_env(["ORIX_HOIST_PATTERNS", "RPNPM_HOIST_PATTERNS"]) {
-            self.hoist_patterns = v
-                .split_whitespace()
-                .map(String::from)
-                .collect();
+            self.hoist_patterns = v.split_whitespace().map(String::from).collect();
         }
         if let Some(v) = first_env(["ORIX_SIDE_EFFECTS_CACHE", "RPNPM_SIDE_EFFECTS_CACHE"]) {
             self.side_effects_cache = v == "true" || v == "1";
@@ -204,10 +201,7 @@ impl Config {
             "save-exact" => self.save_exact = value == "true" || value == "1",
             "engine-strict" => self.engine_strict = value == "true" || value == "1",
             "hoist-patterns" => {
-                self.hoist_patterns = value
-                    .split_whitespace()
-                    .map(String::from)
-                    .collect();
+                self.hoist_patterns = value.split_whitespace().map(String::from).collect();
             }
             "side-effects-cache" => self.side_effects_cache = value == "true" || value == "1",
             "color" => {
@@ -324,12 +318,12 @@ mod tests {
     #[test]
     fn hoist_patterns_parsed_from_npmrc() -> anyhow::Result<()> {
         let temp = tempfile::tempdir()?;
-        fs::write(temp.path().join(".npmrc"), "hoist-patterns=@types/* *babel* *jest*")?;
+        fs::write(
+            temp.path().join(".npmrc"),
+            "hoist-patterns=@types/* *babel* *jest*",
+        )?;
         let config = Config::load(temp.path())?;
-        assert_eq!(
-            config.hoist_patterns,
-            vec!["@types/*", "*babel*", "*jest*"]
-        );
+        assert_eq!(config.hoist_patterns, vec!["@types/*", "*babel*", "*jest*"]);
         Ok(())
     }
 

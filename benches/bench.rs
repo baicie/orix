@@ -4,6 +4,8 @@
 //!
 //! For CI comparison, use: `cargo bench -- --test`
 
+#![allow(clippy::unwrap_used, clippy::missing_docs_in_private_items)]
+
 use std::collections::BTreeMap;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -69,9 +71,7 @@ fn domain_package_id_key(c: &mut Criterion) {
         Version::parse("4.17.21").unwrap(),
     );
 
-    group.bench_function("scoped_package", |b| {
-        b.iter(|| black_box(&id).key())
-    });
+    group.bench_function("scoped_package", |b| b.iter(|| black_box(&id).key()));
 
     group.bench_function("unscoped_package", |b| {
         b.iter(|| black_box(&id_unscoped).key())
@@ -204,11 +204,7 @@ fn lockfile_update_small(c: &mut Criterion) {
 
     group.bench_function("update_with_3_packages", |b| {
         b.iter(|| {
-            orix_lockfile::Lockfile::empty().update(
-                black_box(&manifest),
-                black_box(&graph),
-                ".",
-            )
+            orix_lockfile::Lockfile::empty().update(black_box(&manifest), black_box(&graph), ".")
         })
     });
 
@@ -230,10 +226,7 @@ fn lockfile_serialize(c: &mut Criterion) {
                 name: Some(name.clone()),
                 version: Some(format!("1.0.{}", i % 10)),
                 resolution: Some(orix_lockfile::PackageResolution {
-                    tarball: Some(format!(
-                        "https://registry.npmjs.org/{}/1.0.0.tgz",
-                        name
-                    )),
+                    tarball: Some(format!("https://registry.npmjs.org/{}/1.0.0.tgz", name)),
                     integrity: Some(format!("sha512-{}", name)),
                     resolution_type: None,
                     path: None,
@@ -248,9 +241,7 @@ fn lockfile_serialize(c: &mut Criterion) {
     }
 
     group.bench_function("serialize_50_packages_yaml", |b| {
-        b.iter(|| {
-            serde_yaml::to_string(black_box(&lockfile)).unwrap()
-        })
+        b.iter(|| serde_yaml::to_string(black_box(&lockfile)).unwrap())
     });
 
     group.finish();
@@ -393,23 +384,16 @@ fn store_import_package(c: &mut Criterion) {
     .unwrap();
     std::fs::write(pkg_dir.join("index.js"), "module.exports = 1;\n").unwrap();
 
-    let id = PackageId::new(
-        PackageName::from("a"),
-        Version::parse("1.0.0").unwrap(),
-    );
+    let id = PackageId::new(PackageName::from("a"), Version::parse("1.0.0").unwrap());
 
     group.bench_function("first_import_copies_files", |b| {
         b.iter(|| {
             let td = tempfile::tempdir().unwrap();
             let pd = td.path().join("pkg");
             std::fs::create_dir_all(&pd).unwrap();
-            std::fs::write(pd.join("package.json"), r#"{"name":"x","version":"1.0.0"}"#)
-                .unwrap();
+            std::fs::write(pd.join("package.json"), r#"{"name":"x","version":"1.0.0"}"#).unwrap();
             std::fs::write(pd.join("index.js"), "module.exports = 1;\n").unwrap();
-            let pkg_id = PackageId::new(
-                PackageName::from("x"),
-                Version::parse("1.0.0").unwrap(),
-            );
+            let pkg_id = PackageId::new(PackageName::from("x"), Version::parse("1.0.0").unwrap());
             store
                 .import_package(&pkg_id, &pd, Vec::new(), None)
                 .unwrap()

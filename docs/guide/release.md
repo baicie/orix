@@ -1,60 +1,88 @@
 # Release
 
-## GitHub Release
-
-Push a tag to trigger the release workflow:
+## Quick Start
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+# 1. Preview the entire release flow (no changes made)
+cargo xtask release --dry-run
+
+# 2. Run full checks before releasing
+cargo xtask check
+
+# 3. Execute the release (publish crates + git tag + push)
+cargo xtask release
+
+# Or publish crates separately
+make publish                    # show publish plan
+make publish orix_dry_run=0     # actually publish
 ```
 
-The workflow:
+## Release Flow
 
-1. Runs CI checks (fmt, clippy, test, doc)
-2. Builds multi-platform binaries (Linux, macOS, Windows)
-3. Creates a GitHub Release with attached artifacts
+```
+cargo xtask release
+  → [1/4] cargo xtask check     (fmt + clippy + test + doc)
+  → [2/4] cargo publish         (14 crates in topological order)
+  → [3/4] git tag v0.1.0
+  → [4/4] git push origin v0.1.0
+```
+
+Push of the tag triggers GitHub Actions (`release.yml`):
+
+1. Runs CI checks on Linux / Windows / macOS (x64 + ARM64)
+2. Builds release binaries for all platforms
+3. Creates a GitHub Release with attached `.tar.gz` / `.zip` artifacts
+
+## Options
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Preview steps 2-4 without making changes |
+| `--crates-only` | Only publish crates, skip git tag and push |
+| `--skip-crates` | Only create and push git tag, skip crates.io publish |
+| `--tag-prefix PREFIX` | Custom tag prefix (default: `v`) |
 
 ## Publishing to crates.io
 
+Crates are published in strict dependency topological order:
+
+```
+domain → manifest → utils → registry → store → lockfile →
+resolver → linker → workspace → fetcher → config → core → cli → macros
+```
+
 ### Prerequisites
 
-Set `CARGO_REGISTRY_TOKEN` in GitHub repository secrets (or locally):
+Set your crates.io token:
 
 ```bash
-# Local token (from crates.io account settings)
-export CARGO_REGISTRY_TOKEN=your-token-here
+export CARGO_REGISTRY_TOKEN=<your-token>
 ```
 
-### Dry Run
+Or use `cargo login <token>` once to store it in `~/.cargo/credentials.toml`.
 
-First, test the publish process without actually publishing:
+### Dry Run (recommended)
 
 ```bash
-cargo publish --manifest-path crates/your-crate/Cargo.toml --dry-run
+# Show what would be published
+cargo xtask publish-crates --dry-run
+# or
+make publish
 ```
 
-### Publishing Order
+### For Real
 
-Publish crates following dependency topology — publish leaf crates first:
-
+```bash
+make publish orix_dry_run=0
 ```
-utils → config → core → cli → macros
-```
-
-### GitHub Workflow
-
-Use the **Publish crates** workflow (manually triggered):
-
-1. Run with `dry_run = true` first
-2. Verify all steps succeed
-3. Run again with `dry_run = false`
-4. Confirm each crate publishes successfully before proceeding to dependents
 
 ## Changelog
 
 Use [git-cliff](https://github.com/orf/git-cliff) for automated changelog generation:
 
 ```bash
+cargo install git-cliff
 git-cliff --config cliff.toml --repository https://github.com/baicie/orix
 ```
+
+The GitHub Actions release workflow generates release notes automatically via `orhun/git-cliff-action`.
