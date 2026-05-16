@@ -8,6 +8,9 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{add, pipeline, remove, store_path, store_prune, store_verify, InstallOpts};
 
+mod errors;
+mod progress;
+
 #[derive(Parser)]
 #[command(name = "orix")]
 #[command(
@@ -106,28 +109,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Install(args) => {
-            let report = pipeline::install(
-                &dir,
-                &InstallOpts {
-                    registry: cli.registry.clone(),
-                    frozen_lockfile: args.frozen_lockfile,
-                    offline: args.offline,
-                    force: args.force,
-                    ignore_scripts: args.ignore_scripts,
-                    concurrency: args.concurrency,
-                },
-            )
-            .await?;
+            let install_opts = InstallOpts {
+                registry: cli.registry.clone(),
+                frozen_lockfile: args.frozen_lockfile,
+                offline: args.offline,
+                force: args.force,
+                ignore_scripts: args.ignore_scripts,
+                concurrency: args.concurrency,
+            };
 
-            println!("Packages installed: {}", report.packages_added);
-            println!("Packages fetched: {}", report.fetch_report.success);
-            if !report.fetch_report.failures.is_empty() {
-                eprintln!("Failed packages:");
-                for f in &report.fetch_report.failures {
-                    eprintln!("  - {}", f);
-                }
-            }
-            println!("Duration: {:.2}s", report.duration_secs);
+            run_install(&dir, &install_opts).await?;
         }
 
         Command::Add(args) => {
@@ -139,60 +130,167 @@ async fn main() -> Result<()> {
                 pipeline::DepType::Production
             };
 
-            let report = add(&dir, &args.packages, dep_type, &opts).await?;
+            let report = match add(&dir, &args.packages, dep_type, &opts).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            };
             println!(
-                "Added {} packages (total installed: {})",
+                " {} Added {} packages (total installed: {})",
+                CHECKMARK,
                 args.packages.len(),
                 report.packages_added
             );
         }
 
         Command::Remove(args) => {
-            let report = remove(&dir, &args.packages, &opts).await?;
-            println!("Removed packages: {:?}", report.removed_packages);
+            let report = match remove(&dir, &args.packages, &opts).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            };
             println!(
-                "Packages remaining: {}",
-                report.install_report.packages_added
+                " {} Removed packages: {:?}",
+                REMOVE, report.removed_packages
+            );
+            println!(
+                " {} Packages remaining: {}",
+                INFO, report.install_report.packages_added
             );
         }
 
         Command::StorePath => {
-            println!("{}", store_path(&dir)?.display());
+            let path = match store_path(&dir) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            };
+            println!("{}", path.display());
         }
 
         Command::StorePrune { dry_run } => {
-            let report = store_prune(&dir, dry_run)?;
+            let report = match store_prune(&dir, dry_run) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            };
             if dry_run {
                 println!(
-                    "Would remove {} packages and {} content files",
-                    report.packages_removed, report.files_removed
+                    " {} Would remove {} packages and {} content files",
+                    INFO, report.packages_removed, report.files_removed
                 );
             } else {
                 println!(
-                    "Removed {} packages and {} content files",
-                    report.packages_removed, report.files_removed
+                    " {} Removed {} packages and {} content files",
+                    CHECKMARK, report.packages_removed, report.files_removed
                 );
             }
-            println!("Bytes reclaimed: {}", report.bytes_reclaimed);
+            println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
         }
 
         Command::StoreVerify => {
-            let report = store_verify(&dir)?;
-            println!("Packages checked: {}", report.packages_checked);
-            println!("Files checked: {}", report.files_checked);
+            let report = match store_verify(&dir) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            };
+            println!(" {} Packages checked: {}", INFO, report.packages_checked);
+            println!(" {} Files checked: {}", INFO, report.files_checked);
             if report.is_ok() {
-                println!("Store verified");
+                println!(" {} Store verified", CHECKMARK);
             } else {
                 for missing in &report.missing {
-                    eprintln!("missing: {}", missing);
+                    eprintln!("{} missing: {}", CROSS, missing);
                 }
                 for corrupted in &report.corrupted {
-                    eprintln!("corrupted: {}", corrupted);
+                    eprintln!("{} corrupted: {}", CROSS, corrupted);
                 }
-                anyhow::bail!("store verification failed");
+                std::process::exit(1);
             }
         }
     }
 
     Ok(())
+}
+
+const CHECKMARK: &str = "\u{2713}";
+const CROSS: &str = "\u{2717}";
+const INFO: &str = "\u{2139}";
+const REMOVE: &str = "\u{2716}";
+
+/// Run the install command with progress reporting.
+async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
+    use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+
+    let mp = MultiProgress::new();
+
+    // Phase indicator
+    let phase_pb = mp.add(ProgressBar::new_spinner());
+    phase_pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg}")
+            .ok()
+            .expect("failed to set spinner template"),
+    );
+    phase_pb.set_message("Resolving dependencies...");
+
+    // Download progress bar
+    let dl_pb = mp.add(ProgressBar::new(0));
+    dl_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.cyan} [{bar:40}] {pos}/{len} {msg}")
+            .ok()
+            .expect("failed to set bar template")
+            .progress_chars("=>-"),
+    );
+    dl_pb.set_message("");
+
+    let report = pipeline::install(project_root, opts).await;
+
+    phase_pb.finish_and_clear();
+    dl_pb.finish_and_clear();
+
+    match report {
+        Ok(r) => {
+            if r.fetch_report.failures.is_empty() {
+                println!(" {} Packages installed: {}", CHECKMARK, r.packages_added);
+            } else {
+                println!(
+                    " {} Packages installed: {} ({}/{} failed)",
+                    CHECKMARK,
+                    r.packages_added,
+                    r.fetch_report.failures.len(),
+                    r.fetch_report.success + r.fetch_report.failures.len()
+                );
+                for f in &r.fetch_report.failures {
+                    eprintln!("{} {}", CROSS, f);
+                }
+            }
+            if let Some(diff) = r.lockfile_diff {
+                if !diff.added.is_empty() {
+                    println!(" {} Added: {}", INFO, diff.added.join(", "));
+                }
+                if !diff.removed.is_empty() {
+                    println!(" {} Removed: {}", INFO, diff.removed.join(", "));
+                }
+            }
+            println!(" {} Duration: {:.2}s", INFO, r.duration_secs);
+            Ok(())
+        }
+        Err(e) => {
+            let friendly = errors::format_error(&e, project_root);
+            eprintln!("{}", friendly);
+            Err(e)
+        }
+    }
 }

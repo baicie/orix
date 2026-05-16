@@ -157,10 +157,11 @@ fn handle_registry_request(mut stream: TcpStream, packument: &str, tarball: &[u8
     let request = String::from_utf8_lossy(&buffer[..read]);
     let first_line = request.lines().next().unwrap_or_default();
 
-    if first_line.starts_with("GET /is-number/-/is-number-1.0.0.tgz ") {
+    // Tarball: GET /is-number/-/is-number-1.0.0.tgz (check before packument due to prefix match)
+    if first_line.starts_with("GET /is-number/-/") {
         write_response(&mut stream, "application/octet-stream", tarball);
-    } else if first_line.starts_with("GET /is-number ")
-        || first_line.starts_with("GET /is-number/ ")
+    // Packument: exact match on /is-number or /is-number/
+    } else if first_line.starts_with("GET /is-number ") || first_line.starts_with("GET /is-number/")
     {
         write_response(&mut stream, "application/json", packument.as_bytes());
     } else {

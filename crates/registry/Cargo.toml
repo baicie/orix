@@ -17,6 +17,10 @@ url = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 orix-domain = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

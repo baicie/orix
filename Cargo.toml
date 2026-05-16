@@ -71,6 +71,9 @@ assert_cmd = "2"
 predicates = "3"
 pretty_assertions = "1"
 
+# ── CLI UI ──────────────────────────────────────────────────────────────────────
+indicatif = "0.17"
+
 # ── orix crate aliases (path must match actual package name) ──────────────────
 orix-cli = { path = "crates/cli", version = "0.1.0" }
 orix-core = { path = "crates/core", version = "0.1.0" }

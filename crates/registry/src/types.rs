@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 /// The full packument for a package — metadata for all versions plus dist-tags.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Packument {
     /// Package name.
     pub name: String,
@@ -17,7 +17,7 @@ pub struct Packument {
 }
 
 /// Metadata for a single published version of a package.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct PackageMetadata {
     /// Package name.
     pub name: String,
@@ -52,7 +52,7 @@ pub struct PackageMetadata {
 }
 
 /// Node/npm engine constraints.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Engines {
     /// Minimum Node version constraint.
     #[serde(default)]
@@ -60,7 +60,7 @@ pub struct Engines {
 }
 
 /// Distribution info for a published package version.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Dist {
     /// URL to the tarball.
     pub tarball: String,

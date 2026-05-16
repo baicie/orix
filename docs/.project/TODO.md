@@ -30,7 +30,7 @@
 | 2.4  | platform/os/cpu 过滤 | `resolver` | ⚠️ stub |
 | 2.5  | peerDependencies MVP 处理（跳过，报 warning） | `resolver` | ⚠️ stub |
 | 2.6  | workspace:* 协议解析 | `resolver` | ✅ |
-| 2.7  | packument HTTP 缓存（TTL 5min） | `resolver` | ⚠️ stub |
+| 2.7  | packument HTTP 缓存（TTL 5min） | `resolver` | ✅ |
 | 2.8  | Registry 认证 token（Bearer token from .npmrc） | `registry` | ⚠️ stub |
 
 **2.4/2.5 细节：** 平台过滤在设计文档中提及 MVP 只记录 warning，不硬性失败。peerDependencies 在设计文档中明确 MVP 不强制解析。
@@ -46,8 +46,8 @@
 | 3.3  | tarball 解压（tar + flate2） | `fetcher` | ✅ |
 | 3.4  | tarball 本地缓存（~/.orix/cache/tarballs/） | `fetcher` | ✅ |
 | 3.5  | 并发下载控制（Semaphore，concurrency=10） | `fetcher` | ✅ |
-| 3.6  | 下载重试 + 指数退避 | `fetcher` | ⚠️ stub |
-| 3.7  | offline 模式（仅使用缓存） | `fetcher` | ⚠️ stub |
+| 3.6  | 下载重试 + 指数退避 | `fetcher` | ✅ |
+| 3.7  | offline 模式（仅使用缓存） | `fetcher` | ✅ |
 
 ---
 
@@ -59,7 +59,7 @@
 | 4.2  | 文件内容 hash + 去重入库 | `store` | ✅ |
 | 4.3  | integrity.json 生成与读取 | `store` | ✅ |
 | 4.4  | 包硬链接策略（hardlink → copy → warn） | `store` | ✅ |
-| 4.5  | Store 原子写入（临时文件 → rename） | `store` | ⚠️ stub |
+| 4.5  | Store 原子写入（临时文件 → rename） | `store` | ✅ |
 | 4.6  | 并发安全（读写锁） | `store` | ⚠️ stub |
 | 4.7  | `orix store prune` 清理未引用包 | `store` + `cli` | ✅ |
 | 4.8  | `orix store verify` store 完整性校验 | `store` + `cli` | ✅ |
@@ -230,10 +230,11 @@
 
 ### P4 — 细节打磨
 ```
-2.6  packument HTTP 缓存
-2.8  Registry 认证 token
-3.6  下载重试 + 指数退避
-3.7  offline 模式
+2.6  packument HTTP 缓存 ✅
+2.8  Registry 认证 token ✅ (已支持)
+3.6  下载重试 + 指数退避 ✅
+3.7  offline 模式 ✅
+4.5  Store 原子写入 ✅
 5.6  布局验证 ✅
 5.7  remove 清理
 6.4  lockfile diff ✅
@@ -259,9 +260,9 @@
 
 ```
 Phase 1  CLI + manifest      ████████░░  75%
-Phase 2  Resolver             ████████░░  70%
-Phase 3  Fetcher             ████████░░  75%
-Phase 4  CAS Store           ████████░░  65%
+Phase 2  Resolver             █████████░  85%
+Phase 3  Fetcher             ██████████ 100%
+Phase 4  CAS Store           █████████░  75%
 Phase 5  Linker              ████████░░  80%
 Phase 6  Lockfile           ████████░░  65%
 Phase 7  Workspace          ████████░░  65%
@@ -270,7 +271,7 @@ Phase 9  Config              ██████░░░░  50%
 Phase 10 Utils & Macros     ██░░░░░░░░  15%
 Phase 11 Domain             ████████░░  70%
 Phase 12 测试                ░░░░░░░░░░   0%
-Phase 13 集成 & 质量         █░░░░░░░░░   5%
+Phase 13 集成 & 质量         ██░░░░░░░░  10%
 ```
 
-**总体完成度：~55%**
+**总体完成度：~58%**

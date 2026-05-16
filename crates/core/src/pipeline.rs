@@ -205,6 +205,9 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .collect();
 
     let linker = Linker::new(store, config.node_modules_dir());
+    linker
+        .unlink()
+        .with_context(|| "failed to clean old node_modules")?;
     let link_report = linker
         .link_graph(&graph, &direct_deps)
         .with_context(|| "failed to link packages")?;

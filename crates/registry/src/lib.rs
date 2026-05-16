@@ -1,8 +1,12 @@
 //! npm registry API client.
 
+mod cache;
 mod types;
 
+pub use cache::PackumentCache;
 pub use types::{Dist, PackageMetadata, Packument};
+
+use std::sync::Arc;
 
 use anyhow::Result;
 use thiserror::Error;
@@ -35,6 +39,8 @@ pub enum RegistryError {
 pub struct RegistryClient {
     base_url: Url,
     http_client: reqwest::Client,
+    /// Shared packument cache with TTL.
+    cache: Arc<PackumentCache>,
 }
 
 impl RegistryClient {
@@ -51,6 +57,7 @@ impl RegistryClient {
         Self {
             base_url,
             http_client,
+            cache: Arc::new(PackumentCache::new()),
         }
     }
 
@@ -74,11 +81,19 @@ impl RegistryClient {
         Self {
             base_url,
             http_client,
+            cache: Arc::new(PackumentCache::new()),
         }
     }
 
     /// Fetch the full packument for a package name.
+    ///
+    /// Results are cached in memory with a 5-minute TTL.
     pub async fn fetch_packument(&self, name: &PackageName) -> Result<Packument> {
+        // Check cache first
+        if let Some(cached) = self.cache.get(name.as_str()).await {
+            return Ok(cached);
+        }
+
         let url = package_metadata_url(&self.base_url, name)?;
         let resp = self
             .http_client
@@ -100,6 +115,18 @@ impl RegistryClient {
             .json()
             .await
             .map_err(|e| RegistryError::Other(e.to_string()))?;
+
+        // Cache the result
+        self.cache
+            .insert(name.as_str().to_string(), packument.clone())
+            .await;
+
         Ok(packument)
+    }
+
+    /// Returns a reference to the shared packument cache.
+    #[allow(dead_code)]
+    pub fn cache(&self) -> &Arc<PackumentCache> {
+        &self.cache
     }
 }
