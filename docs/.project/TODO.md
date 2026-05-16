@@ -77,7 +77,7 @@
 | 5.4  | 相对路径计算（platform 内依赖链接公式） | `linker` | ✅ |
 | 5.5  | Windows junction 回退（symlink 失败时） | `linker` | ⚠️ 部分完成 |
 | 5.6  | 布局验证（validate_layout，检测 broken symlink） | `linker` | ✅ |
-| 5.7  | `orix remove` 清理（unlink + 删除 .pnpm 条目） | `linker` | ⚠️ stub |
+| 5.7  | `orix remove` 清理（unlink + 删除 .pnpm 条目 + 清理 lockfile 孤立包） | `linker` + `core` + `lockfile` | ✅ |
 
 **5.6 细节：** `linker/src/linker.rs` 中 `validate_layout` 方法需要完整实现，遍历 node_modules/ 检测 broken symlink 并验证直接依赖可解析。
 
@@ -104,10 +104,10 @@
 | 7.1  | pnpm-workspace.yaml 解析 | `workspace` | ✅ |
 | 7.2  | Workspace 发现算法（glob 模式匹配） | `workspace` | ✅ |
 | 7.3  | workspace:* 协议解析 | `workspace` | ✅ |
-| 7.4  | workspace:^ / workspace:~ / workspace:>=1.0.0 协议变体 | `workspace` | 🔴 待实施 |
-| 7.5  | workspace:file:../utils 协议 | `workspace` | 🔴 待实施 |
-| 7.6  | 本地包 symlink（link_workspace_dep） | `workspace` | ⚠️ stub |
-| 7.7  | 根目录 workspace 安装（共享 orix-lock.yaml） | `workspace` | ⚠️ stub |
+| 7.4  | workspace:^ / workspace:~ / workspace:>=1.0.0 协议变体 | `workspace` | ✅ |
+| 7.5  | workspace:file:../utils 协议 | `workspace` | ✅ |
+| 7.6  | 本地包 symlink（link_local_package） | `linker` + `core` | ✅ |
+| 7.7  | 根目录 workspace 安装（收集所有包依赖并合并） | `resolver` + `core` | ✅ |
 | 7.8  | 循环 workspace 依赖检测 | `workspace` | 🔴 待实施 |
 
 ---
@@ -259,19 +259,19 @@
 ## 当前进度总览
 
 ```
-Phase 1  CLI + manifest      ████████░░  75%
-Phase 2  Resolver             █████████░  85%
+Phase 1  CLI + manifest      ████████░░  63%
+Phase 2  Resolver             ███████░░░  69%
 Phase 3  Fetcher             ██████████ 100%
-Phase 4  CAS Store           █████████░  75%
-Phase 5  Linker              ████████░░  80%
-Phase 6  Lockfile           ████████░░  65%
-Phase 7  Workspace          ████████░░  65%
-Phase 8  Pipeline           █████████░  85%
-Phase 9  Config              ██████░░░░  50%
+Phase 4  CAS Store           ██████████  94%
+Phase 5  Linker              █████████░  86%
+Phase 6  Lockfile           ██████████ 100%
+Phase 7  Workspace          ██████░░░░  63%
+Phase 8  Pipeline           █████████░  86%
+Phase 9  Config              ███░░░░░░  33%
 Phase 10 Utils & Macros     ██░░░░░░░░  15%
-Phase 11 Domain             ████████░░  70%
+Phase 11 Domain             █████████░  90%
 Phase 12 测试                ░░░░░░░░░░   0%
 Phase 13 集成 & 质量         ██░░░░░░░░  10%
 ```
 
-**总体完成度：~58%**
+**总体完成度：~73%**

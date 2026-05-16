@@ -125,17 +125,26 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             anyhow::bail!("frozen lockfile mode requires an existing lockfile");
         }
     } else {
-        // Normal mode: resolve from registry
+        // Normal mode: resolve from registry, with workspace awareness
         let mut resolver = Resolver::new(config.registry.clone());
 
-        if let Some(ref ws) = workspace {
-            let _ = ws;
-        }
+        // When running from workspace root, collect all manifests and resolve together
+        let graph = if let Some(ref ws) = workspace {
+            let mut manifests: Vec<&Manifest> = vec![&manifest];
+            manifests.extend(ws.packages.iter().map(|p| &p.manifest));
+            info!(manifests = manifests.len(), "resolving workspace manifests together");
+            resolver
+                .resolve_manifests(&manifests)
+                .await
+                .with_context(|| "failed to resolve workspace dependencies")?
+        } else {
+            resolver
+                .resolve_manifest(&manifest)
+                .await
+                .with_context(|| "failed to resolve dependencies")?
+        };
 
-        resolver
-            .resolve_manifest(&manifest)
-            .await
-            .with_context(|| "failed to resolve dependencies")?
+        graph
     };
 
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
@@ -211,6 +220,20 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let link_report = linker
         .link_graph(&graph, &direct_deps)
         .with_context(|| "failed to link packages")?;
+
+    // Link workspace local packages directly to their source directories
+    // (bypass .pnpm/ for workspace:* references)
+    if let Some(ref ws) = workspace {
+        for pkg in &ws.packages {
+            if let Some(ref name) = pkg.manifest.name {
+                let local_linked = linker.link_local_package(name, &pkg.abs_path)?;
+                if local_linked > 0 {
+                    info!(package = %name, "linked workspace local package");
+                }
+            }
+        }
+    }
+
     let layout_report = linker
         .validate_layout(&direct_deps)
         .with_context(|| "failed to validate node_modules layout")?;
@@ -350,6 +373,19 @@ pub async fn remove(
         .with_context(|| "failed to write package.json")?;
 
     let report = install(project_root, opts).await?;
+
+    // Prune orphaned packages from the lockfile after reinstall
+    let lockfile_path = project_root.join("orix-lock.yaml");
+    if lockfile_path.exists() {
+        let mut lockfile = Lockfile::read(&lockfile_path)
+            .with_context(|| "failed to read lockfile after remove")?;
+        let removed = lockfile.retain_only_referenced_packages();
+        if removed > 0 {
+            lockfile
+                .write(&lockfile_path)
+                .with_context(|| "failed to write cleaned lockfile")?;
+        }
+    }
 
     Ok(RemoveReport {
         removed_packages: removed,

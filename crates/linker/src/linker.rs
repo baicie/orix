@@ -281,6 +281,28 @@ impl Linker {
         Ok(())
     }
 
+    /// Create a top-level symlink for a local workspace package.
+    /// Links `node_modules/<pkg_name>` directly to the local source directory,
+    /// bypassing the .pnpm/ store. Returns the number of symlinks created (0 or 1).
+    pub fn link_local_package(
+        &self,
+        pkg_name: &str,
+        local_source: &Path,
+    ) -> Result<usize> {
+        let link_path = Self::package_path_in_node_modules(&self.node_modules, pkg_name);
+
+        if link_path.exists() {
+            return Ok(0);
+        }
+
+        if let Some(parent) = link_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        Self::create_symlink(local_source, &link_path)?;
+        Ok(1)
+    }
+
     /// Validate that direct dependencies and generated symlinks are resolvable.
     pub fn validate_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
         let mut report = LayoutReport::default();

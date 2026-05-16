@@ -1,5 +1,7 @@
 //! orix CLI entry point.
 
+#![allow(clippy::unwrap_used)]
+
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -239,8 +241,7 @@ async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Resu
     phase_pb.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.cyan} {msg}")
-            .ok()
-            .expect("failed to set spinner template"),
+            .unwrap(),
     );
     phase_pb.set_message("Resolving dependencies...");
 
@@ -249,8 +250,7 @@ async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Resu
     dl_pb.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.cyan} [{bar:40}] {pos}/{len} {msg}")
-            .ok()
-            .expect("failed to set bar template")
+            .unwrap()
             .progress_chars("=>-"),
     );
     dl_pb.set_message("");

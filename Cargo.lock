@@ -1100,6 +1100,7 @@ dependencies = [
  "orix-lockfile",
  "orix-manifest",
  "orix-registry",
+ "orix-workspace",
  "serde",
  "serde_json",
  "serde_yaml",

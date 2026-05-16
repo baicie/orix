@@ -438,6 +438,46 @@ impl Lockfile {
             })
             .collect()
     }
+
+    /// Remove all packages from the lockfile that are not transitively referenced
+    /// by any importer. Returns the number of packages removed.
+    pub fn retain_only_referenced_packages(&mut self) -> usize {
+        let mut referenced_keys = std::collections::HashSet::new();
+
+        for importer in self.importers.values() {
+            for (name, dep) in importer.dependencies.iter() {
+                referenced_keys.insert(format!("/{}@{}", name, dep.version));
+                for (dep_name, dep_ver) in dep.dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+            }
+            for (name, dep) in importer.dev_dependencies.iter() {
+                referenced_keys.insert(format!("/{}@{}", name, dep.version));
+                for (dep_name, dep_ver) in dep.dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+            }
+            for (name, dep) in importer.optional_dependencies.iter() {
+                referenced_keys.insert(format!("/{}@{}", name, dep.version));
+                for (dep_name, dep_ver) in dep.dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
+                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                }
+            }
+        }
+
+        let before = self.packages.len();
+        self.packages.retain(|key, _| referenced_keys.contains(key));
+        before - self.packages.len()
+    }
 }
 
 fn temporary_lockfile_path(path: &Path) -> PathBuf {
@@ -709,5 +749,69 @@ mod tests {
             Some(&"^2.3.3".to_string())
         );
         Ok(())
+    }
+
+    #[test]
+    fn retain_only_referenced_packages_removes_unused_entries() {
+        let mut lockfile = Lockfile::empty();
+
+        // Add two packages to the lockfile
+        lockfile.packages.insert(
+            "/react@18.2.0".to_string(),
+            PackageLock {
+                id: Some("registry.npmjs.org/react/18.2.0".to_string()),
+                local: None,
+                integrity: Some("sha512-react".to_string()),
+                name: Some("react".to_string()),
+                version: Some("18.2.0".to_string()),
+                resolution: None,
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+        lockfile.packages.insert(
+            "/vite@5.0.0".to_string(),
+            PackageLock {
+                id: Some("registry.npmjs.org/vite/5.0.0".to_string()),
+                local: None,
+                integrity: Some("sha512-vite".to_string()),
+                name: Some("vite".to_string()),
+                version: Some("5.0.0".to_string()),
+                resolution: None,
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+
+        // Only react is referenced by an importer
+        let mut importer = ImporterLock::default();
+        importer.dependencies.insert(
+            "react".to_string(),
+            ResolvedDep {
+                version: "18.2.0".to_string(),
+                id: Some("registry.npmjs.org/react/18.2.0".to_string()),
+                specifier: "^18.0.0".to_string(),
+                dev: Some(false),
+                optional: Some(false),
+                engines: None,
+                os: None,
+                cpu: None,
+                dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
+            },
+        );
+        lockfile.importers.insert(".".to_string(), importer);
+
+        let removed = lockfile.retain_only_referenced_packages();
+
+        assert_eq!(removed, 1);
+        assert!(lockfile.packages.contains_key("/react@18.2.0"));
+        assert!(!lockfile.packages.contains_key("/vite@5.0.0"));
     }
 }

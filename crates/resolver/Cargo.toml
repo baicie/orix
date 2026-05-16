@@ -20,6 +20,7 @@ url = { workspace = true }
 orix-domain = { workspace = true }
 orix-registry = { workspace = true }
 orix-manifest = { workspace = true }
+orix-workspace = { workspace = true }
 orix-lockfile = { workspace = true }
 
 [lints]
