@@ -56,7 +56,7 @@
 | 4.3  | integrity.json 生成与读取 | `store` | ✅ |
 | 4.4  | 包硬链接策略（hardlink → copy → warn） | `store` | ✅ |
 | 4.5  | Store 原子写入（临时文件 → rename） | `store` | ✅ |
-| 4.6  | 并发安全（读写锁） | `store` | ⚠️ stub |
+| 4.6  | 并发安全（读写锁） | `store` | ✅ |
 | 4.7  | `orix store prune` 清理未引用包 | `store` + `cli` | ✅ |
 | 4.8  | `orix store verify` store 完整性校验 | `store` + `cli` | ✅ |
 | 4.9  | `orix store path` 打印 store 路径 | `cli` | ✅ |
@@ -179,7 +179,7 @@
 | 13.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ⚠️ 模板待替换 |
 | 13.5 | 文档：README.md | ✅ |
 | 13.6 | 文档：CONTRIBUTING.md | ✅ |
-| 13.7 | 性能测试 / benchmark | 🔴 待实施 |
+| 13.7 | 性能测试 / benchmark | ✅ |
 
 ---
 
@@ -250,7 +250,7 @@
 12.7 Windows CI 测试
 13.2 cargo deny
 13.3 cargo machete ✅
-13.7 benchmark
+13.7 benchmark ✅
 ```
 
 ---
@@ -261,7 +261,7 @@
 Phase 1  CLI + manifest      ██████████ 100%
 Phase 2  Resolver            ██████████ 100%
 Phase 3  Fetcher            ██████████ 100%
-Phase 4  CAS Store           █████████░  89%
+Phase 4  CAS Store           ██████████ 100%
 Phase 5  Linker             ██████████ 100%
 Phase 6  Lockfile           ██████████ 100%
 Phase 7  Workspace          ██████████ 100%
@@ -270,7 +270,7 @@ Phase 9  Config            ██████████ 100%
 Phase 10 Utils & Macros     ██████░░░░  67%
 Phase 11 Domain            ██████████ 100%
 Phase 12 测试               ███████░░░  86%
-Phase 13 集成 & 质量       █████░░░░░  71%
+Phase 13 集成 & 质量       ██████░░░░  86%
 ```
 
-**总体完成度：~90%**
+**总体完成度：~92%**

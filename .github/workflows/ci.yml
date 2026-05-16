@@ -51,3 +51,40 @@ jobs:
         run: |
           cargo deny check
           cargo machete --with-metadata
+
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Run weekly for trending data; can also be triggered manually.
+    schedule:
+      - cron: "0 0 * * 0"
+    workflow_dispatch:
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: cargo bench --message-format=json > bench.json
+
+      - name: Upload benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "cargo"
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: true
+          alert-github-issues-filter: "from-branch"
+          save-data-file: benchmark-data.json

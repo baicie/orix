@@ -104,7 +104,13 @@ impl Manifest {
     pub fn read(path: &Path) -> Result<Self> {
         let source = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&source).with_context(|| format!("failed to parse {}", path.display()))
+        Self::parse_str(&source, path.display().to_string())
+    }
+
+    /// Parse a package.json string.
+    pub fn parse_str(source: &str, path_hint: impl Into<String>) -> Result<Self> {
+        serde_json::from_str(source)
+            .with_context(|| format!("failed to parse {}", path_hint.into()))
     }
 
     /// Write the manifest back to a package.json file.
