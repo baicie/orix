@@ -45,7 +45,7 @@
 | 3.2  | integrity 验证（sha512 / sha1，常数时间比较） | `fetcher` | ✅ |
 | 3.3  | tarball 解压（tar + flate2） | `fetcher` | ✅ |
 | 3.4  | tarball 本地缓存（~/.orix/cache/tarballs/） | `fetcher` | ✅ |
-| 3.5  | 并发下载控制（Semaphore，concurrency=10） | `fetcher` | ⚠️ stub |
+| 3.5  | 并发下载控制（Semaphore，concurrency=10） | `fetcher` | ✅ |
 | 3.6  | 下载重试 + 指数退避 | `fetcher` | ⚠️ stub |
 | 3.7  | offline 模式（仅使用缓存） | `fetcher` | ⚠️ stub |
 
@@ -91,7 +91,7 @@
 | 6.2  | importers / packages 分离结构 | `lockfile` | ✅ |
 | 6.3  | Lockfile.update()（合并新解析结果） | `lockfile` | ✅ |
 | 6.4  | Lockfile.diff()（计算 added/removed/changed） | `lockfile` | ⚠️ stub |
-| 6.5  | frozen-lockfile 验证（--frozen-lockfile） | `lockfile` | ⚠️ stub |
+| 6.5  | frozen-lockfile 验证（--frozen-lockfile） | `lockfile` | ✅ |
 | 6.6  | Lockfile 原子写入（临时文件 → rename） | `lockfile` | ⚠️ stub |
 | 6.7  | 解析结果写入 importer specifiers | `lockfile` | ⚠️ stub |
 
@@ -119,7 +119,7 @@
 | 8.1  | core::install() 完整管道编排 | `core` | ✅ |
 | 8.2  | core::add()（修改 package.json + install） | `core` | ✅ |
 | 8.3  | core::remove()（修改 package.json + install） | `core` | ✅ |
-| 8.4  | frozen-lockfile 流程（resolve from lockfile） | `core` | ⚠️ stub |
+| 8.4  | frozen-lockfile 流程（resolve from lockfile） | `core` | ✅ |
 | 8.5  | force 流程（重新获取所有包） | `core` | ⚠️ stub |
 | 8.6  | CoreError 枚举（聚合所有子 crate 错误） | `core` | ✅ |
 | 8.7  | InstallReport / FetchReport / LinkReport 结构 | `core` | ⚠️ 部分完成 |
@@ -165,12 +165,12 @@
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 12.1 | manifest 解析测试（fixture: valid/invalid package.json） | `manifest` | 🔴 待实施 |
-| 12.2 | resolver 单元测试（semver 选择逻辑） | `resolver` | 🔴 待实施 |
+| 12.1 | manifest 解析测试（fixture: valid/invalid package.json） | `manifest` | ✅ |
+| 12.2 | resolver 单元测试（semver 选择逻辑） | `resolver` | ✅ |
 | 12.3 | store 文件去重测试 | `store` | 🔴 待实施 |
 | 12.4 | linker 布局算法测试 | `linker` | 🔴 待实施 |
 | 12.5 | lockfile 读写/diff 测试 | `lockfile` | 🔴 待实施 |
-| 12.6 | integration tests（真实 npm 包安装测试） | `tests/` | 🔴 待实施 |
+| 12.6 | integration tests（真实 npm 包安装测试） | `tests/` | ✅ |
 | 12.7 | Windows CI 测试（symlink / junction 行为） | CI | 🔴 待实施 |
 
 ---
@@ -179,7 +179,7 @@
 
 | ID   | 任务 | 状态 |
 |------|------|------|
-| 13.1 | `cargo xtask check` 完整（fmt + clippy + test） | ⚠️ 需验证 |
+| 13.1 | `cargo xtask check` 完整（fmt + clippy + test） | ✅ |
 | 13.2 | `cargo deny check` CI 集成 | 🔴 待实施 |
 | 13.3 | `cargo machete` 依赖检查 | 🔴 待实施 |
 | 13.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ⚠️ 模板待替换 |
@@ -193,17 +193,17 @@
 
 ### P0 — 让 MVP 可运行（核心链路打通）
 ```
-12.6 integration tests (最简单端到端测试)
+12.6 integration tests (最简单端到端测试)✅
   ↓
-3.5  并发下载（影响安装速度）
+3.5  并发下载（影响安装速度）✅
   ↓
-6.5  frozen-lockfile 验证（CI 必需）
+6.5  frozen-lockfile 验证（CI 必需）✅
   ↓
-8.4  frozen-lockfile 流程
+8.4  frozen-lockfile 流程✅
   ↓
-12.1 manifest 解析测试
+12.1 manifest 解析测试✅
   ↓
-12.2 resolver 单元测试
+12.2 resolver 单元测试✅
 ```
 
 ### P1 — CLI 体验完善

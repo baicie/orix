@@ -16,6 +16,9 @@ crates/
 ├── lockfile         # orix-lock.yaml 读写/diff
 ├── linker           # node_modules/.pnpm 结构 + 符号链接/硬链接生成
 ├── workspace        # workspace 发现，pnpm-workspace.yaml 解析
+├── domain           # 共享领域类型
+├── utils            # 共享工具函数
+├── macros           # 过程宏预留
 └── core             # 安装管道编排
 ```
 
@@ -31,6 +34,26 @@ crates/
 | [Workspace](./workspace.md) | `crates/workspace` | Monorepo 支持：`pnpm-workspace.yaml` 解析，`workspace:*` 协议解析。 |
 | [CLI & Config](./cli-config.md) | `crates/cli` + `crates/config` | CLI 命令（`install`、`add`、`remove`、`store`），从 `.npmrc` 和环境变量加载配置。 |
 | [安装管道](./core.md) | `crates/core` | 编排完整安装流程：resolve → fetch → store → link → lockfile。 |
+| [Manifest、Domain 与 Utils](./manifest-domain-utils.md) | `crates/manifest` + `crates/domain` + `crates/utils` + `crates/macros` | `package.json` 输入模型、共享领域类型、integrity/parser、路径工具和过程宏边界。 |
+| [测试、集成与质量](./testing-quality.md) | `tests/` + CI | 测试分层、端到端 fixture、Windows 链接测试、`make check` 和质量工具。 |
+
+## TODO 覆盖情况
+
+| TODO Phase | 设计覆盖 |
+| --- | --- |
+| Phase 1 本地 manifest + CLI | [Manifest、Domain 与 Utils](./manifest-domain-utils.md)、[CLI & Config](./cli-config.md) |
+| Phase 2 Registry Resolver | [Resolver](./resolver.md)、[Registry & Fetcher](./fetcher.md) |
+| Phase 3 Fetcher | [Registry & Fetcher](./fetcher.md) |
+| Phase 4 CAS Store | [CAS Store](./store.md) |
+| Phase 5 Linker | [Linker](./linker.md) |
+| Phase 6 Lockfile | [Lockfile](./lockfile.md) |
+| Phase 7 Workspace | [Workspace](./workspace.md) |
+| Phase 8 Pipeline | [安装管道](./core.md) |
+| Phase 9 Config | [CLI & Config](./cli-config.md) |
+| Phase 10 Utils & Macros | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 11 Domain | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 12 测试 | [测试、集成与质量](./testing-quality.md) |
+| Phase 13 集成 & 质量 | [测试、集成与质量](./testing-quality.md) |
 
 ## 设计原则
 

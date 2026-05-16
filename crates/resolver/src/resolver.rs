@@ -272,3 +272,105 @@ pub fn resolve_from_lockfile_packages(
 
     graph
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    use orix_registry::{Dist, PackageMetadata, Packument};
+
+    fn resolver() -> anyhow::Result<Resolver> {
+        Ok(Resolver::new(url::Url::parse(
+            "https://registry.npmjs.org/",
+        )?))
+    }
+
+    fn packument() -> Packument {
+        let versions = ["1.0.0", "1.2.0", "1.3.0", "2.0.0"]
+            .into_iter()
+            .map(|version| {
+                (
+                    version.to_string(),
+                    PackageMetadata {
+                        name: "demo".to_string(),
+                        version: version.to_string(),
+                        dependencies: HashMap::new(),
+                        dev_dependencies: HashMap::new(),
+                        optional_dependencies: HashMap::new(),
+                        peer_dependencies: HashMap::new(),
+                        engines: None,
+                        os: Vec::new(),
+                        cpu: Vec::new(),
+                        dist: Dist {
+                            tarball: format!(
+                                "https://registry.npmjs.org/demo/-/demo-{}.tgz",
+                                version
+                            ),
+                            integrity: Some(format!("sha512-{}", version)),
+                            shasum: None,
+                        },
+                        optional: false,
+                    },
+                )
+            })
+            .collect();
+
+        Packument {
+            name: "demo".to_string(),
+            versions,
+            dist_tags: HashMap::from([
+                ("latest".to_string(), "2.0.0".to_string()),
+                ("next".to_string(), "1.3.0".to_string()),
+            ]),
+        }
+    }
+
+    #[test]
+    fn select_version_returns_exact_version() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected =
+            resolver.select_version(&packument(), &VersionConstraint::parse("1.2.0")?)?;
+
+        assert_eq!(selected.to_string(), "1.2.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_returns_highest_matching_range() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected =
+            resolver.select_version(&packument(), &VersionConstraint::parse("^1.0.0")?)?;
+
+        assert_eq!(selected.to_string(), "1.3.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_uses_latest_dist_tag() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected =
+            resolver.select_version(&packument(), &VersionConstraint::parse("latest")?)?;
+
+        assert_eq!(selected.to_string(), "2.0.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_uses_named_dist_tag() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected = resolver.select_version(&packument(), &VersionConstraint::parse("next")?)?;
+
+        assert_eq!(selected.to_string(), "1.3.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_errors_when_range_has_no_match() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let result = resolver.select_version(&packument(), &VersionConstraint::parse("^3.0.0")?);
+
+        assert!(result.is_err());
+        Ok(())
+    }
+}

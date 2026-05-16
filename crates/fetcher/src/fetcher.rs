@@ -50,7 +50,7 @@ impl Fetcher {
         graph: &DependencyGraph,
         concurrency: usize,
     ) -> Result<FetchReport> {
-        let sem = Arc::new(Semaphore::new(concurrency));
+        let sem = Arc::new(Semaphore::new(concurrency.max(1)));
         let mut handles = Vec::new();
 
         for pkg in graph.packages() {

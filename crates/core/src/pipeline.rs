@@ -102,33 +102,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let graph = if opts.frozen_lockfile {
         // Frozen lockfile mode: verify lockfile matches manifest, use lockfile packages directly
         if let Some(ref lf) = old_lockfile {
-            let importer = lf.importers.get(".");
-
-            // Check that all manifest deps are in the lockfile with matching specifiers
-            for (name, constraint) in manifest
-                .dependencies
-                .iter()
-                .chain(manifest.dev_dependencies.iter())
-            {
-                let spec = importer.and_then(|i| i.specifiers.get(name));
-                match spec {
-                    Some(spec) if spec != constraint => {
-                        anyhow::bail!(
-                            "Lockfile mismatch: '{}' specifier is '{}' in lockfile but '{}' in package.json",
-                            name,
-                            spec,
-                            constraint
-                        );
-                    }
-                    None => {
-                        anyhow::bail!(
-                            "Lockfile mismatch: '{}' is declared but not in lockfile",
-                            name
-                        );
-                    }
-                    _ => {}
-                }
-            }
+            lf.validate_frozen(&manifest, ".")
+                .with_context(|| "frozen lockfile validation failed")?;
 
             let g = resolve_from_lockfile_packages(&lf.packages);
             info!(packages = g.len(), "resolved from lockfile (frozen mode)");
@@ -155,9 +130,14 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let fetcher = Fetcher::new(tarball_cache, store.clone())
         .with_offline(opts.offline)
         .with_force(opts.force);
+    let concurrency = if opts.concurrency == 0 {
+        config.concurrency
+    } else {
+        opts.concurrency
+    };
 
     let fetch_report = fetcher
-        .fetch_all(&graph, opts.concurrency)
+        .fetch_all(&graph, concurrency)
         .await
         .with_context(|| "failed to fetch packages")?;
 

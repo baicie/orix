@@ -340,4 +340,165 @@ impl Lockfile {
             importers_changed: Vec::new(),
         }
     }
+
+    /// Validate that this lockfile exactly matches the manifest dependency specifiers.
+    pub fn validate_frozen(
+        &self,
+        manifest: &orix_manifest::Manifest,
+        importer_id: &str,
+    ) -> anyhow::Result<()> {
+        let importer = self.importers.get(importer_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Lockfile mismatch: importer '{}' is missing from lockfile",
+                importer_id
+            )
+        })?;
+
+        validate_dependency_group(
+            "dependencies",
+            &manifest.dependencies,
+            &importer.dependencies,
+            importer_id,
+        )?;
+        validate_dependency_group(
+            "devDependencies",
+            &manifest.dev_dependencies,
+            &importer.dev_dependencies,
+            importer_id,
+        )?;
+        validate_dependency_group(
+            "optionalDependencies",
+            &manifest.optional_dependencies,
+            &importer.optional_dependencies,
+            importer_id,
+        )?;
+
+        Ok(())
+    }
+}
+
+fn validate_dependency_group(
+    group_name: &str,
+    manifest_deps: &BTreeMap<String, String>,
+    locked_deps: &BTreeMap<String, ResolvedDep>,
+    importer_id: &str,
+) -> anyhow::Result<()> {
+    for (name, constraint) in manifest_deps {
+        let locked = locked_deps.get(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Lockfile mismatch: '{}' is declared in {} for importer '{}' but not in lockfile",
+                name,
+                group_name,
+                importer_id
+            )
+        })?;
+
+        if locked.specifier != *constraint {
+            anyhow::bail!(
+                "Lockfile mismatch: '{}' specifier is '{}' in lockfile but '{}' in package.json",
+                name,
+                locked.specifier,
+                constraint
+            );
+        }
+    }
+
+    for name in locked_deps.keys() {
+        if !manifest_deps.contains_key(name) {
+            anyhow::bail!(
+                "Lockfile mismatch: '{}' exists in {} for importer '{}' but is not declared in package.json",
+                name,
+                group_name,
+                importer_id
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orix_manifest::Manifest;
+
+    fn resolved_dep(version: &str, specifier: &str) -> ResolvedDep {
+        ResolvedDep {
+            version: version.to_string(),
+            specifier: specifier.to_string(),
+            id: None,
+            dev: None,
+            optional: None,
+            engines: None,
+            os: None,
+            cpu: None,
+            dependencies: BTreeMap::new(),
+            optional_dependencies: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn frozen_validation_accepts_matching_dependency_groups() {
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("react".to_string(), "^18.2.0".to_string());
+        manifest
+            .dev_dependencies
+            .insert("vite".to_string(), "^5.0.0".to_string());
+        manifest
+            .optional_dependencies
+            .insert("fsevents".to_string(), "^2.3.3".to_string());
+
+        let mut importer = ImporterLock::default();
+        importer
+            .dependencies
+            .insert("react".to_string(), resolved_dep("18.2.0", "^18.2.0"));
+        importer
+            .dev_dependencies
+            .insert("vite".to_string(), resolved_dep("5.0.0", "^5.0.0"));
+        importer
+            .optional_dependencies
+            .insert("fsevents".to_string(), resolved_dep("2.3.3", "^2.3.3"));
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.importers.insert(".".to_string(), importer);
+
+        assert!(lockfile.validate_frozen(&manifest, ".").is_ok());
+    }
+
+    #[test]
+    fn frozen_validation_rejects_changed_specifier() {
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("react".to_string(), "^19.0.0".to_string());
+
+        let mut importer = ImporterLock::default();
+        importer
+            .dependencies
+            .insert("react".to_string(), resolved_dep("18.2.0", "^18.2.0"));
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.importers.insert(".".to_string(), importer);
+
+        let result = lockfile.validate_frozen(&manifest, ".");
+        assert!(matches!(result, Err(error) if error.to_string().contains("specifier")));
+    }
+
+    #[test]
+    fn frozen_validation_rejects_stale_locked_dependency() {
+        let manifest = Manifest::default();
+
+        let mut importer = ImporterLock::default();
+        importer
+            .dependencies
+            .insert("react".to_string(), resolved_dep("18.2.0", "^18.2.0"));
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.importers.insert(".".to_string(), importer);
+
+        let result = lockfile.validate_frozen(&manifest, ".");
+        assert!(matches!(result, Err(error) if error.to_string().contains("not declared")));
+    }
 }

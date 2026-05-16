@@ -216,6 +216,17 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_package_json_returns_path_context() -> anyhow::Result<()> {
+        let tmp = tempfile::NamedTempFile::with_suffix(".json")?;
+        std::fs::write(tmp.path(), r#"{"name":"broken""#)?;
+
+        let error = Manifest::read(tmp.path()).err();
+
+        assert!(matches!(error, Some(error) if error.to_string().contains("failed to parse")));
+        Ok(())
+    }
+
+    #[test]
     fn test_bin_field_shorthand() {
         let shorthand = BinField::Shorthand("./bin/cli.js".into());
         let entries = shorthand.entries("my-pkg");

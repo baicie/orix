@@ -151,11 +151,16 @@ impl VersionConstraint {
                 kind: ConstraintKind::Range(req),
             })
         } else {
-            let v = Version::parse(&raw)?;
-            Ok(Self {
-                raw: raw.clone(),
-                kind: ConstraintKind::Exact(v),
-            })
+            match Version::parse(&raw) {
+                Ok(v) => Ok(Self {
+                    raw: raw.clone(),
+                    kind: ConstraintKind::Exact(v),
+                }),
+                Err(_) => Ok(Self {
+                    raw: raw.clone(),
+                    kind: ConstraintKind::Tag(raw.clone()),
+                }),
+            }
         }
     }
 
@@ -450,5 +455,18 @@ pub fn symlink_available() -> bool {
     #[cfg(not(windows))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_constraint_parse_treats_bare_non_semver_as_dist_tag() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("next")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::Tag(tag) if tag == "next"));
+        Ok(())
     }
 }
