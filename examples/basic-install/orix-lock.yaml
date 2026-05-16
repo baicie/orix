@@ -1,0 +1,134 @@
+lockfileVersion: 1
+saveRemoteCacheURLs: true
+importers:
+  .:
+    dependencies:
+      is-even:
+        version: 1.0.0
+        specifier: ^1.0.0
+        id: registry.npmjs.org/is-even/1.0.0
+        dev: false
+        optional: false
+        engines: '>=0.10.0'
+        os: []
+        cpu: []
+        dependencies:
+          is-odd: ^0.1.2
+        optionalDependencies: {}
+      left-pad:
+        version: 1.3.0
+        specifier: ^1.3.0
+        id: registry.npmjs.org/left-pad/1.3.0
+        dev: false
+        optional: false
+        engines: null
+        os: []
+        cpu: []
+        dependencies: {}
+        optionalDependencies: {}
+    devDependencies: {}
+    optionalDependencies: {}
+    specifiers:
+      is-even: ^1.0.0
+      left-pad: ^1.3.0
+packages:
+  /is-buffer@1.1.6:
+    id: registry.npmjs.org/is-buffer/1.1.6
+    local: null
+    integrity: sha512-NcdALwpXkTm5Zvvbk7owOUSvVvBKDgKP5/ewfXEznmQFfs4ZRmanOeKBTjRVjka3QFoN6XJ+9F3USqfHqTaU5w==
+    name: is-buffer
+    version: 1.1.6
+    resolution:
+      tarball: https://registry.npmmirror.com/is-buffer/-/is-buffer-1.1.6.tgz
+      integrity: sha512-NcdALwpXkTm5Zvvbk7owOUSvVvBKDgKP5/ewfXEznmQFfs4ZRmanOeKBTjRVjka3QFoN6XJ+9F3USqfHqTaU5w==
+      type: null
+      path: null
+    dependencies: {}
+    optionalDependencies: {}
+    engines: null
+    os: []
+    cpu: []
+  /is-even@1.0.0:
+    id: registry.npmjs.org/is-even/1.0.0
+    local: null
+    integrity: sha512-LEhnkAdJqic4Dbqn58A0y52IXoHWlsueqQkKfMfdEnIYG8A1sm/GHidKkS6yvXlMoRrkM34csHnXQtOqcb+Jzg==
+    name: is-even
+    version: 1.0.0
+    resolution:
+      tarball: https://registry.npmmirror.com/is-even/-/is-even-1.0.0.tgz
+      integrity: sha512-LEhnkAdJqic4Dbqn58A0y52IXoHWlsueqQkKfMfdEnIYG8A1sm/GHidKkS6yvXlMoRrkM34csHnXQtOqcb+Jzg==
+      type: null
+      path: null
+    dependencies:
+      is-odd: ^0.1.2
+    optionalDependencies: {}
+    engines: '>=0.10.0'
+    os: []
+    cpu: []
+  /is-number@3.0.0:
+    id: registry.npmjs.org/is-number/3.0.0
+    local: null
+    integrity: sha512-4cboCqIpliH+mAvFNegjZQ4kgKc3ZUhQVr3HvWbSh5q3WH2v82ct+T2Y1hdU5Gdtorx/cLifQjqCbL7bpznLTg==
+    name: is-number
+    version: 3.0.0
+    resolution:
+      tarball: https://registry.npmmirror.com/is-number/-/is-number-3.0.0.tgz
+      integrity: sha512-4cboCqIpliH+mAvFNegjZQ4kgKc3ZUhQVr3HvWbSh5q3WH2v82ct+T2Y1hdU5Gdtorx/cLifQjqCbL7bpznLTg==
+      type: null
+      path: null
+    dependencies:
+      kind-of: ^3.0.2
+    optionalDependencies: {}
+    engines: '>=0.10.0'
+    os: []
+    cpu: []
+  /is-odd@0.1.2:
+    id: registry.npmjs.org/is-odd/0.1.2
+    local: null
+    integrity: sha512-Ri7C2K7o5IrUU9UEI8losXJCCD/UtsaIrkR5sxIcFg4xQ9cRJXlWA5DQvTE0yDc0krvSNLsRGXN11UPS6KyfBw==
+    name: is-odd
+    version: 0.1.2
+    resolution:
+      tarball: https://registry.npmmirror.com/is-odd/-/is-odd-0.1.2.tgz
+      integrity: sha512-Ri7C2K7o5IrUU9UEI8losXJCCD/UtsaIrkR5sxIcFg4xQ9cRJXlWA5DQvTE0yDc0krvSNLsRGXN11UPS6KyfBw==
+      type: null
+      path: null
+    dependencies:
+      is-number: ^3.0.0
+    optionalDependencies: {}
+    engines: '>=0.10.0'
+    os: []
+    cpu: []
+  /kind-of@3.2.2:
+    id: registry.npmjs.org/kind-of/3.2.2
+    local: null
+    integrity: sha512-NOW9QQXMoZGg/oqnVNoNTTIFEIid1627WCffUBJEdMxYApq7mNE7CpzucIPc+ZQg25Phej7IJSmX3hO+oblOtQ==
+    name: kind-of
+    version: 3.2.2
+    resolution:
+      tarball: https://registry.npmmirror.com/kind-of/-/kind-of-3.2.2.tgz
+      integrity: sha512-NOW9QQXMoZGg/oqnVNoNTTIFEIid1627WCffUBJEdMxYApq7mNE7CpzucIPc+ZQg25Phej7IJSmX3hO+oblOtQ==
+      type: null
+      path: null
+    dependencies:
+      is-buffer: ^1.1.5
+    optionalDependencies: {}
+    engines: '>=0.10.0'
+    os: []
+    cpu: []
+  /left-pad@1.3.0:
+    id: registry.npmjs.org/left-pad/1.3.0
+    local: null
+    integrity: sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==
+    name: left-pad
+    version: 1.3.0
+    resolution:
+      tarball: https://registry.npmmirror.com/left-pad/-/left-pad-1.3.0.tgz
+      integrity: sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==
+      type: null
+      path: null
+    dependencies: {}
+    optionalDependencies: {}
+    engines: null
+    os: []
+    cpu: []
