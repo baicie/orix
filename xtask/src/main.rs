@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Topological order for publishing crates to crates.io.
@@ -117,6 +117,18 @@ enum Task {
         #[arg(long)]
         output: Option<std::path::PathBuf>,
     },
+    /// Build a Windows MSI installer using WiX Toolset.
+    ///
+    /// Downloads WiX automatically if not found. Creates an MSI with
+    /// path-selection UI, Start Menu shortcut, and desktop shortcut.
+    Msi {
+        /// Override the version (defaults to Cargo.toml version).
+        #[arg(long, value_name = "X.Y.Z")]
+        version: Option<String>,
+        /// Output directory (defaults to dist/).
+        #[arg(long)]
+        output: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -186,6 +198,10 @@ fn main() -> Result<()> {
         } => {
             let version = resolve_version(version)?;
             run_dist(&version, bins_only, output.as_deref())?;
+        }
+        Task::Msi { version, output } => {
+            let version = resolve_version(version)?;
+            run_msi(&version, output.as_deref())?;
         }
     }
 
@@ -622,6 +638,180 @@ fn package_tarball(version: &str, bin_path: &Path, dist_dir: &Path) -> Result<()
     tar.finish().context("failed to finalize tarball")?;
 
     eprintln!("  Created: {}", archive_path.display());
+    Ok(())
+}
+
+/// Build a Windows MSI installer using WiX Toolset.
+fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
+    if !cfg!(windows) {
+        bail!("MSI packaging is only supported on Windows");
+    }
+
+    let dist_root = output_dir.unwrap_or_else(|| Path::new("dist"));
+    let wix_path = find_or_install_wix()?;
+
+    eprintln!("=== MSI: orix v{version} ===");
+    eprintln!("[1/3] Building release binary...");
+    run("cargo", ["build", "--release", "--package", "orix-cli"])?;
+
+    let bin_path = Path::new("target/release/orix.exe");
+    if !bin_path.exists() {
+        bail!("binary not found at {}", bin_path.display());
+    }
+
+    let wix_src = PathBuf::from("packaging/wix/Product.wxs");
+    let wix_compiled = PathBuf::from("packaging/wix/Product_compiled.wxs");
+    let wix_obj = PathBuf::from("packaging/wix/Product_compiled.wixobj");
+    let msi_path = dist_root.join(format!("orix-{version}-x86_64-pc-windows-msvc.msi"));
+
+    fs::create_dir_all(dist_root).context("failed to create dist directory")?;
+
+    eprintln!("[2/3] Preparing WXS...");
+    let wxs_content = fs::read_to_string(&wix_src)
+        .with_context(|| format!("failed to read {}", wix_src.display()))?;
+    let wxs_content = wxs_content.replace("$(var.Version)", version).replace(
+        "$(var.SourceDir)",
+        &std::env::current_dir()
+            .context("failed to get current directory")?
+            .to_string_lossy(),
+    );
+    fs::write(&wix_compiled, wxs_content)
+        .with_context(|| format!("failed to write {}", wix_compiled.display()))?;
+
+    eprintln!("[3/3] Compiling MSI...");
+    let candle = wix_path.join("candle.exe");
+    let light = wix_path.join("light.exe");
+
+    run_with_output(
+        &candle,
+        [
+            "-nologo",
+            "-out",
+            &wix_obj.to_string_lossy(),
+            &wix_compiled.to_string_lossy(),
+        ],
+    )?;
+    run_with_output(
+        &light,
+        [
+            "-nologo",
+            "-ext",
+            "WixUIExtension",
+            "-out",
+            &msi_path.to_string_lossy(),
+            &wix_obj.to_string_lossy(),
+        ],
+    )?;
+
+    eprintln!("\n=== Done! ===");
+    eprintln!("  MSI: {}", msi_path.display());
+    eprintln!("  Run the MSI to install with path-selection UI.");
+
+    Ok(())
+}
+
+/// Find WiX Toolset in PATH or install it to a temp directory.
+fn find_or_install_wix() -> Result<PathBuf> {
+    // Check PATH first
+    if let Ok(path) = which::which("candle.exe") {
+        if which::which("light.exe").is_ok() {
+            #[allow(clippy::expect_used)]
+            let dir = path
+                .parent()
+                .expect("candle.exe has a parent dir")
+                .to_path_buf();
+            eprintln!("  Using WiX from PATH: {}", dir.display());
+            return Ok(dir);
+        }
+    }
+
+    // Check common install location
+    let program_files = std::env::var("WIX").ok();
+    if let Some(wix) = program_files {
+        let path = PathBuf::from(&wix);
+        if path.join("candle.exe").exists() {
+            eprintln!("  Using WiX from WIX env: {}", path.display());
+            return Ok(path);
+        }
+    }
+
+    // Download and extract WiX
+    eprintln!("  WiX not found, downloading...");
+    let wix_version = "wix3141rtm";
+    let temp_dir = std::env::temp_dir().join(format!("wix-{wix_version}"));
+    let zip_path = temp_dir.join("wix.zip");
+    let extracted_path = temp_dir.join("wix314");
+
+    if !extracted_path.join("candle.exe").exists() {
+        fs::create_dir_all(&temp_dir).context("failed to create WiX temp directory")?;
+
+        eprintln!("  Downloading WiX {wix_version}...");
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .context("failed to build HTTP client")?;
+        let mut resp = client
+            .get(format!(
+                "https://github.com/wixtoolset/wix3/releases/download/{wix_version}/wix314-binaries.zip"
+            ))
+            .send()
+            .context("failed to download WiX")?;
+
+        let mut file = File::create(&zip_path).context("failed to create WiX zip file")?;
+        resp.copy_to(&mut file).context("failed to write WiX zip")?;
+
+        eprintln!("  Extracting WiX...");
+        let zip_file = File::open(&zip_path)?;
+        let mut archive =
+            zip::ZipArchive::new(zip_file).context("failed to read WiX zip archive")?;
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .with_context(|| format!("failed to read zip entry {i}"))?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => temp_dir.join(path),
+                None => continue,
+            };
+            if file.name().ends_with('/') {
+                fs::create_dir_all(&outpath)?;
+            } else {
+                if let Some(parent) = outpath.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut outfile = File::create(&outpath)?;
+                std::io::copy(&mut file, &mut outfile)?;
+            }
+        }
+    }
+
+    let wix_bin = extracted_path.join("bin");
+    eprintln!("  WiX ready: {}", wix_bin.display());
+    Ok(wix_bin)
+}
+
+/// Run a command and capture its stdout/stderr to print on error.
+fn run_with_output<I, A>(cmd: impl AsRef<Path>, args: I) -> Result<()>
+where
+    I: IntoIterator<Item = A>,
+    A: AsRef<std::ffi::OsStr>,
+{
+    let cmd = cmd.as_ref();
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned())
+        .collect();
+    let args_str = args.join(" ");
+    let output = Command::new(cmd)
+        .args(&args)
+        .output()
+        .with_context(|| format!("failed to run {} {}", cmd.display(), args_str))?;
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        bail!("command failed: {} {}", cmd.display(), args_str);
+    }
+
     Ok(())
 }
 
