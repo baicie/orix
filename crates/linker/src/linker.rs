@@ -127,23 +127,21 @@ impl Linker {
                 .chain(pkg.optional_dependencies.iter())
             {
                 if let Some(dep_key) = name_to_key.get(dep_name.as_str()) {
-                    let symlink_target = PathBuf::from("..")
-                        .join("..")
-                        .join("..")
-                        .join("..")
-                        .join(dep_key)
-                        .join("node_modules")
-                        .join(dep_name.as_str());
                     let symlink_path = Self::package_path_in_node_modules(
                         &pkg_dir.join("node_modules"),
+                        dep_name.as_str(),
+                    );
+                    let target = Self::package_path_in_node_modules(
+                        &virtual_store_dir.join(dep_key).join("node_modules"),
                         dep_name.as_str(),
                     );
 
                     if !symlink_path.exists() {
                         if let Some(parent) = symlink_path.parent() {
                             fs::create_dir_all(parent)?;
+                            let symlink_target = relative_path(parent, &target);
+                            Self::create_symlink(&symlink_target, &symlink_path)?;
                         }
-                        Self::create_symlink(&symlink_target, &symlink_path)?;
                         report.symlinks_created += 1;
                     }
                 }
@@ -392,6 +390,42 @@ impl Linker {
     }
 }
 
+fn relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
+    let from_components = normal_components(from_dir);
+    let to_components = normal_components(to_path);
+    let common_len = from_components
+        .iter()
+        .zip(to_components.iter())
+        .take_while(|(from, to)| from == to)
+        .count();
+
+    let mut result = PathBuf::new();
+    for _ in common_len..from_components.len() {
+        result.push("..");
+    }
+    for component in &to_components[common_len..] {
+        result.push(component);
+    }
+
+    if result.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        result
+    }
+}
+
+fn normal_components(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => part.to_str().map(ToOwned::to_owned),
+            std::path::Component::ParentDir => Some("..".to_string()),
+            std::path::Component::CurDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,6 +554,50 @@ mod tests {
             .join("node_modules")
             .join("@scope")
             .join("pkg")
+            .exists());
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_supports_scoped_transitive_dependencies() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "@scope/parent", "1.0.0")?;
+        import_package(&store, temp.path(), "@scope/child", "1.0.0")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package(
+            "@scope/parent",
+            "1.0.0",
+            vec![("@scope/child", "1.0.0")],
+        )?);
+        graph.insert(resolved_package("@scope/child", "1.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["@scope/parent".to_string()]);
+        linker.link_graph(&graph, &direct_deps)?;
+
+        let report = linker.validate_layout(&direct_deps)?;
+
+        assert!(report.is_ok(), "{:?}", report.broken);
+        assert!(!temp
+            .path()
+            .join("node_modules")
+            .join("@scope")
+            .join("child")
+            .exists());
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("@scope")
+            .join("parent@1.0.0")
+            .join("node_modules")
+            .join("@scope")
+            .join("parent")
+            .join("node_modules")
+            .join("@scope")
+            .join("child")
             .exists());
         Ok(())
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{mpsc, Semaphore};
 use tracing::{debug, info_span, warn};
 
 use orix_domain::{check_platform_compatibility, DependencyGraph};
@@ -20,6 +20,15 @@ pub struct Fetcher {
     offline: bool,
     /// If true, bypass cache and re-fetch all packages.
     force: bool,
+}
+
+/// Progress events emitted while fetching packages.
+#[derive(Debug, Clone)]
+pub enum FetchEvent {
+    /// A package was fetched, extracted, and imported into the store.
+    PackageFetched(String),
+    /// A package failed during fetch, extraction, or import.
+    PackageFailed(String),
 }
 
 impl Fetcher {
@@ -53,6 +62,7 @@ impl Fetcher {
         &self,
         graph: &DependencyGraph,
         concurrency: usize,
+        progress_tx: Option<mpsc::Sender<FetchEvent>>,
     ) -> Result<FetchReport> {
         let sem = Arc::new(Semaphore::new(concurrency.max(1)));
         let mut handles = Vec::new();
@@ -79,6 +89,7 @@ impl Fetcher {
             let depnodes = pkg.depnodes.clone();
             let offline = self.offline;
             let force = self.force;
+            let progress_tx = progress_tx.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await?;
@@ -91,6 +102,10 @@ impl Fetcher {
                     Ok(t) => t,
                     Err(e) => {
                         warn!(package = %pkg_id, "failed to fetch tarball: {}", e);
+                        if let Some(tx) = &progress_tx {
+                            let _ = tx
+                                .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, e)));
+                        }
                         return Err(e);
                     }
                 };
@@ -99,6 +114,10 @@ impl Fetcher {
                 if let Err(e) = extract_tarball(&tarball, temp_dir.path()) {
                     let error = e.context(format!("failed to extract tarball for {}", pkg_id));
                     warn!(package = %pkg_id, "failed to extract tarball: {}", error);
+                    if let Some(tx) = &progress_tx {
+                        let _ = tx
+                            .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
+                    }
                     return Err(error);
                 }
                 debug!(package = %pkg_id, "importing into store");
@@ -108,9 +127,16 @@ impl Fetcher {
                     let error =
                         e.context(format!("failed to import package {} into store", pkg_id));
                     warn!(package = %pkg_id, "failed to import package: {}", error);
+                    if let Some(tx) = &progress_tx {
+                        let _ = tx
+                            .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
+                    }
                     return Err(error);
                 }
                 debug!(package = %pkg_id, "success");
+                if let Some(tx) = &progress_tx {
+                    let _ = tx.try_send(FetchEvent::PackageFetched(pkg_id.to_string()));
+                }
                 Ok::<_, anyhow::Error>(pkg_id)
             });
             handles.push(handle);

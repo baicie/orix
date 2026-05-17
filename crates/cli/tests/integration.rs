@@ -207,6 +207,46 @@ fn cache_commands_accept_cli_cache_dir_override() {
 }
 
 #[test]
+fn install_with_package_name_adds_dependency() {
+    let tarball = make_package_tarball();
+    let integrity = format!("sha512-{}", base64_encode_sha512(&tarball));
+    let registry = MockRegistry::start(tarball, integrity);
+
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture-app",
+  "version": "1.0.0"
+}"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("orix").unwrap();
+    cmd.arg("--registry")
+        .arg(registry.base_url())
+        .arg("--store-dir")
+        .arg(store.path())
+        .arg("--cache-dir")
+        .arg(cache.path())
+        .arg("-C")
+        .arg(project.path())
+        .arg("i")
+        .arg("is-number")
+        .env("ORIX_LOG", "error")
+        .assert()
+        .success()
+        .stdout(contains("Added 1 packages"));
+
+    let manifest = fs::read_to_string(project.path().join("package.json")).unwrap();
+    assert!(manifest.contains(r#""dependencies""#));
+    assert!(manifest.contains(r#""is-number": "*""#));
+    assert!(project.path().join("orix-lock.yaml").exists());
+}
+
+#[test]
 fn install_fetches_package_from_mock_registry() {
     let tarball = make_package_tarball();
     let integrity = format!("sha512-{}", base64_encode_sha512(&tarball));

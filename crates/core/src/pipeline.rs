@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, info_span};
 
-use orix_fetcher::{Fetcher, TarballCache};
+use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
 use orix_linker::{LinkReport, Linker};
 use orix_lockfile::{resolve_from_lockfile_packages, Lockfile};
 use orix_manifest::Manifest;
@@ -23,20 +23,53 @@ pub use orix_config::{Config, ConfigOverrides};
 /// Progress event emitted during install.
 #[derive(Debug, Clone)]
 pub enum InstallEvent {
+    /// Install metadata is available for rendering.
+    Started {
+        /// Registry URL used for resolution and downloads.
+        registry: String,
+        /// Number of direct dependencies declared by the root manifest.
+        direct_dependencies: usize,
+    },
     /// Total number of packages to resolve.
     ResolvingTotal(usize),
     /// A package is being resolved.
     ResolvingPackage(String),
+    /// Dependency resolution has completed.
+    Resolved {
+        /// Number of packages in the resolved graph.
+        total_packages: usize,
+    },
     /// Total number of packages to fetch.
     FetchingTotal(usize),
-    /// A package is being downloaded.
+    /// A package has been fetched, extracted, and imported.
     FetchingPackage(String),
     /// A package failed to download.
     FetchFailure(String),
+    /// Fetching has completed.
+    Fetched {
+        /// Number of packages successfully fetched.
+        success: usize,
+        /// Number of packages considered for fetching.
+        total: usize,
+    },
     /// Packages are being linked.
     Linking,
+    /// Packages have been linked.
+    Linked,
     /// Lockfile is being written.
     WritingLockfile,
+    /// Lockfile write/check completed.
+    LockfileDone {
+        /// Whether the lockfile changed.
+        changed: bool,
+    },
+    /// Install has finished successfully.
+    Finished {
+        /// Wall-clock time in seconds.
+        duration_secs: f64,
+    },
+    /// Install failed before completion.
+    Failed,
 }
 
 /// Options for the install command.
@@ -148,6 +181,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let direct_dependency_count = manifest.dependencies.len() + manifest.dev_dependencies.len();
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::Started {
+            registry: config.registry.to_string(),
+            direct_dependencies: direct_dependency_count,
+        },
+    );
 
     let workspace = match Workspace::discover(project_root.to_path_buf()) {
         Ok(ws) if !ws.packages.is_empty() => Some(ws),
@@ -231,6 +271,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
         graph
     };
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::Resolved {
+            total_packages: graph.len(),
+        },
+    );
 
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
     let tarball_cache = TarballCache::new(config.cache_dir.clone());
@@ -244,22 +290,33 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     };
 
     send_event(&opts.progress_tx, InstallEvent::FetchingTotal(graph.len()));
-    for pkg in graph.packages() {
-        let name = pkg.id.name.to_string();
-        send_event(&opts.progress_tx, InstallEvent::FetchingPackage(name));
-    }
+    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
+    let install_progress_tx = opts.progress_tx.clone();
+    let fetch_progress_forwarder = tokio::spawn(async move {
+        while let Some(event) = fetch_progress_rx.recv().await {
+            match event {
+                FetchEvent::PackageFetched(package) => {
+                    send_event(&install_progress_tx, InstallEvent::FetchingPackage(package))
+                }
+                FetchEvent::PackageFailed(failure) => {
+                    send_event(&install_progress_tx, InstallEvent::FetchFailure(failure));
+                }
+            }
+        }
+    });
 
     let fetch_report = fetcher
-        .fetch_all(&graph, concurrency)
+        .fetch_all(&graph, concurrency, Some(fetch_progress_tx))
         .await
         .with_context(|| "failed to fetch packages")?;
-
-    for failure in &fetch_report.failures {
-        send_event(
-            &opts.progress_tx,
-            InstallEvent::FetchFailure(failure.clone()),
-        );
-    }
+    let _ = fetch_progress_forwarder.await;
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::Fetched {
+            success: fetch_report.success,
+            total: graph.len(),
+        },
+    );
 
     info!(
         success = fetch_report.success,
@@ -289,6 +346,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let link_report = linker
         .link_graph(&graph, &direct_deps)
         .with_context(|| "failed to link packages")?;
+    send_event(&opts.progress_tx, InstallEvent::Linked);
 
     // Link workspace local packages directly to their source directories
     // (bypass .orix/ for workspace:* references)
@@ -353,9 +411,21 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     } else {
         None
     };
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::LockfileDone {
+            changed: lockfile_changed,
+        },
+    );
 
     let duration = start.elapsed();
     info!(duration_ms = duration.as_millis(), "install complete");
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::Finished {
+            duration_secs: duration.as_secs_f64(),
+        },
+    );
 
     Ok(InstallReport {
         registry: config.registry.to_string(),

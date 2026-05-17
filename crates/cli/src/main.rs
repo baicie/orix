@@ -1,15 +1,17 @@
 //! orix CLI entry point.
 
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{
     add, cache_clean_with_overrides, cache_path_with_overrides, install, pipeline, remove,
     store_path_with_overrides, store_prune_with_overrides, store_verify_with_overrides,
-    ConfigOverrides, InstallOpts,
+    ConfigOverrides, InstallEvent, InstallOpts,
 };
 
 mod errors;
@@ -82,16 +84,30 @@ enum CacheCommand {
 
 #[derive(Args)]
 struct InstallArgs {
+    /// Fail if the lockfile is missing or out of date.
     #[arg(long)]
     frozen_lockfile: bool,
+    /// Use only locally cached packages.
     #[arg(long)]
     offline: bool,
+    /// Re-fetch packages regardless of cache.
     #[arg(long)]
     force: bool,
+    /// Skip lifecycle scripts.
     #[arg(long)]
     ignore_scripts: bool,
+    /// Number of concurrent package fetches.
     #[arg(long, default_value = "10")]
     concurrency: usize,
+    /// Save named packages as dev dependencies.
+    #[arg(short = 'D')]
+    dev: bool,
+    /// Save named packages as optional dependencies.
+    #[arg(short = 'O')]
+    optional: bool,
+    /// Package names or specs to add before installing.
+    #[arg(trailing_var_arg = true)]
+    packages: Vec<String>,
 }
 
 #[derive(Args)]
@@ -161,9 +177,62 @@ async fn main() -> Result<()> {
                 progress_tx: None,
             };
 
-            if let Err(e) = run_install(&dir, &install_opts).await {
-                eprintln!("{}", errors::format_error(&e, &dir));
-                std::process::exit(1);
+            if args.packages.is_empty() {
+                if args.dev || args.optional {
+                    eprintln!(
+                        "{}",
+                        errors::format_error(
+                            &anyhow::anyhow!(
+                                "-D and -O can only be used when installing package names"
+                            ),
+                            &dir
+                        )
+                    );
+                    std::process::exit(1);
+                }
+
+                if let Err(e) = run_install(&dir, &install_opts).await {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            } else {
+                if args.frozen_lockfile {
+                    eprintln!(
+                        "{}",
+                        errors::format_error(
+                            &anyhow::anyhow!(
+                                "--frozen-lockfile cannot be used when installing package names"
+                            ),
+                            &dir
+                        )
+                    );
+                    std::process::exit(1);
+                }
+
+                let dep_type = if args.dev {
+                    pipeline::DepType::Dev
+                } else if args.optional {
+                    pipeline::DepType::Optional
+                } else {
+                    pipeline::DepType::Production
+                };
+
+                let run = match run_add(&dir, &args.packages, dep_type, &install_opts).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("{}", errors::format_error(&e, &dir));
+                        std::process::exit(1);
+                    }
+                };
+                if !run.rendered_summary {
+                    print_summary(&run.report);
+                }
+                println!(
+                    " {} Added {} packages (total installed: {})",
+                    CHECKMARK,
+                    args.packages.len(),
+                    run.report.packages_added
+                );
             }
         }
 
@@ -176,18 +245,21 @@ async fn main() -> Result<()> {
                 pipeline::DepType::Production
             };
 
-            let report = match add(&dir, &args.packages, dep_type, &opts).await {
+            let run = match run_add(&dir, &args.packages, dep_type, &opts).await {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
                     std::process::exit(1);
                 }
             };
+            if !run.rendered_summary {
+                print_summary(&run.report);
+            }
             println!(
                 " {} Added {} packages (total installed: {})",
                 CHECKMARK,
                 args.packages.len(),
-                report.packages_added
+                run.report.packages_added
             );
         }
 
@@ -232,6 +304,7 @@ const CHECKMARK: &str = "\u{2713}";
 const CROSS: &str = "\u{2717}";
 const INFO: &str = "\u{2139}";
 const REMOVE: &str = "\u{2716}";
+const CURRENT: &str = "\u{25CF}";
 
 fn print_store_path(project_root: &std::path::Path, overrides: &ConfigOverrides) {
     let path = match store_path_with_overrides(project_root, overrides) {
@@ -323,14 +396,250 @@ fn print_cache_clean(project_root: &std::path::Path, overrides: &ConfigOverrides
 
 /// Run the install command and print the final install summary.
 async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
-    let mut install_opts = opts.clone();
-    install_opts.progress_tx = None;
-
-    let report = install(project_root, &install_opts).await?;
-    print_summary(&report);
+    let run = run_with_progress(opts.clone(), |install_opts| async move {
+        install(project_root, &install_opts).await
+    })
+    .await?;
+    if !run.rendered_summary {
+        print_summary(&run.report);
+    }
     Ok(())
 }
 
+async fn run_add(
+    project_root: &std::path::Path,
+    packages: &[String],
+    dep_type: pipeline::DepType,
+    opts: &InstallOpts,
+) -> Result<InstallRun> {
+    run_with_progress(opts.clone(), |install_opts| async move {
+        add(project_root, packages, dep_type, &install_opts).await
+    })
+    .await
+}
+
+struct InstallRun {
+    report: orix_core::InstallReport,
+    rendered_summary: bool,
+}
+
+async fn run_with_progress<F, Fut>(mut opts: InstallOpts, operation: F) -> Result<InstallRun>
+where
+    F: FnOnce(InstallOpts) -> Fut,
+    Fut: std::future::Future<Output = Result<orix_core::InstallReport>>,
+{
+    let render_progress = io::stdout().is_terminal();
+    if !render_progress {
+        opts.progress_tx = None;
+        let report = operation(opts).await?;
+        return Ok(InstallRun {
+            report,
+            rendered_summary: false,
+        });
+    }
+
+    let (tx, mut rx) = mpsc::channel(128);
+    opts.progress_tx = Some(tx.clone());
+
+    let reporter = tokio::spawn(async move {
+        let mut progress = InstallProgress::default();
+        while let Some(event) = rx.recv().await {
+            progress.on_event(event);
+        }
+    });
+
+    let result = operation(opts).await;
+    if result.is_err() {
+        let _ = tx.send(InstallEvent::Failed).await;
+    }
+    drop(tx);
+    let _ = reporter.await;
+    result.map(|report| InstallRun {
+        report,
+        rendered_summary: true,
+    })
+}
+
+#[derive(Default)]
+struct InstallProgress {
+    registry: Option<String>,
+    direct_dependencies: Option<usize>,
+    total_packages: Option<usize>,
+    resolved: bool,
+    fetch_total: usize,
+    fetch_seen: usize,
+    fetched: bool,
+    fetch_failed: bool,
+    linking: bool,
+    linked: bool,
+    writing_lockfile: bool,
+    lockfile_changed: Option<bool>,
+    duration_secs: Option<f64>,
+    failed: bool,
+    rendered_lines: usize,
+}
+
+impl InstallProgress {
+    fn on_event(&mut self, event: InstallEvent) {
+        match event {
+            InstallEvent::Started {
+                registry,
+                direct_dependencies,
+            } => {
+                self.registry = Some(registry);
+                self.direct_dependencies = Some(direct_dependencies);
+                self.render();
+            }
+            InstallEvent::ResolvingTotal(_) => self.render(),
+            InstallEvent::ResolvingPackage(_) => {}
+            InstallEvent::Resolved { total_packages } => {
+                self.resolved = true;
+                self.total_packages = Some(total_packages);
+                self.render();
+            }
+            InstallEvent::FetchingTotal(total) => {
+                self.fetch_total = total;
+                self.fetch_seen = 0;
+                self.render();
+            }
+            InstallEvent::FetchingPackage(_) => {
+                self.fetch_seen += 1;
+                self.render();
+            }
+            InstallEvent::FetchFailure(failure) => {
+                self.fetch_failed = true;
+                self.render();
+                eprintln!("{} Failed to fetch {}", CROSS, failure);
+            }
+            InstallEvent::Fetched { success, total } => {
+                self.fetch_seen = success;
+                self.fetch_total = total;
+                self.fetched = true;
+                self.render();
+            }
+            InstallEvent::Linking => {
+                self.linking = true;
+                self.render();
+            }
+            InstallEvent::Linked => {
+                self.linked = true;
+                self.render();
+            }
+            InstallEvent::WritingLockfile => {
+                self.writing_lockfile = true;
+                self.render();
+            }
+            InstallEvent::LockfileDone { changed } => {
+                self.lockfile_changed = Some(changed);
+                self.render();
+            }
+            InstallEvent::Finished { duration_secs } => {
+                self.duration_secs = Some(duration_secs);
+                self.render();
+                println!();
+            }
+            InstallEvent::Failed => {
+                self.failed = true;
+                self.render();
+                println!();
+            }
+        }
+    }
+
+    fn render(&mut self) {
+        let lines = self.lines();
+        let mut stdout = io::stdout();
+        if self.rendered_lines > 0 {
+            let _ = write!(stdout, "\x1b[{}A", self.rendered_lines);
+        }
+        for line in &lines {
+            let _ = writeln!(stdout, "\x1b[2K\r{}", line);
+        }
+        let _ = stdout.flush();
+        self.rendered_lines = lines.len();
+    }
+
+    fn lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            "orix install".to_string(),
+            "----------------------------------------".to_string(),
+            String::new(),
+            format!(
+                "Packages: +{} direct, +{} total",
+                self.direct_dependencies
+                    .map_or_else(|| "?".to_string(), |value| value.to_string()),
+                self.total_packages
+                    .map_or_else(|| "?".to_string(), |value| value.to_string())
+            ),
+            format!(
+                "Registry: {}",
+                self.registry.as_deref().unwrap_or("resolving")
+            ),
+            String::new(),
+        ];
+
+        lines.push(format!(
+            "{} Resolved dependencies",
+            if !self.resolved && self.failed {
+                CROSS
+            } else if self.resolved {
+                CHECKMARK
+            } else {
+                CURRENT
+            }
+        ));
+
+        if self.fetch_total > 0 || self.fetched || self.fetch_failed {
+            let symbol = if self.fetch_failed || (!self.fetched && self.failed) {
+                CROSS
+            } else if self.fetched {
+                CHECKMARK
+            } else {
+                CURRENT
+            };
+            let total = self
+                .fetch_total
+                .max(self.total_packages.unwrap_or_default());
+            lines.push(format!(
+                "{} Fetched packages {}/{}",
+                symbol, self.fetch_seen, total
+            ));
+        }
+
+        if self.linking || self.linked {
+            lines.push(format!(
+                "{} Linked dependencies",
+                if !self.linked && self.failed {
+                    CROSS
+                } else if self.linked {
+                    CHECKMARK
+                } else {
+                    CURRENT
+                }
+            ));
+        }
+
+        if let Some(changed) = self.lockfile_changed {
+            if changed {
+                lines.push(format!("{} Updated lockfile", CHECKMARK));
+            } else {
+                lines.push(format!("{} Lockfile unchanged", CHECKMARK));
+            }
+        } else if self.writing_lockfile {
+            lines.push(format!(
+                "{} Writing lockfile",
+                if self.failed { CROSS } else { CURRENT }
+            ));
+        }
+
+        if let Some(duration_secs) = self.duration_secs {
+            lines.push(String::new());
+            lines.push(format!("Done in {:.2}s", duration_secs));
+        }
+
+        lines
+    }
+}
 fn print_summary(report: &orix_core::InstallReport) {
     print_install_header();
     println!(

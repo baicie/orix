@@ -4,7 +4,7 @@ mod cache;
 mod fetcher;
 
 pub use cache::TarballCache;
-pub use fetcher::{FetchReport, Fetcher};
+pub use fetcher::{FetchEvent, FetchReport, Fetcher};
 
 use std::fs;
 use std::path::{Path, PathBuf};
