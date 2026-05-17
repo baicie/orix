@@ -4,16 +4,14 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{
     add, install, pipeline, remove, store_path_with_overrides, store_prune_with_overrides,
-    store_verify_with_overrides, ConfigOverrides, InstallEvent, InstallOpts,
+    store_verify_with_overrides, ConfigOverrides, InstallOpts,
 };
 
 mod errors;
-mod progress;
 
 #[derive(Parser)]
 #[command(name = "orix")]
@@ -25,7 +23,7 @@ struct Cli {
     #[arg(long, global = true, env = "ORIX_REGISTRY")]
     registry: Option<String>,
 
-    #[arg(long, global = true, default_value = "info", env = "ORIX_LOG")]
+    #[arg(long, global = true, default_value = "warn", env = "ORIX_LOG")]
     log: String,
 
     #[arg(long, short = 'C', default_value = ".", env = "ORIX_DIR")]
@@ -97,7 +95,7 @@ enum ColorChoice {
 }
 
 fn init_tracing(level: &str) {
-    let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("warn"));
     fmt().with_env_filter(filter).init();
 }
 
@@ -252,82 +250,41 @@ const CROSS: &str = "\u{2717}";
 const INFO: &str = "\u{2139}";
 const REMOVE: &str = "\u{2716}";
 
-/// Spawns a task that drains install events from the channel and renders them.
-fn spawn_event_renderer(mut rx: mpsc::Receiver<InstallEvent>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut renderer = progress::ProgressRenderer::new();
-        while let Some(event) = rx.recv().await {
-            match event {
-                InstallEvent::FetchingPackage(name) => {
-                    renderer.fetched_package(name);
-                }
-                _ => {
-                    renderer.handle(event);
-                }
-            }
-        }
-    })
-}
-
-/// Run the install command with a live progress renderer.
+/// Run the install command and print the final install summary.
 async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
-    let (tx, rx) = mpsc::channel::<InstallEvent>(100);
-
     let mut install_opts = opts.clone();
-    install_opts.progress_tx = Some(tx);
+    install_opts.progress_tx = None;
 
-    // Start the event renderer task.
-    let renderer_handle = spawn_event_renderer(rx);
-
-    // Run install; the pipeline sends events through `progress_tx`.
-    let report = match install(project_root, &install_opts).await {
-        Ok(report) => report,
-        Err(error) => {
-            drop(install_opts.progress_tx);
-            renderer_handle.await?;
-            return Err(error);
-        }
-    };
-
-    // Drop the sender so the channel closes and the renderer task exits cleanly.
-    drop(install_opts.progress_tx);
-
-    // Wait for the renderer to finish draining any remaining events.
-    renderer_handle.await?;
-
+    let report = install(project_root, &install_opts).await?;
     print_summary(&report);
     Ok(())
 }
 
 fn print_summary(report: &orix_core::InstallReport) {
+    print_install_header();
+    println!(
+        "Packages: +{} direct, +{} total",
+        report.direct_dependencies, report.packages_added
+    );
+    println!("Registry: {}", report.registry);
     println!();
-
-    if report.fetch_report.failures.is_empty() {
-        println!(
-            " {} Packages installed: {}",
-            CHECKMARK, report.packages_added
-        );
+    println!("{} Resolved dependencies", CHECKMARK);
+    println!(
+        "{} Fetched packages {}/{}",
+        CHECKMARK, report.fetch_report.success, report.packages_added
+    );
+    println!("{} Linked dependencies", CHECKMARK);
+    if report.lockfile_changed {
+        println!("{} Updated lockfile", CHECKMARK);
     } else {
-        println!(
-            " {} Packages installed: {} ({}/{} failed)",
-            CHECKMARK,
-            report.packages_added,
-            report.fetch_report.failures.len(),
-            report.fetch_report.success + report.fetch_report.failures.len()
-        );
-        for f in &report.fetch_report.failures {
-            eprintln!("{} {}", CROSS, f);
-        }
+        println!("{} Lockfile unchanged", CHECKMARK);
     }
+    println!();
+    println!("Done in {:.2}s", report.duration_secs);
+}
 
-    if let Some(diff) = &report.lockfile_diff {
-        if !diff.added.is_empty() {
-            println!(" {} Added: {}", INFO, diff.added.join(", "));
-        }
-        if !diff.removed.is_empty() {
-            println!(" {} Removed: {}", INFO, diff.removed.join(", "));
-        }
-    }
-
-    println!(" {} Duration: {:.2}s", INFO, report.duration_secs);
+fn print_install_header() {
+    println!("orix install");
+    println!("----------------------------------------");
+    println!();
 }

@@ -1,4 +1,4 @@
-//! node_modules/.pnpm structure and symlink/hardlink generation.
+//! node_modules/.orix structure and symlink/hardlink generation.
 
 mod linker;
 

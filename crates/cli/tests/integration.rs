@@ -220,8 +220,12 @@ fn install_fetches_package_from_mock_registry() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Packages installed: 1"),
-        "expected 'Packages installed: 1' in output"
+        stdout.contains("Packages: +1 direct, +1 total"),
+        "expected package summary in output"
+    );
+    assert!(
+        stdout.contains("Done in"),
+        "expected install duration in output"
     );
 
     assert!(project.path().join("orix-lock.yaml").exists());

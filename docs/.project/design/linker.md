@@ -11,7 +11,7 @@
 ```
 project-root/
 ├── node_modules/
-│   ├── .pnpm/                           # 物理包文件
+│   ├── .orix/                           # 物理包文件
 │   │   ├── react@18.2.0/
 │   │   │   └── node_modules/
 │   │   │       └── react/               # 包文件（从 store 硬链接）
@@ -25,38 +25,38 @@ project-root/
 │   │       └── node_modules/
 │   │           └── loose-envify/
 │   │
-│   ├── react -> .pnpm/react@18.2.0/node_modules/react
-│   ├── react-dom -> .pnpm/react-dom@18.2.0/node_modules/react-dom
-│   └── .pnpmfile.cjs                    #（未来：支持 pnpmfile）
+│   ├── react -> .orix/react@18.2.0/node_modules/react
+│   ├── react-dom -> .orix/react-dom@18.2.0/node_modules/react-dom
+│   └── .orixfile.cjs                    #（未来：支持 orixfile）
 │
 └── package.json
 ```
 
 ## 符号链接约定
 
-pnpm 布局使用符号链接从物理存储构建虚拟模块树：
+Orix 虚拟 store 布局使用符号链接从物理存储构建虚拟模块树：
 
 | 类型 | 源 | 目标 |
 |------|-----|------|
-| 项目依赖 | `node_modules/<pkg>` | `.pnpm/<pkg>@<ver>/node_modules/<pkg>` |
-| 平台内依赖 | `.pnpm/<pkg>@<ver>/node_modules/<dep>` | `../../<dep>@<ver>/node_modules/<dep>` |
+| 项目依赖 | `node_modules/<pkg>` | `.orix/<pkg>@<ver>/node_modules/<pkg>` |
+| 平台内依赖 | `.orix/<pkg>@<ver>/node_modules/<dep>` | `../../<dep>@<ver>/node_modules/<dep>` |
 
-这意味着任何包中的 `require('react')` 解析到 `node_modules/react`，它符号链接到 `.pnpm/react@18.2.0/node_modules/react`。
+这意味着任何包中的 `require('react')` 解析到 `node_modules/react`，它符号链接到 `.orix/react@18.2.0/node_modules/react`。
 
 ## 布局算法
 
 给定 `DependencyGraph`，linker 通过两遍生成符号链接：
 
-### 第一遍：物理布局（.pnpm/）
+### 第一遍：物理布局（.orix/）
 
 对图中的每个 `PackageNode`：
 
 ```
-1. 创建 .pnpm/<name>@<version>/node_modules/<name>/
+1. 创建 .orix/<name>@<version>/node_modules/<name>/
 2. 将 store/packages/<name>@<version>/files/ 中的所有文件硬链接（或复制）到此目录
 3. 对该包的每个声明依赖 dep：
    a. 在图中定位 dep 的 ResolvedPackage
-   b. 在 .pnpm/<name>@<version>/node_modules/<dep_name> 创建符号链接
+   b. 在 .orix/<name>@<version>/node_modules/<dep_name> 创建符号链接
       指向 ../../<dep_name>@<dep_version>/node_modules/<dep_name>
 ```
 
@@ -64,9 +64,9 @@ pnpm 布局使用符号链接从物理存储构建虚拟模块树：
 
 ```rust
 fn relative_symlink_target(dep: &PackageId, parent: &PackageId, root: &Path) -> PathBuf {
-    let dep_physical = root.join(".pnpm").join(format!("{}@{}", dep.name, dep.version))
+    let dep_physical = root.join(".orix").join(format!("{}@{}", dep.name, dep.version))
         .join("node_modules").join(&dep.name);
-    let parent_physical = root.join(".pnpm").join(format!("{}@{}", parent.name, parent.version))
+    let parent_physical = root.join(".orix").join(format!("{}@{}", parent.name, parent.version))
         .join("node_modules");
     rel_path(&dep_physical, &parent_physical)
 }
@@ -77,7 +77,7 @@ fn relative_symlink_target(dep: &PackageId, parent: &PackageId, root: &Path) -> 
 对项目中 `package.json` 的每个**直接**（非传递）依赖：
 
 ```
-node_modules/<name> -> .pnpm/<name>@<version>/node_modules/<name>
+node_modules/<name> -> .orix/<name>@<version>/node_modules/<name>
 ```
 
 传递依赖**不会**符号链接到根目录——它们只能通过显式依赖链访问（严格隔离）。
@@ -186,10 +186,10 @@ impl Linker {
         direct_deps: &HashMap<String, VersionConstraint>,
     ) -> Result<LinkReport>;
 
-    /// 删除此项目生成的所有链接和 .pnpm/ 内容
+    /// 删除此项目生成的所有链接和 .orix/ 内容
     pub fn unlink(&self) -> Result<()>;
 
-    /// 清理不再被引用的 .pnpm/ 条目
+    /// 清理不再被引用的 .orix/ 条目
     pub fn prune_stale(&self, referenced: &HashSet<PackageId>) -> Result<PruneReport>;
 }
 ```
@@ -213,7 +213,7 @@ pub struct LinkReport {
 运行 `orix remove <pkg>` 时：
 
 1. 删除 `node_modules/<pkg>` 符号链接
-2. 删除 `node_modules/.pnpm/<pkg>@<ver>/` 目录树
+2. 删除 `node_modules/.orix/<pkg>@<ver>/` 目录树
 3. 更新 `orix-lock.yaml`
 4. 如果包不再被使用，可选触发 store 清理
 

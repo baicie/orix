@@ -110,9 +110,9 @@ mod tests {
 
     #[test]
     fn relative_path_moves_between_sibling_directories() {
-        let from = Path::new("node_modules").join(".pnpm").join("a");
+        let from = Path::new("node_modules").join(".orix").join("a");
         let to = Path::new("node_modules")
-            .join(".pnpm")
+            .join(".orix")
             .join("b")
             .join("pkg");
 

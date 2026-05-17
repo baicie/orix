@@ -1,10 +1,10 @@
 # orix
 
-高性能 Rust 包管理器，采用 pnpm 兼容设计。
+高性能 Rust 包管理器，参考 pnpm 的隔离布局思路。
 
 ## 特性
 
-- **pnpm 兼容**：生成 `node_modules/.pnpm` 结构，支持 workspace 协议
+- **Orix 虚拟 store**：生成 `node_modules/.orix` 结构，支持 workspace 协议
 - **全局 CAS 缓存**：内容可寻址存储，跨项目复用 tarball 文件
 - **快速安装**：并发下载 + 文件级去重 + 硬链接
 - **Lockfile**：可重现安装，支持 `--frozen-lockfile` 在 CI 中验证
@@ -54,7 +54,7 @@ crates/
 ├── fetcher      # tarball 下载与解压
 ├── store        # 内容可寻址全局缓存
 ├── lockfile     # orix-lock.yaml 管理
-├── linker       # node_modules/.pnpm 结构生成
+├── linker       # node_modules/.orix 结构生成
 ├── workspace    # workspace 发现与循环依赖检测
 ├── utils        # 共享工具函数
 └── macros       # 过程宏（预留）
@@ -102,7 +102,7 @@ orix install
   → Fetcher.fetch_all()  并发下载 tarball
   → Store.import_package()  CAS 去重 + 硬链接
   → Lockfile.update()   写入 orix-lock.yaml
-  → Linker.link_graph() 生成 .pnpm 结构
+  → Linker.link_graph() 生成 .orix 结构
 ```
 
 ## 状态
@@ -114,7 +114,7 @@ orix 正在积极开发中。MVP 聚焦以下能力：
 - npm registry 拉包
 - tarball 下载、完整性校验、解压
 - CAS 全局缓存
-- node_modules/.pnpm 结构生成
+- node_modules/.orix 结构生成
 - 根依赖和子依赖链接
 - workspace 最小支持
 

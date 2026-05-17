@@ -1,6 +1,6 @@
 [package]
 name = "orix-linker"
-description = "node_modules/.pnpm structure and symlink/hardlink generation."
+description = "node_modules/.orix structure and symlink/hardlink generation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

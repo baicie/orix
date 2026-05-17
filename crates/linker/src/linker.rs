@@ -14,7 +14,9 @@ use orix_store::Store;
 
 use super::{LayoutReport, LinkReport};
 
-/// The linker creates the pnpm-style node_modules structure using hardlinks and symlinks.
+const VIRTUAL_STORE_DIR: &str = ".orix";
+
+/// The linker creates the Orix virtual node_modules structure using hardlinks and symlinks.
 pub struct Linker {
     store: Store,
     node_modules: PathBuf,
@@ -42,8 +44,8 @@ impl Linker {
             bytes_saved: 0,
         };
 
-        let pnpm_dir = self.node_modules.join(".pnpm");
-        fs::create_dir_all(&pnpm_dir)?;
+        let virtual_store_dir = self.node_modules.join(VIRTUAL_STORE_DIR);
+        fs::create_dir_all(&virtual_store_dir)?;
 
         // Build a lookup from package name -> pkg_id for quick dep resolution
         let name_to_key: HashMap<String, String> = graph
@@ -54,7 +56,7 @@ impl Linker {
         for pkg in graph.packages() {
             let pkg_key = pkg.id.key();
             let pkg_dir = Self::package_path_in_node_modules(
-                &pnpm_dir.join(&pkg_key).join("node_modules"),
+                &virtual_store_dir.join(&pkg_key).join("node_modules"),
                 pkg.id.name.as_str(),
             );
 
@@ -147,7 +149,7 @@ impl Linker {
                 }
             }
 
-            // Link bin executables for this package into .pnpm/<pkg>/bin/
+            // Link bin executables for this package into .orix/<pkg>/bin/
             self.link_package_bins(&pkg_dir, &pkg_key, &store_files, &mut report)?;
         }
 
@@ -157,7 +159,7 @@ impl Linker {
                 continue;
             }
 
-            let target = pnpm_dir.join(pkg.id.key()).join("node_modules");
+            let target = virtual_store_dir.join(pkg.id.key()).join("node_modules");
             let target = Self::package_path_in_node_modules(&target, pkg.id.name.as_str());
             let link = Self::package_path_in_node_modules(&self.node_modules, pkg.id.name.as_str());
 
@@ -173,7 +175,7 @@ impl Linker {
         Ok(report)
     }
 
-    /// Link bin executables from a package into the .pnpm/<pkg>/bin directory.
+    /// Link bin executables from a package into the .orix/<pkg>/bin directory.
     /// Also creates the global .bin/ directory with symlinks to each bin.
     fn link_package_bins(
         &self,
@@ -209,10 +211,14 @@ impl Linker {
             _ => return Ok(()),
         };
 
-        let pnpm_bin_dir = self.node_modules.join(".pnpm").join(pkg_key).join("bin");
+        let package_bin_dir = self
+            .node_modules
+            .join(VIRTUAL_STORE_DIR)
+            .join(pkg_key)
+            .join("bin");
         let global_bin_dir = self.node_modules.join(".bin");
 
-        fs::create_dir_all(&pnpm_bin_dir)?;
+        fs::create_dir_all(&package_bin_dir)?;
         fs::create_dir_all(&global_bin_dir)?;
 
         for (cmd_name, bin_path) in bin_entries {
@@ -222,29 +228,29 @@ impl Linker {
 
             // Source: the bin file inside the package directory
             let bin_source = pkg_dir.join(&bin_path);
-            // Dest in .pnpm/<pkg>/bin/<cmd>
-            let pnpm_bin_dest = pnpm_bin_dir.join(&cmd_name);
+            // Dest in .orix/<pkg>/bin/<cmd>
+            let package_bin_dest = package_bin_dir.join(&cmd_name);
 
-            if bin_source.exists() && !pnpm_bin_dest.exists() {
-                if let Some(parent) = pnpm_bin_dest.parent() {
+            if bin_source.exists() && !package_bin_dest.exists() {
+                if let Some(parent) = package_bin_dest.parent() {
                     fs::create_dir_all(parent)?;
                 }
                 #[allow(clippy::incompatible_msrv)]
-                if let Err(e) = fs::hard_link(&bin_source, &pnpm_bin_dest) {
+                if let Err(e) = fs::hard_link(&bin_source, &package_bin_dest) {
                     if e.kind() == io::ErrorKind::PermissionDenied
                         || e.kind() == io::ErrorKind::NotFound
                         || e.kind() == io::ErrorKind::CrossesDevices
                     {
-                        let _ = fs::copy(&bin_source, &pnpm_bin_dest);
+                        let _ = fs::copy(&bin_source, &package_bin_dest);
                     }
                 }
             }
 
-            // Global bin link: node_modules/.bin/<cmd> -> ../.pnpm/<pkg>/bin/<cmd>
+            // Global bin link: node_modules/.bin/<cmd> -> ../.orix/<pkg>/bin/<cmd>
             let global_bin_link = global_bin_dir.join(&cmd_name);
             if !global_bin_link.exists() {
                 let relative_target = PathBuf::from("..")
-                    .join(".pnpm")
+                    .join(VIRTUAL_STORE_DIR)
                     .join(pkg_key)
                     .join("bin")
                     .join(&cmd_name);
@@ -301,7 +307,7 @@ impl Linker {
         }
     }
 
-    /// Remove all generated links and .pnpm/ content for this project.
+    /// Remove all generated links and .orix/ content for this project.
     pub fn unlink(&self) -> Result<()> {
         if self.node_modules.exists() {
             fs::remove_dir_all(&self.node_modules)?;
@@ -311,7 +317,7 @@ impl Linker {
 
     /// Create a top-level symlink for a local workspace package.
     /// Links `node_modules/<pkg_name>` directly to the local source directory,
-    /// bypassing the .pnpm/ store. Returns the number of symlinks created (0 or 1).
+    /// bypassing the .orix/ store. Returns the number of symlinks created (0 or 1).
     pub fn link_local_package(&self, pkg_name: &str, local_source: &Path) -> Result<usize> {
         let link_path = Self::package_path_in_node_modules(&self.node_modules, pkg_name);
 
@@ -467,6 +473,13 @@ mod tests {
 
         assert!(report.is_ok());
         assert!(temp.path().join("node_modules").join("react").exists());
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("react@18.2.0")
+            .exists());
+        assert!(!temp.path().join("node_modules").join(".pnpm").exists());
         assert!(!temp.path().join("node_modules").join("scheduler").exists());
         Ok(())
     }

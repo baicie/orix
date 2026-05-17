@@ -65,6 +65,10 @@ pub struct InstallOpts {
 /// Report from an install operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallReport {
+    /// Registry URL used for resolution and downloads.
+    pub registry: String,
+    /// Number of direct dependencies declared by the root manifest.
+    pub direct_dependencies: usize,
     /// Number of packages added.
     pub packages_added: usize,
     /// Fetch operation report.
@@ -73,6 +77,8 @@ pub struct InstallReport {
     pub link_report: LinkReport,
     /// Lockfile diff (if computed).
     pub lockfile_diff: Option<LockfileDiffReport>,
+    /// Whether the lockfile changed during this install.
+    pub lockfile_changed: bool,
     /// Wall-clock time in seconds.
     pub duration_secs: f64,
 }
@@ -129,6 +135,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
+    let direct_dependency_count = manifest.dependencies.len() + manifest.dev_dependencies.len();
 
     let workspace = match Workspace::discover(project_root.to_path_buf()) {
         Ok(ws) if !ws.packages.is_empty() => Some(ws),
@@ -255,44 +262,6 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         );
     }
 
-    // Write lockfile (unless frozen)
-    let lockfile_diff: Option<LockfileDiffReport> = if !opts.frozen_lockfile {
-        send_event(&opts.progress_tx, InstallEvent::WritingLockfile);
-        let base_lockfile = old_lockfile
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(Lockfile::empty);
-        let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
-
-        // Compute diff before writing so we have the old vs new comparison
-        let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
-        let diff_report = LockfileDiffReport {
-            added: diff.added.clone(),
-            removed: diff.removed.clone(),
-            changed: diff.changed.clone(),
-            importers_changed: diff.importers_changed.clone(),
-        };
-
-        updated_lockfile
-            .write(&config.lockfile_path())
-            .with_context(|| "failed to write lockfile")?;
-
-        if !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty() {
-            info!(
-                added = diff.added.len(),
-                removed = diff.removed.len(),
-                changed = diff.changed.len(),
-                "lockfile updated"
-            );
-        } else {
-            info!("lockfile unchanged");
-        }
-
-        Some(diff_report)
-    } else {
-        None
-    };
-
     send_event(&opts.progress_tx, InstallEvent::Linking);
     let direct_deps: HashSet<String> = manifest
         .dependencies
@@ -310,7 +279,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .with_context(|| "failed to link packages")?;
 
     // Link workspace local packages directly to their source directories
-    // (bypass .pnpm/ for workspace:* references)
+    // (bypass .orix/ for workspace:* references)
     if let Some(ref ws) = workspace {
         for pkg in &ws.packages {
             if let Some(ref name) = pkg.manifest.name {
@@ -332,14 +301,58 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         );
     }
 
+    // Write lockfile (unless frozen)
+    let mut lockfile_changed = false;
+    let lockfile_diff: Option<LockfileDiffReport> = if !opts.frozen_lockfile {
+        send_event(&opts.progress_tx, InstallEvent::WritingLockfile);
+        let base_lockfile = old_lockfile
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(Lockfile::empty);
+        let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
+
+        // Compute diff before writing so we have the old vs new comparison
+        let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
+        let diff_report = LockfileDiffReport {
+            added: diff.added.clone(),
+            removed: diff.removed.clone(),
+            changed: diff.changed.clone(),
+            importers_changed: diff.importers_changed.clone(),
+        };
+
+        updated_lockfile
+            .write(&config.lockfile_path())
+            .with_context(|| "failed to write lockfile")?;
+
+        lockfile_changed =
+            !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty();
+        if lockfile_changed {
+            info!(
+                added = diff.added.len(),
+                removed = diff.removed.len(),
+                changed = diff.changed.len(),
+                "lockfile updated"
+            );
+        } else {
+            info!("lockfile unchanged");
+        }
+
+        Some(diff_report)
+    } else {
+        None
+    };
+
     let duration = start.elapsed();
     info!(duration_ms = duration.as_millis(), "install complete");
 
     Ok(InstallReport {
+        registry: config.registry.to_string(),
+        direct_dependencies: direct_dependency_count,
         packages_added: graph.len(),
         fetch_report,
         link_report,
         lockfile_diff,
+        lockfile_changed,
         duration_secs: duration.as_secs_f64(),
     })
 }
