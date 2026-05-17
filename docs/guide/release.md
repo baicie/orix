@@ -19,8 +19,8 @@ cargo xtask release
 cargo xtask release [--version X.Y.Z] [--dry-run] [--crates-only] [--skip-crates] [--force]
   → [1/5] cargo xtask check      (fmt + clippy + test)
   → [2/5] cargo publish          (14 crates in topological order)
-  → [3/5] git tag vX.Y.Z
-  → [4/5] git push origin vX.Y.Z
+  → [3/5] git commit + push      (if pending changes exist)
+  → [4/5] git tag + push         (vX.Y.Z)
   → [5/5] GitHub Release artifacts
 ```
 
@@ -40,6 +40,11 @@ Push of the tag triggers GitHub Actions (`release.yml`):
 | `--force` | Yank existing crates when publishing, and delete/recreate the git tag when releasing |
 | `--version X.Y.Z` | Override version from Cargo.toml (also sets the git tag) |
 | `--tag-prefix PREFIX` | Custom tag prefix (default: `v`) |
+
+Before creating a release tag, `cargo xtask release` automatically commits any
+pending worktree changes with `chore: prepare release vX.Y.Z` and pushes the
+current branch to `origin`. This keeps the pushed tag on the same commit as the
+code being released.
 
 ## Version Override
 

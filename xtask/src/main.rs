@@ -212,7 +212,15 @@ fn run_release(
     }
 
     if !crates_only {
-        eprintln!("\n[3/5] Tagging commit: {tag}");
+        eprintln!("\n[3/5] Preparing release commit");
+        if !dry_run {
+            commit_and_push_pending_changes(&tag)?;
+        } else {
+            eprintln!("  (dry-run) would commit pending changes if the worktree is dirty");
+            eprintln!("  (dry-run) would push the current branch to origin");
+        }
+
+        eprintln!("\n[4/5] Tagging commit: {tag}");
         if !dry_run {
             if force {
                 recreate_release_tag(&tag)?;
@@ -258,6 +266,63 @@ fn run_release(
     }
 
     Ok(())
+}
+
+/// Commit and push pending changes before tagging so the release tag includes them.
+fn commit_and_push_pending_changes(tag: &str) -> Result<()> {
+    let branch = current_branch()?;
+
+    if worktree_has_pending_changes()? {
+        eprintln!("  Pending changes detected; committing them before tagging {tag}...");
+        run("git", ["add", "-A"])?;
+        run(
+            "git",
+            ["commit", "-m", &format!("chore: prepare release {tag}")],
+        )?;
+    } else {
+        eprintln!("  Worktree clean; no release commit needed.");
+    }
+
+    eprintln!("  Pushing current branch {branch} to origin...");
+    let refspec = format!("HEAD:{branch}");
+    run("git", ["push", "origin", &refspec])
+}
+
+fn current_branch() -> Result<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .stdin(Stdio::null())
+        .output()
+        .context("failed to determine current git branch")?;
+
+    if !output.status.success() {
+        bail!("failed to determine current git branch");
+    }
+
+    let branch = String::from_utf8(output.stdout)
+        .context("git branch output was not valid UTF-8")?
+        .trim()
+        .to_string();
+
+    if branch.is_empty() {
+        bail!("release cannot auto-push from a detached HEAD; check out a branch first");
+    }
+
+    Ok(branch)
+}
+
+fn worktree_has_pending_changes() -> Result<bool> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .stdin(Stdio::null())
+        .output()
+        .context("failed to inspect git worktree status")?;
+
+    if !output.status.success() {
+        bail!("failed to inspect git worktree status");
+    }
+
+    Ok(!output.stdout.is_empty())
 }
 
 /// Delete local and remote tags so a forced release can recreate the same version tag.
