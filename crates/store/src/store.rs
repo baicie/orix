@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
+use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use orix_domain::PackageId;
@@ -93,7 +94,9 @@ impl Store {
         top_integrity: Option<&str>,
     ) -> Result<HashSet<PathBuf>> {
         // Fast path: if already imported, skip all I/O.
-        if self.contains(pkg_id) {
+        let already_exists = self.contains(pkg_id);
+        debug!(pkg = %pkg_id, already_exists, source_dir = %source_dir.display(), "import_package called");
+        if already_exists {
             return Ok(HashSet::new());
         }
 
@@ -102,15 +105,21 @@ impl Store {
         // write integrity.json simultaneously.
         let _guard = self.io_guard.write();
 
+        debug!(pkg = %pkg_id, source_dir = %source_dir.display(), "importing package into store");
+
         // Re-check after acquiring lock (another thread may have imported it).
         if self.contains(pkg_id) {
+            debug!(pkg = %pkg_id, "package already in store, skipping");
             return Ok(HashSet::new());
         }
 
         let dest = self.package_path(pkg_id);
+        debug!(pkg = %pkg_id, dest = %dest.display(), "creating package directory");
         fs::create_dir_all(&dest).context("failed to create package directory")?;
 
         let mut new_files = HashSet::new();
+        let mut files_found = 0;
+        let mut errors = Vec::new();
 
         for entry in WalkDir::new(source_dir).into_iter().filter_map(|e| e.ok()) {
             if !entry.file_type().is_file() {
@@ -122,37 +131,87 @@ impl Store {
                 .with_context(|| format!("path {} not under source_dir", entry.path().display()))?;
             let rel_str = rel_path.display().to_string().replace('\\', "/");
 
-            let content = fs::read(entry.path())?;
+            let content = match fs::read(entry.path()) {
+                Ok(c) => c,
+                Err(e) => {
+                    errors.push(format!("failed to read {}: {}", entry.path().display(), e));
+                    continue;
+                }
+            };
             let hash = sha256(&content);
             let content_path = self.file_path(&hash);
 
             let is_new = !content_path.exists();
             if is_new {
                 if let Some(parent) = content_path.parent() {
-                    fs::create_dir_all(parent)?;
+                    if let Err(e) = fs::create_dir_all(parent) {
+                        errors.push(format!("failed to create dir {}: {}", parent.display(), e));
+                        continue;
+                    }
                 }
-                fs::copy(entry.path(), &content_path)?;
+                if let Err(e) = fs::copy(entry.path(), &content_path) {
+                    errors.push(format!(
+                        "failed to copy to {}: {}",
+                        content_path.display(),
+                        e
+                    ));
+                    continue;
+                }
             }
 
             let dest_file = dest.join(&rel_str);
             if let Some(parent) = dest_file.parent() {
-                fs::create_dir_all(parent)?;
+                if let Err(e) = fs::create_dir_all(parent) {
+                    errors.push(format!(
+                        "failed to create dest dir {}: {}",
+                        parent.display(),
+                        e
+                    ));
+                    continue;
+                }
             }
 
-            if let Err(e) = fs::hard_link(&content_path, &dest_file) {
-                if e.kind() == io::ErrorKind::NotFound
-                    || e.kind() == io::ErrorKind::PermissionDenied
+            match fs::hard_link(&content_path, &dest_file) {
+                Ok(_) => {}
+                Err(e)
+                    if e.kind() == io::ErrorKind::NotFound
+                        || e.kind() == io::ErrorKind::PermissionDenied =>
                 {
-                    fs::copy(entry.path(), &dest_file)?;
-                } else {
-                    return Err(e.into());
+                    if let Err(e2) = fs::copy(entry.path(), &dest_file) {
+                        errors.push(format!(
+                            "failed to hard_link/copy {} -> {}: {}",
+                            content_path.display(),
+                            dest_file.display(),
+                            e2
+                        ));
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!(
+                        "hard_link failed {} -> {}: {}",
+                        content_path.display(),
+                        dest_file.display(),
+                        e
+                    ));
                 }
             }
 
             if is_new {
                 new_files.insert(rel_path.to_path_buf());
             }
+            files_found += 1;
         }
+
+        for err in &errors {
+            warn!(pkg = %pkg_id, "{}", err);
+        }
+
+        if files_found == 0 {
+            warn!(pkg = %pkg_id, "no files found in source directory, skipping import");
+            return Ok(HashSet::new());
+        }
+
+        debug!(pkg = %pkg_id, files = files_found, new_files = new_files.len(), "imported package files");
 
         let mut files: Vec<(String, String)> = Vec::new();
         for entry in WalkDir::new(&dest).into_iter().filter_map(|e| e.ok()) {

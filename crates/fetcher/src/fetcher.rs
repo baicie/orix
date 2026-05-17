@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
-use tracing::{info_span, warn};
+use tracing::{debug, info_span, warn};
 
 use orix_domain::{check_platform_compatibility, DependencyGraph};
 use orix_store::Store;
@@ -83,12 +83,30 @@ impl Fetcher {
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await?;
                 let _guard = span.enter();
-                let tarball = cache
+                let tarball = match cache
                     .get_or_fetch(&tarball_url, &integrity, offline, force)
-                    .await?;
+                    .await
+                {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(package = %pkg_id, "failed to fetch tarball: {}", e);
+                        return Err(e);
+                    }
+                };
                 let temp_dir = tempfile::tempdir()?;
-                extract_tarball(&tarball, temp_dir.path())?;
-                store.import_package(&pkg_id, temp_dir.path(), depnodes, Some(&integrity))?;
+                debug!(package = %pkg_id, temp_dir = %temp_dir.path().display(), "created temp dir");
+                if let Err(e) = extract_tarball(&tarball, temp_dir.path()) {
+                    warn!(package = %pkg_id, "failed to extract tarball: {}", e);
+                    return Err(e);
+                }
+                debug!(package = %pkg_id, "importing into store");
+                if let Err(e) =
+                    store.import_package(&pkg_id, temp_dir.path(), depnodes, Some(&integrity))
+                {
+                    warn!(package = %pkg_id, "failed to import package: {}", e);
+                    return Err(e);
+                }
+                debug!(package = %pkg_id, "success");
                 Ok::<_, anyhow::Error>(pkg_id)
             });
             handles.push(handle);

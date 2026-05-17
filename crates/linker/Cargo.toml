@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 walkdir = { workspace = true }
 orix-domain = { workspace = true }
 orix-store = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -1262,6 +1262,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "base64",
  "clap",
  "clearscreen",
  "flate2",
@@ -1323,6 +1324,7 @@ name = "orix-fetcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "flate2",
  "hex",
  "orix-domain",
@@ -1331,6 +1333,7 @@ dependencies = [
  "serde",
  "sha1",
  "sha2",
+ "subtle",
  "tar",
  "tempfile",
  "tokio",
@@ -1347,6 +1350,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
  "walkdir",
 ]
 
@@ -1416,6 +1420,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tracing",
  "walkdir",
 ]
 

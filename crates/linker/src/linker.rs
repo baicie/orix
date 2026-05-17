@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use orix_domain::DependencyGraph;
@@ -60,7 +61,12 @@ impl Linker {
             fs::create_dir_all(&pkg_dir)?;
 
             let store_files = self.store.package_files_path(&pkg.id);
+            debug!(pkg = %pkg_key, store = %store_files.display(), "linking package files");
             if store_files.exists() {
+                let mut hardlink_ok = 0;
+                let mut copy_ok = 0;
+                let mut hardlink_fail = 0;
+                let mut copy_fail = 0;
                 for entry in WalkDir::new(&store_files)
                     .into_iter()
                     .filter_map(|e| e.ok())
@@ -72,24 +78,44 @@ impl Linker {
                     let dest = pkg_dir.join(rel_path);
 
                     if let Some(parent) = dest.parent() {
-                        fs::create_dir_all(parent)?;
+                        if let Err(e) = fs::create_dir_all(parent) {
+                            warn!(pkg = %pkg_key, "failed to create dir {}: {}", parent.display(), e);
+                            continue;
+                        }
                     }
 
+                    #[allow(clippy::incompatible_msrv)]
                     match fs::hard_link(entry.path(), &dest) {
                         Ok(_) => {
-                            report.hardlinked_files += 1;
+                            hardlink_ok += 1;
                         }
                         Err(e)
                             if e.kind() == io::ErrorKind::PermissionDenied
-                                || e.kind() == io::ErrorKind::NotFound =>
+                                || e.kind() == io::ErrorKind::NotFound
+                                || e.kind() == io::ErrorKind::CrossesDevices =>
                         {
-                            if fs::copy(entry.path(), &dest).is_ok() {
-                                report.copied_files += 1;
+                            match fs::copy(entry.path(), &dest) {
+                                Ok(_) => copy_ok += 1,
+                                Err(e2) => {
+                                    copy_fail += 1;
+                                    warn!(pkg = %pkg_key, "hard_link failed and copy also failed {} -> {}: {}", entry.path().display(), dest.display(), e2);
+                                }
                             }
                         }
-                        Err(_) => {}
+                        Err(e) => {
+                            hardlink_fail += 1;
+                            warn!(pkg = %pkg_key, "hard_link failed {} -> {}: {}", entry.path().display(), dest.display(), e);
+                        }
                     }
                 }
+                report.hardlinked_files += hardlink_ok;
+                report.copied_files += copy_ok;
+                debug!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, "link summary");
+                if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
+                    warn!(pkg = %pkg_key, "no files found in store or no files were linked");
+                }
+            } else {
+                warn!(pkg = %pkg_key, store = %store_files.display(), "store path does not exist, skipping");
             }
 
             // Create symlinks for this package's declared dependencies
@@ -203,9 +229,11 @@ impl Linker {
                 if let Some(parent) = pnpm_bin_dest.parent() {
                     fs::create_dir_all(parent)?;
                 }
+                #[allow(clippy::incompatible_msrv)]
                 if let Err(e) = fs::hard_link(&bin_source, &pnpm_bin_dest) {
                     if e.kind() == io::ErrorKind::PermissionDenied
                         || e.kind() == io::ErrorKind::NotFound
+                        || e.kind() == io::ErrorKind::CrossesDevices
                     {
                         let _ = fs::copy(&bin_source, &pnpm_bin_dest);
                     }

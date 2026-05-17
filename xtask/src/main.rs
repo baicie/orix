@@ -659,6 +659,13 @@ fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
         bail!("binary not found at {}", bin_path.display());
     }
 
+    let bin_dir = Path::new("bin");
+    fs::create_dir_all(bin_dir).context("failed to create bin directory")?;
+    let bin_exe = bin_dir.join("orix.exe");
+    fs::copy(&bin_path, &bin_exe)
+        .with_context(|| format!("failed to copy {} to {}", bin_path.display(), bin_exe.display()))?;
+    eprintln!("  Copied {} -> {}", bin_path.display(), bin_exe.display());
+
     let wix_src = PathBuf::from("packaging/wix/Product.wxs");
     let wix_compiled = PathBuf::from("packaging/wix/Product_compiled.wxs");
     let wix_obj = PathBuf::from("packaging/wix/Product_compiled.wixobj");
@@ -669,12 +676,12 @@ fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
     eprintln!("[2/3] Preparing WXS...");
     let wxs_content = fs::read_to_string(&wix_src)
         .with_context(|| format!("failed to read {}", wix_src.display()))?;
-    let wxs_content = wxs_content.replace("$(var.Version)", version).replace(
-        "$(var.SourceDir)",
-        &std::env::current_dir()
-            .context("failed to get current directory")?
-            .to_string_lossy(),
-    );
+    let source_dir = std::env::current_dir()
+        .context("failed to get current directory")?
+        .join("bin");
+    let wxs_content = wxs_content
+        .replace("$(var.SourceDir)", &source_dir.to_string_lossy())
+        .replace("$(var.Version)", version);
     fs::write(&wix_compiled, wxs_content)
         .with_context(|| format!("failed to write {}", wix_compiled.display()))?;
 
@@ -729,14 +736,24 @@ fn find_or_install_wix() -> Result<PathBuf> {
     let program_files = std::env::var("WIX").ok();
     if let Some(wix) = program_files {
         let path = PathBuf::from(&wix);
-        if path.join("candle.exe").exists() {
-            eprintln!("  Using WiX from WIX env: {}", path.display());
-            return Ok(path);
-        }
+        let bin_path = if path.join("bin/candle.exe").exists() || path.join("bin\\candle.exe").exists() {
+            path.join("bin")
+        } else if path.join("candle.exe").exists() {
+            path.clone()
+        } else {
+            eprintln!("  WIX is set to {} but candle.exe not found, skipping...", path.display());
+            return Ok(find_or_download_wix()?);
+        };
+        eprintln!("  Using WiX from WIX env: {}", bin_path.display());
+        return Ok(bin_path);
     }
 
     // Download and extract WiX
     eprintln!("  WiX not found, downloading...");
+    find_or_download_wix()
+}
+
+fn find_or_download_wix() -> Result<PathBuf> {
     let wix_version = "wix3141rtm";
     let temp_dir = std::env::temp_dir().join(format!("wix-{wix_version}"));
     let zip_path = temp_dir.join("wix.zip");

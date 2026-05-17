@@ -19,6 +19,7 @@ hex = { workspace = true }
 walkdir = { workspace = true }
 parking_lot = { workspace = true }
 orix-domain = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
