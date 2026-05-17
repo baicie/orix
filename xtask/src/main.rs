@@ -2,6 +2,9 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Topological order for publishing crates to crates.io.
@@ -100,6 +103,20 @@ enum Task {
         #[arg(long, value_name = "CRATE")]
         crates: Vec<String>,
     },
+    /// Build and package release binaries for the current platform.
+    ///
+    /// Creates a zip (Windows) or tar.gz (Unix) archive in dist/.
+    Dist {
+        /// Override the version (defaults to Cargo.toml version).
+        #[arg(long, value_name = "X.Y.Z")]
+        version: Option<String>,
+        /// Only build, skip packaging.
+        #[arg(long)]
+        bins_only: bool,
+        /// Output directory (defaults to dist/).
+        #[arg(long)]
+        output: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -161,6 +178,14 @@ fn main() -> Result<()> {
                 crates.iter().map(|s| s.as_str()).collect()
             };
             run_yank(&crates, &version)?;
+        }
+        Task::Dist {
+            version,
+            bins_only,
+            output,
+        } => {
+            let version = resolve_version(version)?;
+            run_dist(&version, bins_only, output.as_deref())?;
         }
     }
 
@@ -512,6 +537,92 @@ fn read_cargo_toml_version() -> Result<String> {
         }
     }
     bail!("could not find version in Cargo.toml");
+}
+
+/// Build and package release binaries for the current platform.
+fn run_dist(version: &str, bins_only: bool, output_dir: Option<&Path>) -> Result<()> {
+    let dist_root = output_dir.unwrap_or_else(|| Path::new("dist"));
+    let bin_dir = Path::new("target/release");
+
+    eprintln!("=== Dist: orix v{version} ===");
+    eprintln!("[1/2] Building release binary...");
+    run("cargo", ["build", "--release", "--package", "orix-cli"])?;
+
+    let bin_name = if cfg!(windows) { "orix.exe" } else { "orix" };
+    let bin_path = bin_dir.join(bin_name);
+    if !bin_path.exists() {
+        bail!("binary not found at {}", bin_path.display());
+    }
+
+    fs::create_dir_all(dist_root).context("failed to create dist directory")?;
+
+    if bins_only {
+        eprintln!("[2/2] Skipping packaging (--bins-only).");
+        let dest = dist_root.join(bin_name);
+        fs::copy(&bin_path, &dest).context("failed to copy binary")?;
+        eprintln!("Done: {}", dest.display());
+        return Ok(());
+    }
+
+    eprintln!("[2/2] Packaging...");
+    match std::env::consts::OS {
+        "windows" => package_zip(version, &bin_path, dist_root)?,
+        _ => package_tarball(version, &bin_path, dist_root)?,
+    }
+
+    eprintln!("\n=== Done! Output in {} ===", dist_root.display());
+    Ok(())
+}
+
+/// Package binary as a .zip archive (Windows).
+fn package_zip(version: &str, bin_path: &Path, dist_dir: &Path) -> Result<()> {
+    let name = format!("orix-{version}-x86_64-pc-windows-msvc",);
+    let archive_path = dist_dir.join(format!("{name}.zip"));
+
+    let file = File::create(&archive_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let mut bin_file = File::open(bin_path).context("failed to open binary")?;
+    let mut contents = Vec::new();
+    bin_file.read_to_end(&mut contents)?;
+
+    zip.start_file(format!("{name}/orix.exe"), options)
+        .context("failed to add file to zip")?;
+    zip.write_all(&contents)
+        .context("failed to write binary to zip")?;
+    zip.finish().context("failed to finalize zip")?;
+
+    eprintln!("  Created: {}", archive_path.display());
+    Ok(())
+}
+
+/// Package binary as a .tar.gz archive (Unix).
+fn package_tarball(version: &str, bin_path: &Path, dist_dir: &Path) -> Result<()> {
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        "unknown"
+    };
+
+    let name = format!("orix-{version}-{target}");
+    let archive_path = dist_dir.join(format!("{name}.tar.gz"));
+
+    let file = File::create(&archive_path)?;
+    let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut tar = tar::Builder::new(enc);
+
+    tar.append_path_with_name(bin_path, format!("{name}/orix"))
+        .context("failed to add binary to tarball")?;
+    tar.finish().context("failed to finalize tarball")?;
+
+    eprintln!("  Created: {}", archive_path.display());
+    Ok(())
 }
 
 fn run<I, A>(cmd: &str, args: I) -> Result<()>

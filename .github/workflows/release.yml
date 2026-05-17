@@ -304,13 +304,25 @@ jobs:
 
       - name: Create AppDir
         run: |
-          mkdir -p dist AppDir/usr/bin AppDir/usr/share/applications
+          set -e
+
+          mkdir -p dist AppDir/usr/bin
+
           cp bin/orix AppDir/usr/bin/orix
           chmod +x AppDir/usr/bin/orix
+
           cp "${{ github.workspace }}/packaging/appimage/AppRun" AppDir/AppRun
           chmod +x AppDir/AppRun
-          cp "${{ github.workspace }}/packaging/appimage/orix.desktop" AppDir/usr/share/applications/orix.desktop
-          touch AppDir/.DirIcon
+
+          # 关键：desktop 文件必须放 AppDir 根目录
+          cp "${{ github.workspace }}/packaging/appimage/orix.desktop" AppDir/orix.desktop
+
+          # 关键：Icon=orix 要对应 AppDir/orix.png
+          cp "${{ github.workspace }}/packaging/appimage/orix.png" AppDir/orix.png
+          cp AppDir/orix.png AppDir/.DirIcon
+
+          echo "AppDir structure:"
+          find AppDir -maxdepth 4 -type f -print
 
       - name: Install desktop-file-utils
         run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
@@ -382,13 +394,14 @@ jobs:
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
     name: GitHub Release
-    needs: [
-      package-windows-msi,
-      package-macos-pkg,
-      package-deb,
-      package-appimage,
-      package-binaries
-    ]
+    needs:
+      [
+        package-windows-msi,
+        package-macos-pkg,
+        package-deb,
+        package-appimage,
+        package-binaries,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
