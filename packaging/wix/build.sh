@@ -28,4 +28,6 @@ mkdir -p "${DIST_DIR}"
 # In the GitHub Actions workflow, WiX is installed via chocolatey.
 # The actual build is done via PowerShell/cmd steps that call candle + light.
 # This file serves as documentation / local reference.
+# NOTE: light.exe must be invoked with -ext WixUtilExtension to support
+# Environment elements (PATH modification). See release.yml for CI steps.
 echo "WiX build requires Windows environment. See release.yml for CI steps."
