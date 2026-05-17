@@ -1138,7 +1138,6 @@ dependencies = [
  "orix-linker",
  "orix-lockfile",
  "orix-manifest",
- "orix-registry",
  "orix-resolver",
  "orix-store",
  "orix-workspace",
@@ -1172,7 +1171,6 @@ dependencies = [
  "serde",
  "sha1",
  "sha2",
- "subtle",
  "tar",
  "tempfile",
  "tokio",
@@ -1258,7 +1256,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
- "tokio",
  "walkdir",
 ]
 

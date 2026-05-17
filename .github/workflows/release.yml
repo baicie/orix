@@ -312,6 +312,9 @@ jobs:
           cp "${{ github.workspace }}/packaging/appimage/orix.desktop" AppDir/usr/share/applications/orix.desktop
           touch AppDir/.DirIcon
 
+      - name: Install desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+
       - name: Build AppImage
         run: |
           v="${VERSION#v}"

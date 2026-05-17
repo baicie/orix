@@ -19,7 +19,6 @@ orix-domain = { workspace = true }
 orix-manifest = { workspace = true }
 orix-config = { workspace = true }
 orix-resolver = { workspace = true }
-orix-registry = { workspace = true }
 orix-fetcher = { workspace = true }
 orix-store = { workspace = true }
 orix-lockfile = { workspace = true }
