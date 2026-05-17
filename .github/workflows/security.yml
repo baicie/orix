@@ -37,7 +37,9 @@ jobs:
         run: cargo deny check
 
       - name: cargo audit
-        run: cargo audit
+        run: |
+          rm -rf ~/.cargo/advisory-db
+          cargo audit
 
       - name: cargo machete
         run: cargo machete --with-metadata

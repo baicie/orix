@@ -293,13 +293,14 @@ jobs:
           name: orix-linux-x86_64-bin
           path: bin
 
-      - name: Install AppImage tool
+      - name: Extract appimagetool runtime
         run: |
           mkdir -p "$HOME/.local/bin"
           curl -sSL https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
             -o "$HOME/.local/bin/appimagetool"
           chmod +x "$HOME/.local/bin/appimagetool"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          cd "$HOME/.local/bin"
+          ./appimagetool --appimage-extract > /dev/null 2>&1
 
       - name: Create AppDir
         run: |
@@ -314,7 +315,7 @@ jobs:
       - name: Build AppImage
         run: |
           v="${VERSION#v}"
-          appimagetool AppDir dist/orix-${v}-x86_64.AppImage
+          "$HOME/.local/bin/squashfs-root/usr/bin/appimagetool" AppDir dist/orix-${v}-x86_64.AppImage
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
