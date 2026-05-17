@@ -1,0 +1,11 @@
+#!/bin/sh
+# Postinstall script for Orix .pkg
+# Adds /usr/local/bin (or /opt/homebrew/bin on Apple Silicon) to PATH if needed
+
+if [ -d "/usr/local/bin" ] && [ ! -L "/usr/local/bin/orix" ]; then
+    ln -sf "/Applications/Orix.app/Contents/MacOS/orix" "/usr/local/bin/orix" 2>/dev/null || true
+fi
+
+if [ -d "/opt/homebrew/bin" ] && [ ! -L "/opt/homebrew/bin/orix" ]; then
+    ln -sf "/Applications/Orix.app/Contents/MacOS/orix" "/opt/homebrew/bin/orix" 2>/dev/null || true
+fi

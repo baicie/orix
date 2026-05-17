@@ -1,0 +1,6 @@
+#!/bin/sh
+# Preinstall script for Orix .pkg
+# Removes existing symlinks before installation
+
+rm -f "/usr/local/bin/orix" 2>/dev/null || true
+rm -f "/opt/homebrew/bin/orix" 2>/dev/null || true

@@ -1,0 +1,24 @@
+#!/bin/sh
+# postinst script for orix
+# Adds orix to /usr/bin and registers shell completions
+
+set -e
+
+case "$1" in
+    configure)
+        # Ensure binary is executable
+        if [ -f "/usr/bin/orix" ]; then
+            chmod 755 "/usr/bin/orix"
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#

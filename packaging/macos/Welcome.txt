@@ -1,0 +1,10 @@
+Welcome to Orix Installer
+=========================
+
+Orix is a high-performance package manager compatible with pnpm.
+
+This installer will place the Orix binary in /Applications/Orix.app.
+
+To complete installation, Orix will create a symlink in /usr/local/bin (or /opt/homebrew/bin on Apple Silicon).
+
+Thank you for choosing Orix!
