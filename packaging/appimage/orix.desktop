@@ -5,5 +5,5 @@ Exec=orix
 Icon=orix
 Terminal=true
 Type=Application
-Categories=Development;Utility;
+Categories=Development;
 Keywords=package;manager;npm;pnpm;node;

@@ -366,13 +366,10 @@ jobs:
           cp "${{ github.workspace }}/packaging/appimage/AppRun" AppDir/AppRun
           chmod +x AppDir/AppRun
 
-          # appimagetool 要求 .desktop 位于 AppDir 根目录
           cp "${{ github.workspace }}/packaging/appimage/orix.desktop" AppDir/orix.desktop
 
-          # Icon=orix 对应 AppDir/orix.png
           if [ ! -f "${{ github.workspace }}/packaging/appimage/orix.png" ]; then
             echo "Error: missing packaging/appimage/orix.png"
-            echo "Please add a PNG icon named packaging/appimage/orix.png"
             exit 1
           fi
 
@@ -381,10 +378,15 @@ jobs:
 
           desktop-file-validate AppDir/orix.desktop
 
+          echo "Binary info:"
+          file AppDir/usr/bin/orix
+
           echo "AppDir structure:"
           find AppDir -maxdepth 4 -type f -print
 
       - name: Build AppImage
+        env:
+          ARCH: x86_64
         run: |
           set -e
 
