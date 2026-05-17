@@ -88,20 +88,7 @@ impl ProgressRenderer {
         self.render();
     }
 
-    fn clear(&self) {
-        #[cfg(windows)]
-        {
-            let _ = clearscreen::clear();
-        }
-        #[cfg(not(windows))]
-        {
-            print!("\x1b[2J\x1b[H");
-            let _ = std::io::stdout().flush();
-        }
-    }
-
     fn render(&self) {
-        self.clear();
         let mut out = String::new();
 
         out.push_str("  orix install\n");

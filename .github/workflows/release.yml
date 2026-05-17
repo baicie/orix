@@ -5,41 +5,67 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
-  BIN_NAME: orix
 
 jobs:
-  # ── Build binaries for all targets ──────────────────────────────────────────
   build-linux:
-    name: Build / Linux x86_64
+    name: Build / ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: orix-linux-x86_64-gnu-bin
+          - target: x86_64-unknown-linux-musl
+            artifact: orix-linux-x86_64-musl-bin
+          - target: aarch64-unknown-linux-gnu
+            artifact: orix-linux-aarch64-gnu-bin
+            linker: aarch64-linux-gnu-gcc
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
+
+      - name: Install target toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get install -y musl-tools
+          else
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --package orix-cli --target x86_64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --package orix-cli --target ${{ matrix.target }}
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: orix-linux-x86_64-bin
-          path: target/x86_64-unknown-linux-gnu/release/orix
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/orix
 
   build-windows:
-    name: Build / Windows x86_64
+    name: Build / x86_64-pc-windows-msvc
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -62,59 +88,45 @@ jobs:
           name: orix-windows-x86_64-bin
           path: target/x86_64-pc-windows-msvc/release/orix.exe
 
-  build-macos-x86_64:
-    name: Build / macOS x86_64
-    runs-on: macos-latest
+  build-macos:
+    name: Build / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            artifact: orix-macos-x86_64-bin
+            runner: macos-13
+          - target: aarch64-apple-darwin
+            artifact: orix-macos-aarch64-bin
+            runner: macos-latest
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --package orix-cli --target x86_64-apple-darwin
+        run: cargo build --release --package orix-cli --target ${{ matrix.target }}
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: orix-macos-x86_64-bin
-          path: target/x86_64-apple-darwin/release/orix
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/orix
 
-  build-macos-arm64:
-    name: Build / macOS ARM64
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build
-        run: cargo build --release --package orix-cli --target aarch64-apple-darwin
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: orix-macos-arm64-bin
-          path: target/aarch64-apple-darwin/release/orix
-
-  # ── Package: Windows MSI ────────────────────────────────────────────────────
   package-windows-msi:
     name: Package / Windows MSI
     needs: build-windows
     runs-on: windows-latest
     env:
-      VERSION: ${{ github.ref_name }}
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v6
 
@@ -127,36 +139,31 @@ jobs:
       - name: Install WiX Toolset
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $wixVersion = "wix3141rtm"
           $wixPath = "$env:TEMP\wix-$wixVersion"
 
-          if (-not (Test-Path $wixPath)) {
+          if (-not (Test-Path "$wixPath\candle.exe")) {
             New-Item -ItemType Directory -Force -Path $wixPath | Out-Null
-
             Invoke-WebRequest `
               -Uri "https://github.com/wixtoolset/wix3/releases/download/$wixVersion/wix314-binaries.zip" `
               -OutFile "$wixPath\wix.zip" `
               -UseBasicParsing
-
             Expand-Archive -Path "$wixPath\wix.zip" -DestinationPath $wixPath -Force
           }
 
-          $env:PATH = "$wixPath;$env:PATH"
-          Write-Host "WiX installed at: $wixPath"
-
       - name: Build MSI
         shell: pwsh
-        env:
-          VERSION: ${{ github.ref_name }}
         run: |
-          $v = $env:VERSION -replace '^v', ''
+          $ErrorActionPreference = "Stop"
+          $fileVersion = $env:VERSION
+          $msiVersion = $env:VERSION -replace '^v', ''
           $wixPath = "$env:TEMP\wix-wix3141rtm"
-          $env:PATH = "$wixPath;$env:PATH"
 
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\dist" | Out-Null
 
           $wxs = Get-Content "${{ github.workspace }}\packaging\wix\Product.wxs" -Raw
-          $wxs = $wxs -replace '\$\(var\.Version\)', $v
+          $wxs = $wxs -replace '\$\(var\.Version\)', $msiVersion
           $wxs = $wxs -replace '\$\(var\.SourceDir\)', "${{ github.workspace }}\bin"
           $wxs | Set-Content -Path "${{ github.workspace }}\packaging\wix\Product_compiled.wxs" -NoNewline
 
@@ -169,11 +176,8 @@ jobs:
             -nologo `
             -ext WixUIExtension `
             -ext WixUtilExtension `
-            -out "${{ github.workspace }}\dist\orix-$v-x86_64-pc-windows-msvc.msi" `
+            -out "${{ github.workspace }}\dist\orix-$fileVersion-x86_64-pc-windows-msvc.msi" `
             "${{ github.workspace }}\packaging\wix\Product_compiled.wixobj"
-
-          Write-Host "MSI created:"
-          Get-Item "${{ github.workspace }}\dist\orix-$v-x86_64-pc-windows-msvc.msi"
 
       - name: Upload MSI
         uses: actions/upload-artifact@v4
@@ -181,123 +185,46 @@ jobs:
           name: release-windows-msi
           path: dist/*.msi
 
-  # ── Package: macOS .pkg ─────────────────────────────────────────────────────
-  package-macos-pkg:
-    name: Package / macOS .pkg
-    needs: [build-macos-x86_64, build-macos-arm64]
-    runs-on: macos-latest
-    env:
-      VERSION: ${{ github.ref_name }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download x86_64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-macos-x86_64-bin
-          path: bin_x86_64
-
-      - name: Download ARM64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-macos-arm64-bin
-          path: bin_arm64
-
-      - name: Make binaries executable
-        run: chmod +x bin_x86_64/orix bin_arm64/orix
-
-      - name: Build x86_64 .pkg
-        run: |
-          set -e
-
-          v="${VERSION#v}"
-
-          mkdir -p dist pkgroot_x86_64/usr/local/bin
-
-          cp bin_x86_64/orix pkgroot_x86_64/usr/local/bin/orix
-          chmod 755 pkgroot_x86_64/usr/local/bin/orix
-
-          pkgbuild \
-            --identifier com.baicie.orix.x86_64 \
-            --version "$v" \
-            --root pkgroot_x86_64 \
-            --install-location / \
-            dist/orix-${v}-x86_64.pkg
-
-          rm -rf pkgroot_x86_64
-
-      - name: Build ARM64 .pkg
-        run: |
-          set -e
-
-          v="${VERSION#v}"
-
-          mkdir -p dist pkgroot_arm64/usr/local/bin
-
-          cp bin_arm64/orix pkgroot_arm64/usr/local/bin/orix
-          chmod 755 pkgroot_arm64/usr/local/bin/orix
-
-          pkgbuild \
-            --identifier com.baicie.orix.arm64 \
-            --version "$v" \
-            --root pkgroot_arm64 \
-            --install-location / \
-            dist/orix-${v}-aarch64.pkg
-
-          rm -rf pkgroot_arm64
-
-      - name: Upload .pkg files
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-pkg
-          path: dist/*.pkg
-
-  # ── Package: Linux .deb ──────────────────────────────────────────────────────
   package-deb:
-    name: Package / Linux .deb
+    name: Package / Linux deb
     needs: build-linux
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ github.ref_name }}
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Install dpkg-dev
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev
 
-      - name: Download binary
+      - name: Download Linux x86_64 GNU binary
         uses: actions/download-artifact@v4
         with:
-          name: orix-linux-x86_64-bin
+          name: orix-linux-x86_64-gnu-bin
           path: bin
 
-      - name: Build .deb
+      - name: Build deb
         run: |
           set -e
-
-          v="${VERSION#v}"
+          package_version="${VERSION#v}"
+          file_version="$VERSION"
           arch="amd64"
           deb_dir="${{ github.workspace }}/deb_root"
 
           rm -rf "$deb_dir"
-
-          mkdir -p \
-            "$deb_dir/DEBIAN" \
-            "$deb_dir/usr/bin" \
-            "${{ github.workspace }}/dist"
+          mkdir -p "$deb_dir/DEBIAN" "$deb_dir/usr/bin" "${{ github.workspace }}/dist"
 
           cp bin/orix "$deb_dir/usr/bin/orix"
           chmod 755 "$deb_dir/usr/bin/orix"
 
           sed \
-            -e "s/\$(VERSION)/$v/g" \
+            -e "s/\$(VERSION)/$package_version/g" \
             -e "s/\$(ARCH)/$arch/g" \
             "${{ github.workspace }}/packaging/debian/control" \
             > "$deb_dir/DEBIAN/control"
 
           for script in postinst prerm postrm; do
             src="${{ github.workspace }}/packaging/debian/$script"
-
             if [ -f "$src" ]; then
               cp "$src" "$deb_dir/DEBIAN/$script"
               chmod 755 "$deb_dir/DEBIAN/$script"
@@ -308,115 +235,40 @@ jobs:
             --build \
             --root-owner-group \
             "$deb_dir" \
-            "${{ github.workspace }}/dist/orix_${v}_${arch}.deb"
+            "${{ github.workspace }}/dist/orix-$file_version-$arch.deb"
 
-          rm -rf "$deb_dir"
-
-      - name: Upload .deb
+      - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
           name: release-linux-deb
           path: dist/*.deb
 
-  # ── Package: Linux AppImage ─────────────────────────────────────────────────
-  package-appimage:
-    name: Package / Linux AppImage
-    needs: build-linux
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ github.ref_name }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-linux-x86_64-bin
-          path: bin
-
-      - name: Install AppImage build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y desktop-file-utils
-
-      - name: Extract appimagetool runtime
-        run: |
-          set -e
-
-          mkdir -p "$HOME/.local/bin"
-
-          curl -sSL \
-            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
-            -o "$HOME/.local/bin/appimagetool"
-
-          chmod +x "$HOME/.local/bin/appimagetool"
-
-          cd "$HOME/.local/bin"
-          ./appimagetool --appimage-extract > /dev/null 2>&1
-
-      - name: Create AppDir
-        run: |
-          set -e
-
-          mkdir -p dist AppDir/usr/bin
-
-          cp bin/orix AppDir/usr/bin/orix
-          chmod +x AppDir/usr/bin/orix
-
-          cp "${{ github.workspace }}/packaging/appimage/AppRun" AppDir/AppRun
-          chmod +x AppDir/AppRun
-
-          cp "${{ github.workspace }}/packaging/appimage/orix.desktop" AppDir/orix.desktop
-
-          if [ ! -f "${{ github.workspace }}/packaging/appimage/orix.png" ]; then
-            echo "Error: missing packaging/appimage/orix.png"
-            exit 1
-          fi
-
-          cp "${{ github.workspace }}/packaging/appimage/orix.png" AppDir/orix.png
-          cp AppDir/orix.png AppDir/.DirIcon
-
-          desktop-file-validate AppDir/orix.desktop
-
-          echo "Binary info:"
-          file AppDir/usr/bin/orix
-
-          echo "AppDir structure:"
-          find AppDir -maxdepth 4 -type f -print
-
-      - name: Build AppImage
-        env:
-          ARCH: x86_64
-        run: |
-          set -e
-
-          v="${VERSION#v}"
-
-          "$HOME/.local/bin/squashfs-root/usr/bin/appimagetool" \
-            AppDir \
-            dist/orix-${v}-x86_64.AppImage
-
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-linux-appimage
-          path: dist/*.AppImage
-
-  # ── Package: binary archives ─────────────────────────────────────────────────
   package-binaries:
     name: Package / Binary archives
-    needs: [build-linux, build-windows, build-macos-x86_64, build-macos-arm64]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ github.ref_name }}
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download Linux binary
+      - name: Download Linux x86_64 GNU binary
         uses: actions/download-artifact@v4
         with:
-          name: orix-linux-x86_64-bin
-          path: bin/linux
+          name: orix-linux-x86_64-gnu-bin
+          path: bin/linux-x86_64-gnu
+
+      - name: Download Linux x86_64 MUSL binary
+        uses: actions/download-artifact@v4
+        with:
+          name: orix-linux-x86_64-musl-bin
+          path: bin/linux-x86_64-musl
+
+      - name: Download Linux ARM64 GNU binary
+        uses: actions/download-artifact@v4
+        with:
+          name: orix-linux-aarch64-gnu-bin
+          path: bin/linux-aarch64-gnu
 
       - name: Download Windows binary
         uses: actions/download-artifact@v4
@@ -433,93 +285,53 @@ jobs:
       - name: Download macOS ARM64 binary
         uses: actions/download-artifact@v4
         with:
-          name: orix-macos-arm64-bin
-          path: bin/macos-arm64
+          name: orix-macos-aarch64-bin
+          path: bin/macos-aarch64
 
-      - name: Package Linux tar.gz
+      - name: Package archives
         run: |
           set -e
+          mkdir -p dist
 
-          v="${VERSION#v}"
+          package_unix() {
+            local src="$1"
+            local target="$2"
+            local root="orix-${VERSION}-${target}"
+            rm -rf "$root"
+            mkdir -p "$root"
+            cp "$src" "$root/orix"
+            chmod 755 "$root/orix"
+            tar -cJf "dist/${root}.tar.xz" "$root"
+            rm -rf "$root"
+          }
 
-          mkdir -p dist dist_linux
+          package_unix bin/linux-x86_64-gnu/orix x86_64-unknown-linux-gnu
+          package_unix bin/linux-x86_64-musl/orix x86_64-unknown-linux-musl
+          package_unix bin/linux-aarch64-gnu/orix aarch64-unknown-linux-gnu
+          package_unix bin/macos-x86_64/orix x86_64-apple-darwin
+          package_unix bin/macos-aarch64/orix aarch64-apple-darwin
 
-          cp bin/linux/orix dist_linux/orix
-          chmod +x dist_linux/orix
-
-          tar -czf dist/orix-${v}-x86_64-unknown-linux-gnu.tar.gz -C dist_linux orix
-
-          rm -rf dist_linux
-
-      - name: Package Windows zip
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $v = $env:VERSION -replace '^v', ''
-
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          New-Item -ItemType Directory -Force -Path dist_win | Out-Null
-
-          Copy-Item bin/windows/orix.exe dist_win/orix.exe -Force
-
-          Compress-Archive `
-            -Path dist_win/orix.exe `
-            -DestinationPath "dist/orix-$v-x86_64-pc-windows-msvc.zip" `
-            -Force
-
-          Remove-Item -Recurse -Force dist_win
-
-      - name: Package macOS x86_64 tar.gz
-        run: |
-          set -e
-
-          v="${VERSION#v}"
-
-          mkdir -p dist dist_macos_x86_64
-
-          cp bin/macos-x86_64/orix dist_macos_x86_64/orix
-          chmod +x dist_macos_x86_64/orix
-
-          tar -czf dist/orix-${v}-x86_64-apple-darwin.tar.gz -C dist_macos_x86_64 orix
-
-          rm -rf dist_macos_x86_64
-
-      - name: Package macOS ARM64 tar.gz
-        run: |
-          set -e
-
-          v="${VERSION#v}"
-
-          mkdir -p dist dist_macos_arm64
-
-          cp bin/macos-arm64/orix dist_macos_arm64/orix
-          chmod +x dist_macos_arm64/orix
-
-          tar -czf dist/orix-${v}-aarch64-apple-darwin.tar.gz -C dist_macos_arm64 orix
-
-          rm -rf dist_macos_arm64
+          win_root="orix-${VERSION}-x86_64-pc-windows-msvc"
+          rm -rf "$win_root"
+          mkdir -p "$win_root"
+          cp bin/windows/orix.exe "$win_root/orix.exe"
+          zip -qr "dist/${win_root}.zip" "$win_root"
+          rm -rf "$win_root"
 
       - name: Upload binary archives
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries
           path: |
-            dist/*.tar.gz
+            dist/*.tar.xz
             dist/*.zip
 
-  # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
     name: GitHub Release
-    needs:
-      [
-        package-windows-msi,
-        package-macos-pkg,
-        package-deb,
-        package-appimage,
-        package-binaries,
-      ]
+    needs: [package-windows-msi, package-deb, package-binaries]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v6
 
@@ -530,10 +342,112 @@ jobs:
           pattern: release-*
           merge-multiple: true
 
-      - name: List release files
+      - name: Generate installers
         run: |
-          echo "Release files:"
-          find artifacts -maxdepth 2 -type f -print | sort
+          set -e
+
+          cat > artifacts/orix-installer.sh <<'EOF'
+          #!/bin/sh
+          set -e
+
+          repo="baicie/orix"
+          version="${ORIX_VERSION:-latest}"
+          os="$(uname -s)"
+          arch="$(uname -m)"
+
+          case "$os:$arch" in
+            Linux:x86_64) target="x86_64-unknown-linux-gnu" ;;
+            Linux:aarch64|Linux:arm64) target="aarch64-unknown-linux-gnu" ;;
+            Darwin:x86_64) target="x86_64-apple-darwin" ;;
+            Darwin:arm64) target="aarch64-apple-darwin" ;;
+            *) echo "unsupported platform: $os $arch" >&2; exit 1 ;;
+          esac
+
+          if [ "$version" = "latest" ]; then
+            base="https://github.com/$repo/releases/latest/download"
+            asset_version="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" | sed 's#.*/tag/##')"
+          else
+            base="https://github.com/$repo/releases/download/$version"
+            asset_version="$version"
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          archive="orix-${asset_version}-${target}.tar.xz"
+
+          curl --proto '=https' --tlsv1.2 -LsSf "$base/$archive" -o "$tmp/$archive"
+          tar -xJf "$tmp/$archive" -C "$tmp"
+
+          if [ "$os" = "Darwin" ]; then
+            install_dir="$HOME/.orix/bin"
+          else
+            install_dir="$HOME/.local/bin"
+          fi
+
+          mkdir -p "$install_dir"
+          cp "$tmp/orix-${asset_version}-${target}/orix" "$install_dir/orix"
+          chmod 755 "$install_dir/orix"
+
+          echo "Installed orix to $install_dir/orix"
+          case ":$PATH:" in
+            *":$install_dir:"*) ;;
+            *) echo "Add this to your shell profile: export PATH=\"$install_dir:\$PATH\"" ;;
+          esac
+          EOF
+
+          cat > artifacts/orix-installer.ps1 <<'EOF'
+          $ErrorActionPreference = "Stop"
+
+          $repo = "baicie/orix"
+          $version = if ($env:ORIX_VERSION) { $env:ORIX_VERSION } else { "latest" }
+          $target = "x86_64-pc-windows-msvc"
+
+          if ($version -eq "latest") {
+            $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+            $assetVersion = $release.tag_name
+            $base = "https://github.com/$repo/releases/latest/download"
+          } else {
+            $assetVersion = $version
+            $base = "https://github.com/$repo/releases/download/$version"
+          }
+
+          $archive = "orix-$assetVersion-$target.zip"
+          $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("orix-install-" + [System.Guid]::NewGuid())
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\Orix\bin"
+
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+          try {
+            Invoke-WebRequest "$base/$archive" -OutFile (Join-Path $tmp $archive) -UseBasicParsing
+            Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath $tmp -Force
+            Copy-Item (Join-Path $tmp "orix-$assetVersion-$target\orix.exe") (Join-Path $installDir "orix.exe") -Force
+
+            $path = [Environment]::GetEnvironmentVariable("Path", "User")
+            $entries = @()
+            if ($path) { $entries = $path -split ';' | Where-Object { $_ } }
+            if ($entries -notcontains $installDir) {
+              $entries += $installDir
+              [Environment]::SetEnvironmentVariable("Path", ($entries -join ";"), "User")
+              Write-Host "Added $installDir to user PATH. Restart your terminal to use orix."
+            }
+
+            Write-Host "Installed orix to $installDir\orix.exe"
+          } finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+          }
+          EOF
+
+          chmod 755 artifacts/orix-installer.sh
+
+      - name: Generate SHA256SUMS
+        run: |
+          set -e
+          cd artifacts
+          sha256sum * > SHA256SUMS
+
+      - name: List release files
+        run: find artifacts -maxdepth 1 -type f -print | sort
 
       - name: Generate release notes
         uses: orhun/git-cliff-action@v4
@@ -546,6 +460,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
           files: artifacts/*
           body_path: RELEASE_NOTES.md
           draft: false

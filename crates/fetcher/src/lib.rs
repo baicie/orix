@@ -139,18 +139,19 @@ mod tests {
     }
 
     #[test]
-    fn verify_integrity_sha512_wrong_hash_rejected() {
+    fn verify_integrity_sha512_wrong_hash_rejected() -> Result<()> {
         let content = b"hello world";
         let wrong_integrity = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         let result = verify_integrity(content, wrong_integrity);
         let Err(e) = result else {
-            panic!("wrong sha512 hash should be rejected");
+            anyhow::bail!("wrong sha512 hash should be rejected");
         };
         let msg = e.to_string();
         assert!(
             msg.contains("integrity mismatch"),
             "error message should mention mismatch"
         );
+        Ok(())
     }
 
     #[test]
@@ -175,11 +176,11 @@ mod tests {
     }
 
     #[test]
-    fn base64_encode_decode_roundtrip() {
+    fn base64_encode_decode_roundtrip() -> Result<()> {
         let original = b"hello world";
         let encoded = base64_encode(original);
-        let decoded =
-            base64_decode(&encoded).expect("round-trip encode/decode should always succeed");
+        let decoded = base64_decode(&encoded)?;
         assert_eq!(decoded, original);
+        Ok(())
     }
 }

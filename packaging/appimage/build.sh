@@ -13,7 +13,8 @@ if [ -z "$ARCH" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_PATH="${SCRIPT_DIR}/../target/${ARCH}-unknown-linux-gnu/release/orix"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+BIN_PATH="${REPO_ROOT}/target/${ARCH}-unknown-linux-gnu/release/orix"
 APPDIR="${SCRIPT_DIR}/AppDir_${ARCH}"
 
 echo "Building Orix AppImage v${VERSION} for ${ARCH}"
@@ -62,6 +63,6 @@ fi
 # Build AppImage
 echo "Building AppImage..."
 cd "${APPDIR}"
-"${APPIMAGETOOL}" "${APPDIR}" "${SCRIPT_DIR}/../dist/orix-${ARCH}.AppImage"
+"${APPIMAGETOOL}" "${APPDIR}" "${REPO_ROOT}/dist/orix-${ARCH}.AppImage"
 
 echo "Done: orix-${ARCH}.AppImage"

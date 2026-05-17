@@ -248,6 +248,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         "fetched packages"
     );
 
+    if !fetch_report.failures.is_empty() {
+        anyhow::bail!(
+            "failed to fetch packages:\n  {}",
+            fetch_report.failures.join("\n  ")
+        );
+    }
+
     // Write lockfile (unless frozen)
     let lockfile_diff: Option<LockfileDiffReport> = if !opts.frozen_lockfile {
         send_event(&opts.progress_tx, InstallEvent::WritingLockfile);

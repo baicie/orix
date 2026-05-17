@@ -12,7 +12,7 @@
     <Package
       InstallerVersion="500"
       Compressed="yes"
-      InstallScope="perMachine"
+      InstallScope="perUser"
       Platform="x64"
       Description="High-performance package manager compatible with pnpm" />
 
@@ -34,7 +34,7 @@
     <Property Id="ARPPRODUCTICON" Value="orix.exe" />
     <Property Id="ARPHELPLINK" Value="https://github.com/baicie/orix" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/baicie/orix" />
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONROOT" />
 
     <UIRef Id="WixUI_InstallDir" />
     <UIRef Id="WixUI_ErrorProgressText" />
@@ -42,8 +42,12 @@
 
   <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="Orix" />
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="APPLICATIONROOT" Name="Orix">
+            <Directory Id="INSTALLFOLDER" Name="bin" />
+          </Directory>
+        </Directory>
       </Directory>
 
       <Directory Id="ProgramMenuFolder">
@@ -63,15 +67,30 @@
 
         <File
           Id="orix_exe"
-          Source="$(var.SourceDir)\orix.exe"
-          KeyPath="yes" />
+          Source="$(var.SourceDir)\orix.exe" />
+
+        <RemoveFolder
+          Id="CleanUpInstallFolder"
+          Directory="INSTALLFOLDER"
+          On="uninstall" />
+
+        <RemoveFolder
+          Id="CleanUpApplicationRoot"
+          Directory="APPLICATIONROOT"
+          On="uninstall" />
+
+        <RemoveFolder
+          Id="CleanUpProgramsFolder"
+          Directory="ProgramsFolder"
+          On="uninstall" />
 
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\baicie\orix"
           Name="InstallPath"
           Value="[INSTALLFOLDER]"
-          Type="string" />
+          Type="string"
+          KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
@@ -88,10 +107,10 @@
           Permanent="no"
           Part="last"
           Action="set"
-          System="yes" />
+          System="no" />
 
         <RegistryValue
-          Root="HKLM"
+          Root="HKCU"
           Key="Software\baicie\orix"
           Name="PathEnvironment"
           Value="1"

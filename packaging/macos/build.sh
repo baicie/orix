@@ -13,14 +13,15 @@ if [ -z "$ARCH" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 echo "Building Orix .pkg v${VERSION} for ${ARCH}"
 
 # Binary path depends on architecture
 if [ "${ARCH}" = "arm64" ]; then
-    BIN_PATH="${SCRIPT_DIR}/../target/aarch64-apple-darwin/release/orix"
+    BIN_PATH="${REPO_ROOT}/target/aarch64-apple-darwin/release/orix"
 else
-    BIN_PATH="${SCRIPT_DIR}/../target/x86_64-apple-darwin/release/orix"
+    BIN_PATH="${REPO_ROOT}/target/x86_64-apple-darwin/release/orix"
 fi
 
 if [ ! -f "${BIN_PATH}" ]; then
@@ -28,7 +29,7 @@ if [ ! -f "${BIN_PATH}" ]; then
     exit 1
 fi
 
-DIST_DIR="${SCRIPT_DIR}/../dist"
+DIST_DIR="${REPO_ROOT}/dist"
 PKG_DIR="${SCRIPT_DIR}/pkgroot_${ARCH}"
 rm -rf "${PKG_DIR}"
 mkdir -p "${PKG_DIR}/usr/local/bin"

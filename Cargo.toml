@@ -67,6 +67,7 @@ dirs = "6"
 tempfile = "3"
 subtle = "2"
 parking_lot = "0.12"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 which = "8"
@@ -79,7 +80,6 @@ pretty_assertions = "1"
 
 # ── CLI UI ──────────────────────────────────────────────────────────────────────
 indicatif = "0.17"
-clearscreen = "4"
 
 # ── orix crate aliases (path must match actual package name) ──────────────────
 orix-cli = { path = "crates/cli", version = "0.1.0" }

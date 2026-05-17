@@ -46,6 +46,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(alias = "i")]
     Install(InstallArgs),
     Add(AddArgs),
     Remove(RemoveArgs),
@@ -138,7 +139,10 @@ async fn main() -> Result<()> {
                 progress_tx: None,
             };
 
-            run_install(&dir, &install_opts).await?;
+            if let Err(e) = run_install(&dir, &install_opts).await {
+                eprintln!("{}", errors::format_error(&e, &dir));
+                std::process::exit(1);
+            }
         }
 
         Command::Add(args) => {
@@ -276,7 +280,14 @@ async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Resu
     let renderer_handle = spawn_event_renderer(rx);
 
     // Run install; the pipeline sends events through `progress_tx`.
-    let report = install(project_root, &install_opts).await?;
+    let report = match install(project_root, &install_opts).await {
+        Ok(report) => report,
+        Err(error) => {
+            drop(install_opts.progress_tx);
+            renderer_handle.await?;
+            return Err(error);
+        }
+    };
 
     // Drop the sender so the channel closes and the renderer task exits cleanly.
     drop(install_opts.progress_tx);

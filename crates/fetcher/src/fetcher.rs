@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 use tracing::{debug, info_span, warn};
@@ -86,6 +86,7 @@ impl Fetcher {
                 let tarball = match cache
                     .get_or_fetch(&tarball_url, &integrity, offline, force)
                     .await
+                    .with_context(|| format!("failed to fetch tarball for {}", pkg_id))
                 {
                     Ok(t) => t,
                     Err(e) => {
@@ -96,15 +97,18 @@ impl Fetcher {
                 let temp_dir = tempfile::tempdir()?;
                 debug!(package = %pkg_id, temp_dir = %temp_dir.path().display(), "created temp dir");
                 if let Err(e) = extract_tarball(&tarball, temp_dir.path()) {
-                    warn!(package = %pkg_id, "failed to extract tarball: {}", e);
-                    return Err(e);
+                    let error = e.context(format!("failed to extract tarball for {}", pkg_id));
+                    warn!(package = %pkg_id, "failed to extract tarball: {}", error);
+                    return Err(error);
                 }
                 debug!(package = %pkg_id, "importing into store");
                 if let Err(e) =
                     store.import_package(&pkg_id, temp_dir.path(), depnodes, Some(&integrity))
                 {
-                    warn!(package = %pkg_id, "failed to import package: {}", e);
-                    return Err(e);
+                    let error =
+                        e.context(format!("failed to import package {} into store", pkg_id));
+                    warn!(package = %pkg_id, "failed to import package: {}", error);
+                    return Err(error);
                 }
                 debug!(package = %pkg_id, "success");
                 Ok::<_, anyhow::Error>(pkg_id)

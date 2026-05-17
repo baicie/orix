@@ -13,6 +13,7 @@ if [ -z "$ARCH" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 echo "Building Orix .deb v${VERSION} for ${ARCH}"
 
@@ -28,7 +29,7 @@ mkdir -p "${DEB_DIR}/usr/share/doc/orix"
 mkdir -p "${DEB_DIR}/usr/share/lintian/overrides"
 
 # Copy binary
-BIN_PATH="${SCRIPT_DIR}/../target/${ARCH}-unknown-linux-gnu/release/orix"
+BIN_PATH="${REPO_ROOT}/target/${ARCH}-unknown-linux-gnu/release/orix"
 cp "${BIN_PATH}" "${DEB_DIR}/usr/bin/orix"
 chmod 755 "${DEB_DIR}/usr/bin/orix"
 
@@ -43,7 +44,7 @@ sed -e "s/\$(VERSION)/${VERSION}/g" \
 [ -f "${SCRIPT_DIR}/postrm" ] && cp "${SCRIPT_DIR}/postrm" "${DEB_DIR}/DEBIAN/postrm" && chmod 755 "${DEB_DIR}/DEBIAN/postrm"
 
 # Copy copyright
-cp "${SCRIPT_DIR}/../LICENSE" "${DEB_DIR}/usr/share/doc/orix/copyright" 2>/dev/null || true
+cp "${REPO_ROOT}/LICENSE" "${DEB_DIR}/usr/share/doc/orix/copyright" 2>/dev/null || true
 
 # Compress docs
 if [ -d "${DEB_DIR}/usr/share/doc/orix" ]; then
@@ -51,7 +52,7 @@ if [ -d "${DEB_DIR}/usr/share/doc/orix" ]; then
 fi
 
 # Build package
-DIST_DIR="${SCRIPT_DIR}/../dist"
+DIST_DIR="${REPO_ROOT}/dist"
 mkdir -p "${DIST_DIR}"
 dpkg-deb --build --root-owner-group "${DEB_DIR}" "${DIST_DIR}/orix_${VERSION}_${ARCH_DEB}.deb"
 

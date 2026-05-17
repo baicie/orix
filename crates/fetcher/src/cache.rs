@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
-use crate::{sha256_digest, verify_integrity};
+use crate::verify_integrity;
 
 /// An in-memory + disk cache for downloaded tarballs.
 pub struct TarballCache {
@@ -42,8 +43,7 @@ impl TarballCache {
         offline: bool,
         force: bool,
     ) -> Result<PathBuf> {
-        let cache_key = sha256_digest(url.as_bytes());
-        let cached_path = self.root.join(format!("{}.tgz", &cache_key[..16]));
+        let cached_path = self.root.join(cache_file_name(url));
 
         // Fast path: check in-memory verified map first
         {
@@ -100,7 +100,11 @@ impl TarballCache {
                         continue;
                     }
 
-                    tokio::fs::write(&cached_path, &bytes).await?;
+                    tokio::fs::write(&cached_path, &bytes)
+                        .await
+                        .with_context(|| {
+                            format!("failed to write tarball cache {}", cached_path.display())
+                        })?;
 
                     let mut verified = self.verified.write().await;
                     verified.insert(
@@ -149,5 +153,23 @@ impl TarballCache {
             .with_context(|| format!("failed to read response body from {}", url))?;
 
         Ok(bytes.into())
+    }
+}
+
+fn cache_file_name(url: &str) -> String {
+    let digest = Sha256::digest(url.as_bytes());
+    format!("{}.tgz", hex::encode(digest))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_file_name_never_contains_path_separators() {
+        let file_name = cache_file_name("https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz");
+
+        assert!(!file_name.contains(['/', '\\']));
+        assert_eq!(file_name.len(), 68);
     }
 }

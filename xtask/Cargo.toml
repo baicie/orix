@@ -19,3 +19,4 @@ which.workspace = true
 zip.workspace = true
 flate2.workspace = true
 tar.workspace = true
+time.workspace = true

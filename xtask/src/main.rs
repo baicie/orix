@@ -110,6 +110,9 @@ enum Task {
         /// Override the version (defaults to Cargo.toml version).
         #[arg(long, value_name = "X.Y.Z")]
         version: Option<String>,
+        /// Append a minute-precision build timestamp to artifact names for local previews.
+        #[arg(long)]
+        preview: bool,
         /// Only build, skip packaging.
         #[arg(long)]
         bins_only: bool,
@@ -125,6 +128,9 @@ enum Task {
         /// Override the version (defaults to Cargo.toml version).
         #[arg(long, value_name = "X.Y.Z")]
         version: Option<String>,
+        /// Append a minute-precision build timestamp to the MSI filename for local previews.
+        #[arg(long)]
+        preview: bool,
         /// Output directory (defaults to dist/).
         #[arg(long)]
         output: Option<std::path::PathBuf>,
@@ -193,15 +199,20 @@ fn main() -> Result<()> {
         }
         Task::Dist {
             version,
+            preview,
             bins_only,
             output,
         } => {
             let version = resolve_version(version)?;
-            run_dist(&version, bins_only, output.as_deref())?;
+            run_dist(&version, preview, bins_only, output.as_deref())?;
         }
-        Task::Msi { version, output } => {
+        Task::Msi {
+            version,
+            preview,
+            output,
+        } => {
             let version = resolve_version(version)?;
-            run_msi(&version, output.as_deref())?;
+            run_msi(&version, preview, output.as_deref())?;
         }
     }
 
@@ -556,11 +567,17 @@ fn read_cargo_toml_version() -> Result<String> {
 }
 
 /// Build and package release binaries for the current platform.
-fn run_dist(version: &str, bins_only: bool, output_dir: Option<&Path>) -> Result<()> {
+fn run_dist(
+    version: &str,
+    preview: bool,
+    bins_only: bool,
+    output_dir: Option<&Path>,
+) -> Result<()> {
     let dist_root = output_dir.unwrap_or_else(|| Path::new("dist"));
     let bin_dir = Path::new("target/release");
+    let artifact_version = artifact_version(version, preview)?;
 
-    eprintln!("=== Dist: orix v{version} ===");
+    eprintln!("=== Dist: orix v{artifact_version} ===");
     eprintln!("[1/2] Building release binary...");
     run("cargo", ["build", "--release", "--package", "orix-cli"])?;
 
@@ -574,7 +591,7 @@ fn run_dist(version: &str, bins_only: bool, output_dir: Option<&Path>) -> Result
 
     if bins_only {
         eprintln!("[2/2] Skipping packaging (--bins-only).");
-        let dest = dist_root.join(bin_name);
+        let dest = dist_root.join(format!("orix-{artifact_version}-{bin_name}"));
         fs::copy(&bin_path, &dest).context("failed to copy binary")?;
         eprintln!("Done: {}", dest.display());
         return Ok(());
@@ -582,8 +599,8 @@ fn run_dist(version: &str, bins_only: bool, output_dir: Option<&Path>) -> Result
 
     eprintln!("[2/2] Packaging...");
     match std::env::consts::OS {
-        "windows" => package_zip(version, &bin_path, dist_root)?,
-        _ => package_tarball(version, &bin_path, dist_root)?,
+        "windows" => package_zip(&artifact_version, &bin_path, dist_root)?,
+        _ => package_tarball(&artifact_version, &bin_path, dist_root)?,
     }
 
     eprintln!("\n=== Done! Output in {} ===", dist_root.display());
@@ -642,13 +659,14 @@ fn package_tarball(version: &str, bin_path: &Path, dist_dir: &Path) -> Result<()
 }
 
 /// Build a Windows MSI installer using WiX Toolset.
-fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
+fn run_msi(version: &str, preview: bool, output_dir: Option<&Path>) -> Result<()> {
     if !cfg!(windows) {
         bail!("MSI packaging is only supported on Windows");
     }
 
     let dist_root = output_dir.unwrap_or_else(|| Path::new("dist"));
     let wix_path = find_or_install_wix()?;
+    let artifact_version = artifact_version(version, preview)?;
 
     eprintln!("=== MSI: orix v{version} ===");
     eprintln!("[1/3] Building release binary...");
@@ -662,14 +680,21 @@ fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
     let bin_dir = Path::new("bin");
     fs::create_dir_all(bin_dir).context("failed to create bin directory")?;
     let bin_exe = bin_dir.join("orix.exe");
-    fs::copy(&bin_path, &bin_exe)
-        .with_context(|| format!("failed to copy {} to {}", bin_path.display(), bin_exe.display()))?;
+    fs::copy(bin_path, &bin_exe).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            bin_path.display(),
+            bin_exe.display()
+        )
+    })?;
     eprintln!("  Copied {} -> {}", bin_path.display(), bin_exe.display());
 
     let wix_src = PathBuf::from("packaging/wix/Product.wxs");
     let wix_compiled = PathBuf::from("packaging/wix/Product_compiled.wxs");
     let wix_obj = PathBuf::from("packaging/wix/Product_compiled.wixobj");
-    let msi_path = dist_root.join(format!("orix-{version}-x86_64-pc-windows-msvc.msi"));
+    let msi_path = dist_root.join(format!(
+        "orix-{artifact_version}-x86_64-pc-windows-msvc.msi"
+    ));
 
     fs::create_dir_all(dist_root).context("failed to create dist directory")?;
 
@@ -717,6 +742,26 @@ fn run_msi(version: &str, output_dir: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn artifact_version(version: &str, preview: bool) -> Result<String> {
+    if !preview {
+        return Ok(version.to_string());
+    }
+
+    Ok(format!("{version}-{}", preview_timestamp()?))
+}
+
+fn preview_timestamp() -> Result<String> {
+    let now = time::OffsetDateTime::now_local()
+        .or_else(|_| Ok::<_, time::error::IndeterminateOffset>(time::OffsetDateTime::now_utc()))
+        .context("failed to determine preview timestamp")?;
+    let format = time::macros::format_description!(
+        "[year][month padding:zero][day padding:zero][hour padding:zero][minute padding:zero]"
+    );
+
+    now.format(&format)
+        .context("failed to format preview timestamp")
+}
+
 /// Find WiX Toolset in PATH or install it to a temp directory.
 fn find_or_install_wix() -> Result<PathBuf> {
     // Check PATH first
@@ -736,14 +781,18 @@ fn find_or_install_wix() -> Result<PathBuf> {
     let program_files = std::env::var("WIX").ok();
     if let Some(wix) = program_files {
         let path = PathBuf::from(&wix);
-        let bin_path = if path.join("bin/candle.exe").exists() || path.join("bin\\candle.exe").exists() {
-            path.join("bin")
-        } else if path.join("candle.exe").exists() {
-            path.clone()
-        } else {
-            eprintln!("  WIX is set to {} but candle.exe not found, skipping...", path.display());
-            return Ok(find_or_download_wix()?);
-        };
+        let bin_path =
+            if path.join("bin/candle.exe").exists() || path.join("bin\\candle.exe").exists() {
+                path.join("bin")
+            } else if path.join("candle.exe").exists() {
+                path.clone()
+            } else {
+                eprintln!(
+                    "  WIX is set to {} but candle.exe not found, skipping...",
+                    path.display()
+                );
+                return find_or_download_wix();
+            };
         eprintln!("  Using WiX from WIX env: {}", bin_path.display());
         return Ok(bin_path);
     }
@@ -757,9 +806,8 @@ fn find_or_download_wix() -> Result<PathBuf> {
     let wix_version = "wix3141rtm";
     let temp_dir = std::env::temp_dir().join(format!("wix-{wix_version}"));
     let zip_path = temp_dir.join("wix.zip");
-    let extracted_path = temp_dir.join("wix314");
 
-    if !extracted_path.join("candle.exe").exists() {
+    if !temp_dir.join("candle.exe").exists() {
         fs::create_dir_all(&temp_dir).context("failed to create WiX temp directory")?;
 
         eprintln!("  Downloading WiX {wix_version}...");
@@ -801,7 +849,7 @@ fn find_or_download_wix() -> Result<PathBuf> {
         }
     }
 
-    let wix_bin = extracted_path.join("bin");
+    let wix_bin = temp_dir;
     eprintln!("  WiX ready: {}", wix_bin.display());
     Ok(wix_bin)
 }

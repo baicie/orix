@@ -39,12 +39,12 @@ release:
 	@if [ "$(orix_skip_crates)" = "1" ]; then \
 		cargo xtask release --skip-crates $(ARGS); \
 	elif [ "$(orix_crates_only)" = "1" ]; then \
-		@if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then echo "CARGO_REGISTRY_TOKEN not set"; exit 1; fi; \
+		if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then echo "CARGO_REGISTRY_TOKEN not set"; exit 1; fi; \
 		cargo xtask release --crates-only $(ARGS); \
 	elif [ "$(orix_dry_run)" = "1" ]; then \
 		cargo xtask release --dry-run $(ARGS); \
 	else \
-		@if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then echo "CARGO_REGISTRY_TOKEN not set"; exit 1; fi; \
+		if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then echo "CARGO_REGISTRY_TOKEN not set"; exit 1; fi; \
 		cargo xtask release $(ARGS); \
 	fi
 
@@ -57,7 +57,7 @@ publish:
 	@if [ "$(orix_dry_run)" != "0" ]; then \
 		cargo xtask publish-crates --dry-run $(ARGS); \
 	else \
-		@if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then \
+		if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then \
 			echo "CARGO_REGISTRY_TOKEN not set"; exit 1; fi; \
 		cargo xtask publish-crates $(ARGS); \
 	fi

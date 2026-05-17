@@ -103,9 +103,11 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             );
         }
         return format!(
-            "{} Failed to fetch packages: {}\n  \
-               Try again or check your network connection.",
-            EMOJI_ERR, top
+            "{} Failed to fetch packages.\n{}\n  \
+               Hint: Try again, check your registry/cache settings, or run with {} for the full trace.",
+            EMOJI_ERR,
+            format_details(error),
+            INFO_ARG
         );
     }
 
@@ -154,10 +156,27 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
 
     // Generic fallback
     format!(
-        "{} An error occurred:\n  {}\n\n\
+        "{} An error occurred:\n{}\n\n\
            Run with {} for more details.",
-        EMOJI_ERR, top, INFO_ARG
+        EMOJI_ERR,
+        format_details(error),
+        INFO_ARG
     )
+}
+
+fn format_details(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .map(|cause| {
+            cause
+                .to_string()
+                .lines()
+                .map(|line| format!("  {}", line))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n  caused by: ")
 }
 
 /// Attempts to extract a package name from an error message.
