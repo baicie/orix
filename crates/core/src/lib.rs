@@ -1,8 +1,9 @@
 //! Install pipeline orchestration for orix.
 
 pub use crate::pipeline::{
-    add, install, remove, store_path, store_path_with_overrides, store_prune,
-    store_prune_with_overrides, store_verify, store_verify_with_overrides, DepType, InstallEvent,
+    add, cache_clean, cache_clean_with_overrides, cache_path, cache_path_with_overrides, install,
+    remove, store_path, store_path_with_overrides, store_prune, store_prune_with_overrides,
+    store_verify, store_verify_with_overrides, CacheCleanReport, DepType, InstallEvent,
     InstallOpts, InstallReport, RemoveReport,
 };
 

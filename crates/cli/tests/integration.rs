@@ -165,11 +165,45 @@ fn store_path_accepts_cli_store_dir_override() {
         .arg(project.path())
         .arg("--store-dir")
         .arg(store.path())
-        .arg("store-path")
+        .arg("store")
+        .arg("path")
         .env("ORIX_STORE", "C:/orix-env-store")
         .assert()
         .success()
         .stdout(contains(store.path().display().to_string()));
+}
+
+#[test]
+fn cache_commands_accept_cli_cache_dir_override() {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    fs::write(cache.path().join("cached.tgz"), b"cached").unwrap();
+
+    let mut cmd = Command::cargo_bin("orix").unwrap();
+    cmd.arg("-C")
+        .arg(project.path())
+        .arg("--cache-dir")
+        .arg(cache.path())
+        .arg("cache")
+        .arg("path")
+        .env("ORIX_CACHE", "C:/orix-env-cache")
+        .assert()
+        .success()
+        .stdout(contains(cache.path().display().to_string()));
+
+    let mut cmd = Command::cargo_bin("orix").unwrap();
+    cmd.arg("-C")
+        .arg(project.path())
+        .arg("--cache-dir")
+        .arg(cache.path())
+        .arg("cache")
+        .arg("clean")
+        .assert()
+        .success()
+        .stdout(contains("Cleared cache"));
+
+    assert!(cache.path().exists());
+    assert!(!cache.path().join("cached.tgz").exists());
 }
 
 #[test]
@@ -250,7 +284,8 @@ fn install_fetches_package_from_mock_registry() {
     let output = std::process::Command::new(&orix_bin)
         .arg("-C")
         .arg(project.path())
-        .arg("store-path")
+        .arg("store")
+        .arg("path")
         .env("ORIX_STORE", store.path())
         .output()
         .unwrap();
@@ -268,7 +303,8 @@ fn install_fetches_package_from_mock_registry() {
     let output = std::process::Command::new(&orix_bin)
         .arg("-C")
         .arg(project.path())
-        .arg("store-verify")
+        .arg("store")
+        .arg("verify")
         .env("ORIX_STORE", store.path())
         .output()
         .unwrap();
@@ -281,7 +317,8 @@ fn install_fetches_package_from_mock_registry() {
     let output = std::process::Command::new(&orix_bin)
         .arg("-C")
         .arg(project.path())
-        .arg("store-prune")
+        .arg("store")
+        .arg("prune")
         .arg("--dry-run")
         .env("ORIX_STORE", store.path())
         .output()

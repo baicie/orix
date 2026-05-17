@@ -7,8 +7,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{
-    add, install, pipeline, remove, store_path_with_overrides, store_prune_with_overrides,
-    store_verify_with_overrides, ConfigOverrides, InstallOpts,
+    add, cache_clean_with_overrides, cache_path_with_overrides, install, pipeline, remove,
+    store_path_with_overrides, store_prune_with_overrides, store_verify_with_overrides,
+    ConfigOverrides, InstallOpts,
 };
 
 mod errors;
@@ -48,12 +49,35 @@ enum Command {
     Install(InstallArgs),
     Add(AddArgs),
     Remove(RemoveArgs),
+    #[command(subcommand)]
+    Store(StoreCommand),
+    #[command(subcommand)]
+    Cache(CacheCommand),
+    #[command(name = "store-prune", hide = true)]
     StorePrune {
         #[arg(long)]
         dry_run: bool,
     },
+    #[command(name = "store-path", hide = true)]
     StorePath,
+    #[command(name = "store-verify", hide = true)]
     StoreVerify,
+}
+
+#[derive(Subcommand)]
+enum StoreCommand {
+    Path,
+    Prune {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Verify,
+}
+
+#[derive(Subcommand)]
+enum CacheCommand {
+    Path,
+    Clean,
 }
 
 #[derive(Args)]
@@ -185,61 +209,20 @@ async fn main() -> Result<()> {
             );
         }
 
-        Command::StorePath => {
-            let path = match store_path_with_overrides(&dir, &config_overrides) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
-                    std::process::exit(1);
-                }
-            };
-            println!("{}", path.display());
-        }
+        Command::Store(command) => match command {
+            StoreCommand::Path => print_store_path(&dir, &config_overrides),
+            StoreCommand::Prune { dry_run } => print_store_prune(&dir, &config_overrides, dry_run),
+            StoreCommand::Verify => print_store_verify(&dir, &config_overrides),
+        },
 
-        Command::StorePrune { dry_run } => {
-            let report = match store_prune_with_overrides(&dir, dry_run, &config_overrides) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
-                    std::process::exit(1);
-                }
-            };
-            if dry_run {
-                println!(
-                    " {} Would remove {} packages and {} content files",
-                    INFO, report.packages_removed, report.files_removed
-                );
-            } else {
-                println!(
-                    " {} Removed {} packages and {} content files",
-                    CHECKMARK, report.packages_removed, report.files_removed
-                );
-            }
-            println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
-        }
+        Command::Cache(command) => match command {
+            CacheCommand::Path => print_cache_path(&dir, &config_overrides),
+            CacheCommand::Clean => print_cache_clean(&dir, &config_overrides),
+        },
 
-        Command::StoreVerify => {
-            let report = match store_verify_with_overrides(&dir, &config_overrides) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
-                    std::process::exit(1);
-                }
-            };
-            println!(" {} Packages checked: {}", INFO, report.packages_checked);
-            println!(" {} Files checked: {}", INFO, report.files_checked);
-            if report.is_ok() {
-                println!(" {} Store verified", CHECKMARK);
-            } else {
-                for missing in &report.missing {
-                    eprintln!("{} missing: {}", CROSS, missing);
-                }
-                for corrupted in &report.corrupted {
-                    eprintln!("{} corrupted: {}", CROSS, corrupted);
-                }
-                std::process::exit(1);
-            }
-        }
+        Command::StorePath => print_store_path(&dir, &config_overrides),
+        Command::StorePrune { dry_run } => print_store_prune(&dir, &config_overrides, dry_run),
+        Command::StoreVerify => print_store_verify(&dir, &config_overrides),
     }
 
     Ok(())
@@ -249,6 +232,94 @@ const CHECKMARK: &str = "\u{2713}";
 const CROSS: &str = "\u{2717}";
 const INFO: &str = "\u{2139}";
 const REMOVE: &str = "\u{2716}";
+
+fn print_store_path(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+    let path = match store_path_with_overrides(project_root, overrides) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", errors::format_error(&e, project_root));
+            std::process::exit(1);
+        }
+    };
+    println!("{}", path.display());
+}
+
+fn print_store_prune(project_root: &std::path::Path, overrides: &ConfigOverrides, dry_run: bool) {
+    let report = match store_prune_with_overrides(project_root, dry_run, overrides) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{}", errors::format_error(&e, project_root));
+            std::process::exit(1);
+        }
+    };
+    if dry_run {
+        println!(
+            " {} Would remove {} packages and {} content files",
+            INFO, report.packages_removed, report.files_removed
+        );
+    } else {
+        println!(
+            " {} Removed {} packages and {} content files",
+            CHECKMARK, report.packages_removed, report.files_removed
+        );
+    }
+    println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
+}
+
+fn print_store_verify(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+    let report = match store_verify_with_overrides(project_root, overrides) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{}", errors::format_error(&e, project_root));
+            std::process::exit(1);
+        }
+    };
+    println!(" {} Packages checked: {}", INFO, report.packages_checked);
+    println!(" {} Files checked: {}", INFO, report.files_checked);
+    if report.is_ok() {
+        println!(" {} Store verified", CHECKMARK);
+    } else {
+        for missing in &report.missing {
+            eprintln!("{} missing: {}", CROSS, missing);
+        }
+        for corrupted in &report.corrupted {
+            eprintln!("{} corrupted: {}", CROSS, corrupted);
+        }
+        std::process::exit(1);
+    }
+}
+
+fn print_cache_path(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+    let path = match cache_path_with_overrides(project_root, overrides) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", errors::format_error(&e, project_root));
+            std::process::exit(1);
+        }
+    };
+    println!("{}", path.display());
+}
+
+fn print_cache_clean(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+    let report = match cache_clean_with_overrides(project_root, overrides) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{}", errors::format_error(&e, project_root));
+            std::process::exit(1);
+        }
+    };
+
+    if report.existed {
+        println!(" {} Cleared cache: {}", CHECKMARK, report.path.display());
+        println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
+    } else {
+        println!(
+            " {} Cache is already empty: {}",
+            INFO,
+            report.path.display()
+        );
+    }
+}
 
 /// Run the install command and print the final install summary.
 async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {

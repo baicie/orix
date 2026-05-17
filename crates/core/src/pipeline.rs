@@ -1,6 +1,7 @@
 //! Install pipeline orchestration.
 
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -90,6 +91,17 @@ pub struct RemoveReport {
     pub removed_packages: Vec<String>,
     /// Install report for the updated graph.
     pub install_report: InstallReport,
+}
+
+/// Report from cleaning the tarball cache.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheCleanReport {
+    /// Cache directory that was cleaned.
+    pub path: PathBuf,
+    /// Whether the cache directory existed before cleaning.
+    pub existed: bool,
+    /// Best-effort number of bytes removed.
+    pub bytes_reclaimed: u64,
 }
 
 /// Summary of lockfile changes.
@@ -413,6 +425,67 @@ pub fn store_verify_with_overrides(
         .with_context(|| "failed to load configuration")?;
     let store = Store::open(config.store_dir).with_context(|| "failed to open store")?;
     store.verify()
+}
+
+/// Return the resolved tarball cache path for this project.
+pub fn cache_path(project_root: &Path) -> Result<PathBuf> {
+    cache_path_with_overrides(project_root, &ConfigOverrides::default())
+}
+
+/// Return the resolved tarball cache path for this project using explicit overrides.
+pub fn cache_path_with_overrides(
+    project_root: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<PathBuf> {
+    let config = Config::load_with_overrides(project_root, overrides)
+        .with_context(|| "failed to load configuration")?;
+    Ok(config.cache_dir)
+}
+
+/// Remove all tarballs from the configured cache directory.
+pub fn cache_clean(project_root: &Path) -> Result<CacheCleanReport> {
+    cache_clean_with_overrides(project_root, &ConfigOverrides::default())
+}
+
+/// Remove all tarballs from the configured cache directory using explicit overrides.
+pub fn cache_clean_with_overrides(
+    project_root: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<CacheCleanReport> {
+    let path = cache_path_with_overrides(project_root, overrides)?;
+    let existed = path.exists();
+    let bytes_reclaimed = if existed { dir_size(&path) } else { 0 };
+
+    if existed {
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("failed to remove cache directory {}", path.display()))?;
+    }
+    fs::create_dir_all(&path)
+        .with_context(|| format!("failed to create cache directory {}", path.display()))?;
+
+    Ok(CacheCleanReport {
+        path,
+        existed,
+        bytes_reclaimed,
+    })
+}
+
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let path = entry.path();
+            match entry.metadata() {
+                Ok(metadata) if metadata.is_dir() => dir_size(&path),
+                Ok(metadata) if metadata.is_file() => metadata.len(),
+                _ => 0,
+            }
+        })
+        .sum()
 }
 
 /// Add one or more packages to the project.
