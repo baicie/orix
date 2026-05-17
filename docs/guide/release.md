@@ -37,7 +37,7 @@ Push of the tag triggers GitHub Actions (`release.yml`):
 | `--dry-run` | Preview all steps without making changes |
 | `--crates-only` | Only publish crates, skip git tag and push |
 | `--skip-crates` | Only create and push git tag, skip crates.io publish |
-| `--force` | Yank existing crates at this version first, then re-publish |
+| `--force` | Yank existing crates when publishing, and delete/recreate the git tag when releasing |
 | `--version X.Y.Z` | Override version from Cargo.toml (also sets the git tag) |
 | `--tag-prefix PREFIX` | Custom tag prefix (default: `v`) |
 
@@ -86,7 +86,7 @@ cargo xtask publish-crates
 make publish orix_dry_run=0
 ```
 
-### Force Re-publish Same Version
+### Force Re-release Same Version
 
 When you need to re-publish the same version (e.g. security fix):
 
@@ -102,7 +102,14 @@ cargo xtask publish-crates --force --version 0.1.0
 cargo xtask release --force --version 0.1.0
 ```
 
-The `--force` flag combines both steps automatically.
+The `--force` flag combines both steps automatically. During `cargo xtask release`,
+it also deletes any existing local tag and remote `origin` tag before creating and
+pushing the tag again. This is useful when you want to rerun GitHub Release
+packaging for the same version:
+
+```bash
+cargo xtask release --version 0.1.0 --skip-crates --force
+```
 
 ## Changelog
 

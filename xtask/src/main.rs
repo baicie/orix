@@ -67,8 +67,8 @@ enum Task {
         /// Skip publishing to crates.io, only create and push the git tag.
         #[arg(long)]
         skip_crates: bool,
-        /// Force re-publish: yank existing crates at this version first.
-        /// Use when re-publishing the same version (e.g. after a security fix).
+        /// Force re-release: yank existing crates when publishing, and recreate the git tag.
+        /// Use when re-publishing or re-triggering the same version release.
         #[arg(long)]
         force: bool,
         /// Custom version tag prefix (default: "v").
@@ -214,9 +214,16 @@ fn run_release(
     if !crates_only {
         eprintln!("\n[3/5] Tagging commit: {tag}");
         if !dry_run {
+            if force {
+                recreate_release_tag(&tag)?;
+            }
             run("git", ["tag", &tag])?;
             run("git", ["tag", "-l", &format!("{tag_prefix}*")])?;
         } else {
+            if force {
+                eprintln!("  (dry-run) would delete local tag if present: git tag -d {tag}");
+                eprintln!("  (dry-run) would delete remote tag if present: git push origin :refs/tags/{tag}");
+            }
             eprintln!("  (dry-run) would run: git tag {tag}");
         }
 
@@ -251,6 +258,55 @@ fn run_release(
     }
 
     Ok(())
+}
+
+/// Delete local and remote tags so a forced release can recreate the same version tag.
+fn recreate_release_tag(tag: &str) -> Result<()> {
+    if local_tag_exists(tag)? {
+        eprintln!("  --force: deleting existing local tag {tag}...");
+        run("git", ["tag", "-d", tag])?;
+    } else {
+        eprintln!("  --force: local tag {tag} does not exist; skipping delete.");
+    }
+
+    if remote_tag_exists(tag)? {
+        eprintln!("  --force: deleting existing remote tag origin/{tag}...");
+        let remote_ref = format!(":refs/tags/{tag}");
+        run("git", ["push", "origin", &remote_ref])?;
+    } else {
+        eprintln!("  --force: remote tag origin/{tag} does not exist; skipping delete.");
+    }
+
+    Ok(())
+}
+
+fn local_tag_exists(tag: &str) -> Result<bool> {
+    let tag_ref = format!("refs/tags/{tag}");
+    let status = Command::new("git")
+        .args(["rev-parse", "-q", "--verify", &tag_ref])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("failed to check local tag {tag}"))?;
+    Ok(status.success())
+}
+
+fn remote_tag_exists(tag: &str) -> Result<bool> {
+    let tag_ref = format!("refs/tags/{tag}");
+    let status = Command::new("git")
+        .args(["ls-remote", "--exit-code", "--tags", "origin", &tag_ref])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("failed to check remote tag origin/{tag}"))?;
+
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(2) => Ok(false),
+        _ => bail!("failed to check remote tag origin/{tag}"),
+    }
 }
 
 /// Publish all crates to crates.io in topological order.
