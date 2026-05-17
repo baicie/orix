@@ -11,15 +11,11 @@ authors.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 walkdir = { workspace = true }
-rayon = { workspace = true }
 orix-domain = { workspace = true }
 orix-store = { workspace = true }
-orix-manifest = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

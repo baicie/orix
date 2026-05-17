@@ -11,23 +11,18 @@ authors.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "sync"] }
 reqwest = { workspace = true }
 sha2 = { workspace = true }
 sha1 = "0.10"
 hex = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
-rayon = { workspace = true }
 subtle = { workspace = true }
 tempfile = { workspace = true }
-walkdir = { workspace = true }
 tracing = { workspace = true }
 orix-domain = { workspace = true }
-orix-registry = { workspace = true }
 orix-store = { workspace = true }
 
 [lints]

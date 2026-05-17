@@ -11,11 +11,9 @@ authors.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
 glob = { workspace = true }
-orix-domain = { workspace = true }
 orix-manifest = { workspace = true }
 
 [lints]
