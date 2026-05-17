@@ -20,7 +20,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
@@ -78,19 +78,19 @@ indicatif = "0.17"
 clearscreen = "4"
 
 # ── orix crate aliases (path must match actual package name) ──────────────────
-orix-cli = { path = "crates/cli", version = "1.0.0" }
-orix-core = { path = "crates/core", version = "1.0.0" }
-orix-config = { path = "crates/config", version = "1.0.0" }
-orix-utils = { path = "crates/utils", version = "1.0.0" }
-orix-domain = { path = "crates/domain", version = "1.0.0" }
-orix-manifest = { path = "crates/manifest", version = "1.0.0" }
-orix-resolver = { path = "crates/resolver", version = "1.0.0" }
-orix-registry = { path = "crates/registry", version = "1.0.0" }
-orix-fetcher = { path = "crates/fetcher", version = "1.0.0" }
-orix-store = { path = "crates/store", version = "1.0.0" }
-orix-lockfile = { path = "crates/lockfile", version = "1.0.0" }
-orix-linker = { path = "crates/linker", version = "1.0.0" }
-orix-workspace = { path = "crates/workspace", version = "1.0.0" }
+orix-cli = { path = "crates/cli", version = "0.1.0" }
+orix-core = { path = "crates/core", version = "0.1.0" }
+orix-config = { path = "crates/config", version = "0.1.0" }
+orix-utils = { path = "crates/utils", version = "0.1.0" }
+orix-domain = { path = "crates/domain", version = "0.1.0" }
+orix-manifest = { path = "crates/manifest", version = "0.1.0" }
+orix-resolver = { path = "crates/resolver", version = "0.1.0" }
+orix-registry = { path = "crates/registry", version = "0.1.0" }
+orix-fetcher = { path = "crates/fetcher", version = "0.1.0" }
+orix-store = { path = "crates/store", version = "0.1.0" }
+orix-lockfile = { path = "crates/lockfile", version = "0.1.0" }
+orix-linker = { path = "crates/linker", version = "0.1.0" }
+orix-workspace = { path = "crates/workspace", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
