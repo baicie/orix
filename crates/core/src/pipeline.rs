@@ -17,8 +17,7 @@ use orix_resolver::Resolver;
 use orix_store::Store;
 use orix_workspace::{detect_workspace_cycles, Workspace};
 
-pub use orix_config::Config;
-use orix_config::ConfigOverrides;
+pub use orix_config::{Config, ConfigOverrides};
 
 /// Progress event emitted during install.
 #[derive(Debug, Clone)]
@@ -44,6 +43,10 @@ pub enum InstallEvent {
 pub struct InstallOpts {
     /// Registry URL override from CLI.
     pub registry: Option<String>,
+    /// Global store directory override from CLI.
+    pub store_dir: Option<PathBuf>,
+    /// Local tarball cache directory override from CLI.
+    pub cache_dir: Option<PathBuf>,
     /// Require a lockfile and fail if it doesn't match package.json.
     pub frozen_lockfile: bool,
     /// Only use locally cached packages.
@@ -111,6 +114,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         project_root,
         &ConfigOverrides {
             registry: opts.registry.clone(),
+            store_dir: opts.store_dir.clone(),
+            cache_dir: opts.cache_dir.clone(),
         },
     )
     .with_context(|| "failed to load configuration")?;
@@ -334,13 +339,32 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
 /// Return the resolved store path for this project.
 pub fn store_path(project_root: &Path) -> Result<PathBuf> {
-    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    store_path_with_overrides(project_root, &ConfigOverrides::default())
+}
+
+/// Return the resolved store path for this project using explicit overrides.
+pub fn store_path_with_overrides(
+    project_root: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<PathBuf> {
+    let config = Config::load_with_overrides(project_root, overrides)
+        .with_context(|| "failed to load configuration")?;
     Ok(config.store_dir)
 }
 
 /// Prune packages from the store that are not referenced by this project's lockfile.
 pub fn store_prune(project_root: &Path, dry_run: bool) -> Result<orix_store::PruneReport> {
-    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    store_prune_with_overrides(project_root, dry_run, &ConfigOverrides::default())
+}
+
+/// Prune packages from the configured store using explicit overrides.
+pub fn store_prune_with_overrides(
+    project_root: &Path,
+    dry_run: bool,
+    overrides: &ConfigOverrides,
+) -> Result<orix_store::PruneReport> {
+    let config = Config::load_with_overrides(project_root, overrides)
+        .with_context(|| "failed to load configuration")?;
     let lockfile_path = config.lockfile_path();
     if !lockfile_path.exists() {
         anyhow::bail!(
@@ -357,7 +381,16 @@ pub fn store_prune(project_root: &Path, dry_run: bool) -> Result<orix_store::Pru
 
 /// Verify all packages and content-addressable files in the store.
 pub fn store_verify(project_root: &Path) -> Result<orix_store::VerifyReport> {
-    let config = Config::load(project_root).with_context(|| "failed to load configuration")?;
+    store_verify_with_overrides(project_root, &ConfigOverrides::default())
+}
+
+/// Verify all packages and content-addressable files in the configured store.
+pub fn store_verify_with_overrides(
+    project_root: &Path,
+    overrides: &ConfigOverrides,
+) -> Result<orix_store::VerifyReport> {
+    let config = Config::load_with_overrides(project_root, overrides)
+        .with_context(|| "failed to load configuration")?;
     let store = Store::open(config.store_dir).with_context(|| "failed to open store")?;
     store.verify()
 }

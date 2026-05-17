@@ -12,6 +12,7 @@
             InstallerVersion="500"
             Compressed="yes"
             InstallScope="perMachine"
+            Platform="x64"
             Description="High-performance package manager compatible with pnpm"
         />
         <MajorUpgrade
@@ -30,6 +31,7 @@
         <Property Id="ARPPRODUCTICON" Value="orix.exe" />
         <Property Id="ARPHELPLINK" Value="https://github.com/baicie/orix" />
         <Property Id="ARPURLINFOABOUT" Value="https://github.com/baicie/orix" />
+        <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 
         <UIRef Id="WixUI_InstallDir" />
         <UIRef Id="WixUI_ErrorProgressText" />
@@ -49,17 +51,15 @@
 
     <Fragment>
         <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
-            <Component Id="orix_exe" Guid="B5C8E2A1-3D4F-6B7E-9A8C-1D2E3F4A5B6D">
-                <File Id="orix_exe" Source="$(var.SourceDir)\orix.exe" KeyPath="yes">
-                    <RegistryValue
-                        Root="HKLM"
-                        Key="Software\baicie\orix"
-                        Name="InstallPath"
-                        Value="[INSTALLFOLDER]"
-                        Type="string"
-                        KeyPath="no"
-                    />
-                </File>
+            <Component Id="orix_exe" Guid="B5C8E2A1-3D4F-6B7E-9A8C-1D2E3F4A5B6D" Win64="yes">
+                <File Id="orix_exe" Source="$(var.SourceDir)\orix.exe" KeyPath="yes" />
+                <RegistryValue
+                    Root="HKLM"
+                    Key="Software\baicie\orix"
+                    Name="InstallPath"
+                    Value="[INSTALLFOLDER]"
+                    Type="string"
+                />
             </Component>
         </ComponentGroup>
 
@@ -91,36 +91,4 @@
         </DirectoryRef>
     </Fragment>
 
-    <Fragment>
-        <UI Id="WixUI_InstallDir">
-            <TextStyle Id="WixUI_Font_Normal" FaceName="Segoe UI" Size="8" />
-            <TextStyle Id="WixUI_Font_Bigger" FaceName="Segoe UI" Size="12" />
-            <TextStyle Id="WixUI_Font_Title" FaceName="Segoe UI" Size="12" Bold="yes" />
-
-            <DialogRef Id="BrowseDlg" />
-            <DialogRef Id="DiskCostDlg" />
-            <DialogRef Id="ErrorDlg" />
-            <DialogRef Id="FatalError" />
-            <DialogRef Id="FilesInUse" />
-            <DialogRef Id="MsiRMFilesInUse" />
-            <DialogRef Id="PrepareDlg" />
-            <DialogRef Id="ProgressDlg" />
-            <DialogRef Id="ResumeDlg" />
-            <DialogRef Id="UserExit" />
-
-            <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIValidatePath" />
-            <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIPrintEula" />
-            <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" />
-            <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
-            <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath" />
-            <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="WixCAQuietExec" />
-            <Publish Dialog="InstallDirDlg" Control="Next" Event="EndDialog" Value="Return" />
-            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" />
-        </UI>
-
-        <IconDefinition Id="WixUI_Icon_Info" />
-        <IconDefinition Id="WixUI_Icon_Up" />
-        <IconDefinition Id="WixUI_Icon_Exclamation" />
-        <IconDefinition Id="WixUI_Icon_Error" />
-    </Fragment>
 </Wix>

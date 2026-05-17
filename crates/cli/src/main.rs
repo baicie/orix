@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{
-    add, install, pipeline, remove, store_path, store_prune, store_verify, InstallEvent,
-    InstallOpts,
+    add, install, pipeline, remove, store_path_with_overrides, store_prune_with_overrides,
+    store_verify_with_overrides, ConfigOverrides, InstallEvent, InstallOpts,
 };
 
 mod errors;
@@ -30,6 +30,12 @@ struct Cli {
 
     #[arg(long, short = 'C', default_value = ".", env = "ORIX_DIR")]
     dir: PathBuf,
+
+    #[arg(long, global = true, env = "ORIX_STORE", value_name = "DIR")]
+    store_dir: Option<PathBuf>,
+
+    #[arg(long, global = true, env = "ORIX_CACHE", value_name = "DIR")]
+    cache_dir: Option<PathBuf>,
 
     #[arg(long, global = true, default_value = "auto")]
     color: ColorChoice,
@@ -108,13 +114,22 @@ async fn main() -> Result<()> {
 
     let opts = InstallOpts {
         registry: cli.registry.clone(),
+        store_dir: cli.store_dir.clone(),
+        cache_dir: cli.cache_dir.clone(),
         ..InstallOpts::default()
+    };
+    let config_overrides = ConfigOverrides {
+        registry: cli.registry.clone(),
+        store_dir: cli.store_dir.clone(),
+        cache_dir: cli.cache_dir.clone(),
     };
 
     match cli.command {
         Command::Install(args) => {
             let install_opts = InstallOpts {
                 registry: cli.registry.clone(),
+                store_dir: cli.store_dir.clone(),
+                cache_dir: cli.cache_dir.clone(),
                 frozen_lockfile: args.frozen_lockfile,
                 offline: args.offline,
                 force: args.force,
@@ -169,7 +184,7 @@ async fn main() -> Result<()> {
         }
 
         Command::StorePath => {
-            let path = match store_path(&dir) {
+            let path = match store_path_with_overrides(&dir, &config_overrides) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -180,7 +195,7 @@ async fn main() -> Result<()> {
         }
 
         Command::StorePrune { dry_run } => {
-            let report = match store_prune(&dir, dry_run) {
+            let report = match store_prune_with_overrides(&dir, dry_run, &config_overrides) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -202,7 +217,7 @@ async fn main() -> Result<()> {
         }
 
         Command::StoreVerify => {
-            let report = match store_verify(&dir) {
+            let report = match store_verify_with_overrides(&dir, &config_overrides) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));

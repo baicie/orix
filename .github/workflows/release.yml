@@ -127,7 +127,7 @@ jobs:
       - name: Install WiX Toolset
         shell: pwsh
         run: |
-          $wixVersion = "v3.14.0.7012.20240408"
+          $wixVersion = "wix3141rtm"
           # Use NuGet to get WiX tools
           $wixPath = "$env:TEMP\wix-$wixVersion"
           if (-not (Test-Path $wixPath)) {
@@ -145,8 +145,9 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           $v = $env:VERSION -replace '^v', ''
-          $wixPath = "$env:TEMP\wix-v3.14.0.7012.20240408"
+          $wixPath = "$env:TEMP\wix-wix3141rtm"
           $env:PATH = "$wixPath;$env:PATH"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\dist" | Out-Null
 
           # Prepare WXS
           $wxs = Get-Content "${{ github.workspace }}\packaging\wix\Product.wxs" -Raw

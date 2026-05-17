@@ -49,6 +49,10 @@ pub struct Config {
 pub struct ConfigOverrides {
     /// Registry base URL override.
     pub registry: Option<String>,
+    /// Global store directory override.
+    pub store_dir: Option<PathBuf>,
+    /// Local tarball cache directory override.
+    pub cache_dir: Option<PathBuf>,
 }
 
 /// Color output preference.
@@ -162,6 +166,12 @@ impl Config {
             if let Ok(url) = Url::parse(registry) {
                 self.registry = url;
             }
+        }
+        if let Some(store_dir) = &overrides.store_dir {
+            self.store_dir = store_dir.clone();
+        }
+        if let Some(cache_dir) = &overrides.cache_dir {
+            self.cache_dir = cache_dir.clone();
         }
     }
 
@@ -300,10 +310,35 @@ mod tests {
             temp.path(),
             &ConfigOverrides {
                 registry: Some("https://cli.example.test/".to_string()),
+                store_dir: None,
+                cache_dir: None,
             },
         )?;
 
         assert_eq!(config.registry.as_str(), "https://cli.example.test/");
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_path_overrides_win_over_environment() -> anyhow::Result<()> {
+        let _lock = ENV_LOCK
+            .lock()
+            .map_err(|error| anyhow::anyhow!("env lock poisoned: {}", error))?;
+        let temp = tempfile::tempdir()?;
+        let _store = EnvGuard::set("ORIX_STORE", "C:/orix-env-store");
+        let _cache = EnvGuard::set("ORIX_CACHE", "C:/orix-env-cache");
+
+        let config = Config::load_with_overrides(
+            temp.path(),
+            &ConfigOverrides {
+                registry: None,
+                store_dir: Some(PathBuf::from("D:/orix-cli-store")),
+                cache_dir: Some(PathBuf::from("D:/orix-cli-cache")),
+            },
+        )?;
+
+        assert_eq!(config.store_dir, PathBuf::from("D:/orix-cli-store"));
+        assert_eq!(config.cache_dir, PathBuf::from("D:/orix-cli-cache"));
         Ok(())
     }
 

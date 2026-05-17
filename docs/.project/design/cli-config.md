@@ -26,6 +26,9 @@ orix install --force
 
 # 安装到特定目录（用于 workspace 中的子包）
 orix install --dir packages/my-lib
+
+# 使用自定义全局 store 和 tarball cache，避免默认落到用户目录 / C 盘
+orix --store-dir D:/orix/store --cache-dir D:/orix/cache install
 ```
 
 ### Add（添加）
@@ -93,6 +96,14 @@ struct Cli {
     /// 工作目录（默认：当前目录）
     #[arg(long, short = 'C', default_value = ".", env = "RPNPM_DIR")]
     dir: PathBuf,
+
+    /// 全局 store 目录（默认：~/.orix/store/v1）
+    #[arg(long, global = true, env = "ORIX_STORE")]
+    store_dir: Option<PathBuf>,
+
+    /// tarball cache 目录（默认：系统 cache 目录）
+    #[arg(long, global = true, env = "ORIX_CACHE")]
+    cache_dir: Option<PathBuf>,
 
     /// 全局：输出使用颜色
     #[arg(long, global = true, default_value = "auto")]

@@ -27,6 +27,23 @@ fn cli_help_works() {
 }
 
 #[test]
+fn store_path_accepts_cli_store_dir_override() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+
+    let mut cmd = Command::cargo_bin("orix").unwrap();
+    cmd.arg("-C")
+        .arg(project.path())
+        .arg("--store-dir")
+        .arg(store.path())
+        .arg("store-path")
+        .env("ORIX_STORE", "C:/orix-env-store")
+        .assert()
+        .success()
+        .stdout(contains(store.path().display().to_string()));
+}
+
+#[test]
 fn install_fetches_package_from_mock_registry() {
     let tarball = make_package_tarball();
     let integrity = format!("sha512-{}", hex::encode(Sha512::digest(&tarball)));
@@ -50,11 +67,13 @@ fn install_fetches_package_from_mock_registry() {
     let mut cmd = Command::cargo_bin("orix").unwrap();
     cmd.arg("--registry")
         .arg(registry.base_url())
+        .arg("--store-dir")
+        .arg(store.path())
+        .arg("--cache-dir")
+        .arg(cache.path())
         .arg("-C")
         .arg(project.path())
         .arg("install")
-        .env("ORIX_STORE", store.path())
-        .env("ORIX_CACHE", cache.path())
         .env("ORIX_LOG", "error")
         .assert()
         .success()
