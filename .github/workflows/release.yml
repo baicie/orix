@@ -110,7 +110,7 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             npm_name: darwin-x64
-            runner: macos-13
+            runner: macos-15
           - target: aarch64-apple-darwin
             npm_name: darwin-arm64
             runner: macos-latest
