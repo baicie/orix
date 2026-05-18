@@ -504,9 +504,8 @@ jobs:
           cp README.md dist/main/README.md
           cp LICENSE dist/main/LICENSE
 
-      - name: Build platform binaries
-        env:
-          CARGO_TERM_COLOR: always
+      - name: Prepare platform packages
+        shell: bash
         run: |
           mkdir -p dist/darwin-arm64/bin
           mkdir -p dist/darwin-x64/bin
@@ -514,6 +513,12 @@ jobs:
           mkdir -p dist/linux-arm64-gnu/bin
           mkdir -p dist/linux-x64-musl/bin
           mkdir -p dist/win32-x64-msvc/bin
+
+          for platform in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu linux-x64-musl win32-x64-msvc; do
+            cp "npm/$platform/package.json" "dist/$platform/package.json"
+            cp "npm/$platform/README.md" "dist/$platform/README.md" 2>/dev/null || true
+            cp "npm/$platform/LICENSE" "dist/$platform/LICENSE" 2>/dev/null || true
+          done
 
           cp artifacts/npm-darwin-arm64/bin/orix dist/darwin-arm64/bin/orix || true
           cp artifacts/npm-darwin-x64/bin/orix dist/darwin-x64/bin/orix || true
