@@ -137,7 +137,7 @@ fn apply_single_file_patch(patch: &patch::Patch<'_>, temp_dir: &Path) -> Result<
         use std::os::unix::fs::PermissionsExt;
         if let Ok(metadata) = old_path.metadata() {
             let mode = metadata.permissions().mode();
-            let mut perms = std::fs::Permissions::from_mode(mode);
+            let perms = std::fs::Permissions::from_mode(mode);
             let _ = std::fs::set_permissions(&new_path, perms);
         }
     }
