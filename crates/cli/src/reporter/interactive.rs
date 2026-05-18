@@ -108,46 +108,38 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_render_throttled() {
+    fn test_render_throttled() -> io::Result<()> {
         let mut reporter = InteractiveReporter::new();
 
-        reporter
-            .on_event(InstallEvent::Started {
-                command: "orix install".to_string(),
-            })
-            .expect("reporter should not fail");
+        reporter.on_event(InstallEvent::Started {
+            command: "orix install".to_string(),
+        })?;
 
         let frame1 = reporter.last_rendered_frame.clone();
         assert!(!frame1.is_empty());
 
-        // Sending an identical Started event should not re-render (throttled).
-        reporter
-            .on_event(InstallEvent::Started {
-                command: "orix install".to_string(),
-            })
-            .expect("reporter should not fail");
+        reporter.on_event(InstallEvent::Started {
+            command: "orix install".to_string(),
+        })?;
 
-        // Frame should be unchanged due to throttling + identical frame dedup.
         assert_eq!(frame1, reporter.last_rendered_frame);
+        Ok(())
     }
 
     #[test]
-    fn test_render_finished() {
+    fn test_render_finished() -> io::Result<()> {
         let mut reporter = InteractiveReporter::new();
 
-        reporter
-            .on_event(InstallEvent::Started {
-                command: "orix install".to_string(),
-            })
-            .expect("reporter should not fail");
+        reporter.on_event(InstallEvent::Started {
+            command: "orix install".to_string(),
+        })?;
 
-        reporter
-            .on_event(InstallEvent::Finished {
-                installed: 5,
-                duration: Duration::from_millis(100),
-            })
-            .expect("reporter should not fail");
+        reporter.on_event(InstallEvent::Finished {
+            installed: 5,
+            duration: Duration::from_millis(100),
+        })?;
 
         assert!(reporter.last_rendered_frame.contains("Done in"));
+        Ok(())
     }
 }

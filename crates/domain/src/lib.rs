@@ -1014,25 +1014,20 @@ mod tests {
     }
 
     #[test]
-    fn peer_context_key_generates_sorted_suffix() {
+    fn peer_context_key_generates_sorted_suffix() -> anyhow::Result<()> {
         let mut ctx = PeerContext::default();
         ctx.insert(
             PackageName::from("lodash"),
-            PackageId::new(
-                PackageName::from("lodash"),
-                Version::parse("4.17.21").unwrap(),
-            ),
+            PackageId::new(PackageName::from("lodash"), Version::parse("4.17.21")?),
         );
         ctx.insert(
             PackageName::from("react"),
-            PackageId::new(
-                PackageName::from("react"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            PackageId::new(PackageName::from("react"), Version::parse("18.2.0")?),
         );
         let key = ctx.key();
         assert!(key.contains("(lodash@4.17.21)"));
         assert!(key.contains("(react@18.2.0)"));
+        Ok(())
     }
 
     #[test]
@@ -1043,70 +1038,59 @@ mod tests {
     }
 
     #[test]
-    fn package_instance_id_key_includes_peer_suffix() {
+    fn package_instance_id_key_includes_peer_suffix() -> anyhow::Result<()> {
         let mut ctx = PeerContext::default();
         ctx.insert(
             PackageName::from("react"),
-            PackageId::new(
-                PackageName::from("react"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            PackageId::new(PackageName::from("react"), Version::parse("18.2.0")?),
         );
         let instance = PackageInstanceId::new(
-            PackageId::new(
-                PackageName::from("react-dom"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),
             ctx,
         );
         let key = instance.key();
         assert!(key.contains("react-dom@18.2.0"));
         assert!(key.contains("react@18.2.0"));
+        Ok(())
     }
 
     #[test]
-    fn package_instance_id_key_without_peers_matches_package_key() {
+    fn package_instance_id_key_without_peers_matches_package_key() -> anyhow::Result<()> {
         let ctx = PeerContext::default();
         let instance = PackageInstanceId::new(
-            PackageId::new(
-                PackageName::from("react-dom"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),
             ctx,
         );
         assert_eq!(instance.key(), instance.without_peers().key());
+        Ok(())
     }
 
     #[test]
-    fn resolver_diagnostic_display_formats_missing_peer() {
+    fn resolver_diagnostic_display_formats_missing_peer() -> anyhow::Result<()> {
         let diag = ResolverDiagnostic::MissingPeer {
-            requester: PackageId::new(
-                PackageName::from("react-dom"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),
             peer_name: PackageName::from("react"),
-            range: VersionConstraint::parse("^18.0.0").unwrap(),
+            range: VersionConstraint::parse("^18.0.0")?,
         };
         let msg = diag.to_string();
         assert!(msg.contains("unmet peer dependency"));
         assert!(msg.contains("react-dom@18.2.0"));
         assert!(msg.contains("^18.0.0"));
+        Ok(())
     }
 
     #[test]
-    fn resolver_diagnostic_display_formats_peer_conflict() {
+    fn resolver_diagnostic_display_formats_peer_conflict() -> anyhow::Result<()> {
         let diag = ResolverDiagnostic::PeerVersionConflict {
-            requester: PackageId::new(
-                PackageName::from("react-dom"),
-                Version::parse("18.2.0").unwrap(),
-            ),
+            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),
             peer_name: PackageName::from("react"),
-            requested_range: VersionConstraint::parse("^18.0.0").unwrap(),
-            found_version: Version::parse("17.0.2").unwrap(),
+            requested_range: VersionConstraint::parse("^18.0.0")?,
+            found_version: Version::parse("17.0.2")?,
         };
         let msg = diag.to_string();
         assert!(msg.contains("version conflict"));
         assert!(msg.contains("found"));
         assert!(msg.contains("17.0.2"));
+        Ok(())
     }
 }

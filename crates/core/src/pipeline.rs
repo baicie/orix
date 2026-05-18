@@ -1368,11 +1368,7 @@ pub async fn deploy(
 
     // 4. Compute production dependency closure.
     let importer_key = target.relative_path.display().to_string();
-    let mut prod_deps: Vec<String> = target_manifest
-        .dependencies
-        .keys()
-        .cloned()
-        .collect();
+    let mut prod_deps: Vec<String> = target_manifest.dependencies.keys().cloned().collect();
 
     if !opts.prod {
         prod_deps.extend(target_manifest.dev_dependencies.keys().cloned());

@@ -669,6 +669,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
     fn test_config() -> Config {
         let tmp = tempfile::tempdir().unwrap();
         Config::load(tmp.path()).unwrap()
@@ -690,18 +691,18 @@ mod tests {
     }
 
     #[test]
-    fn scripts_disabled_when_ignore_scripts_true() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn scripts_disabled_when_ignore_scripts_true() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
         let config = Config::load_with_overrides(
             tmp.path(),
             &orix_config::ConfigOverrides {
                 ignore_scripts: Some(true),
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         let runner = ScriptRunner::new(config, test_manifest(), PathBuf::from("."), None);
         assert!(!runner.scripts_enabled());
+        Ok(())
     }
 
     #[test]
@@ -712,19 +713,19 @@ mod tests {
     }
 
     #[test]
-    fn dependency_scripts_allowed_when_in_allow_list() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn dependency_scripts_allowed_when_in_allow_list() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
         let config = Config::load_with_overrides(
             tmp.path(),
             &orix_config::ConfigOverrides {
                 allow_scripts: Some(vec!["esbuild".to_string()]),
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         let runner = ScriptRunner::new(config, test_manifest(), PathBuf::from("."), None);
         assert!(runner.dependency_scripts_allowed("esbuild"));
         assert!(!runner.dependency_scripts_allowed("typescript"));
+        Ok(())
     }
 
     #[test]

@@ -323,6 +323,7 @@ fn dep_graph_insert(c: &mut Criterion) {
                     os: Vec::new(),
                     cpu: Vec::new(),
                     depnodes: Vec::new(),
+                    patch: None,
                 });
             }
             // Use the graph to avoid optimizer removing the loop.
@@ -352,6 +353,7 @@ fn dep_graph_lookup(c: &mut Criterion) {
             os: Vec::new(),
             cpu: Vec::new(),
             depnodes: Vec::new(),
+            patch: None,
         });
     }
 

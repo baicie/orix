@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{Lockfile, LOCKFILE_VERSION};
@@ -478,7 +479,8 @@ mod tests {
     }
 
     #[test]
-    fn test_into_orix_lockfile_v9() {
+    fn test_into_orix_lockfile_v9() -> Result<()> {
+        use anyhow::Context;
         let pnpm_yaml = r#"
 lockfileVersion: 9
 importers:
@@ -497,14 +499,14 @@ packages:
     dependencies:
       scheduler: 0.23.0
 "#;
-        let pnpm: PnpmLockfile = serde_yaml::from_str(pnpm_yaml).unwrap();
+        let pnpm: PnpmLockfile = serde_yaml::from_str(pnpm_yaml)?;
         let orix = pnpm.into_orix_lockfile();
 
         assert_eq!(orix.version, LOCKFILE_VERSION);
         assert!(orix.importers.contains_key("."));
         assert!(orix.packages.contains_key("/react@18.2.0"));
 
-        let importer = orix.importers.get(".").unwrap();
+        let importer = orix.importers.get(".").context("missing root importer")?;
         assert_eq!(
             importer.specifiers.get("react"),
             Some(&"^18.0.0".to_string())
@@ -524,5 +526,6 @@ packages:
                 optional_dependencies: BTreeMap::new(),
             })
         );
+        Ok(())
     }
 }
