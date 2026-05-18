@@ -72,7 +72,7 @@ packages:
     name: '@google/model-viewer'
     version: 4.2.0
     resolution:
-      tarball: https://registry.npmmirror.com/@google/model-viewer/-/model-viewer-4.2.0.tgz
+      tarball: https://registry.npmjs.org/@google/model-viewer/-/model-viewer-4.2.0.tgz
       integrity: sha512-RjpAI5cLs9CdvPcMRsOs8Bea/lNmGTTyaPyl16o9Fv6Qn8VSpgBMmXFr/11yb0hTrsojp2dOACEcY77R8hVUVA==
       type: null
       path: null
@@ -90,7 +90,7 @@ packages:
     name: '@jridgewell/resolve-uri'
     version: 3.1.2
     resolution:
-      tarball: https://registry.npmmirror.com/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz
+      tarball: https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz
       integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==
       type: null
       path: null
@@ -106,7 +106,7 @@ packages:
     name: '@jridgewell/sourcemap-codec'
     version: 1.5.5
     resolution:
-      tarball: https://registry.npmmirror.com/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz
+      tarball: https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz
       integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==
       type: null
       path: null
@@ -122,7 +122,7 @@ packages:
     name: '@jridgewell/trace-mapping'
     version: 0.3.31
     resolution:
-      tarball: https://registry.npmmirror.com/@jridgewell/trace-mapping/-/trace-mapping-0.3.31.tgz
+      tarball: https://registry.npmjs.org/@jridgewell/trace-mapping/-/trace-mapping-0.3.31.tgz
       integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==
       type: null
       path: null
@@ -140,7 +140,7 @@ packages:
     name: '@juggle/resize-observer'
     version: 3.4.0
     resolution:
-      tarball: https://registry.npmmirror.com/@juggle/resize-observer/-/resize-observer-3.4.0.tgz
+      tarball: https://registry.npmjs.org/@juggle/resize-observer/-/resize-observer-3.4.0.tgz
       integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==
       type: null
       path: null
@@ -156,7 +156,7 @@ packages:
     name: '@lit-labs/ssr-dom-shim'
     version: 1.6.0
     resolution:
-      tarball: https://registry.npmmirror.com/@lit-labs/ssr-dom-shim/-/ssr-dom-shim-1.6.0.tgz
+      tarball: https://registry.npmjs.org/@lit-labs/ssr-dom-shim/-/ssr-dom-shim-1.6.0.tgz
       integrity: sha512-VHb0ALPMTlgKjM6yIxxoQNnpKyUKLD04VzeQdsiXkMqkvYlAHxq9glGLmgbb889/1GsohSOAjvQYoiBppXFqrQ==
       type: null
       path: null
@@ -172,7 +172,7 @@ packages:
     name: '@lit/reactive-element'
     version: 2.1.2
     resolution:
-      tarball: https://registry.npmmirror.com/@lit/reactive-element/-/reactive-element-2.1.2.tgz
+      tarball: https://registry.npmjs.org/@lit/reactive-element/-/reactive-element-2.1.2.tgz
       integrity: sha512-pbCDiVMnne1lYUIaYNN5wrwQXDtHaYtg7YEFPeW+hws6U47WeFvISGUWekPGKWOP1ygrs0ef0o1VJMk1exos5A==
       type: null
       path: null
@@ -189,7 +189,7 @@ packages:
     name: '@monogrid/gainmap-js'
     version: 3.4.0
     resolution:
-      tarball: https://registry.npmmirror.com/@monogrid/gainmap-js/-/gainmap-js-3.4.0.tgz
+      tarball: https://registry.npmjs.org/@monogrid/gainmap-js/-/gainmap-js-3.4.0.tgz
       integrity: sha512-2Z0FATFHaoYJ8b+Y4y4Hgfn3FRFwuU5zRrk+9dFWp4uGAdHGqVEdP7HP+gLA3X469KXHmfupJaUbKo1b/aDKIg==
       type: null
       path: null
@@ -206,7 +206,7 @@ packages:
     name: '@shopify/graphql-client'
     version: 1.4.1
     resolution:
-      tarball: https://registry.npmmirror.com/@shopify/graphql-client/-/graphql-client-1.4.1.tgz
+      tarball: https://registry.npmjs.org/@shopify/graphql-client/-/graphql-client-1.4.1.tgz
       integrity: sha512-/w4Uchx8ueI8gwmJd1ZbbIGndsjfMEFlzmay3P7rya5zj7K308xne/ggIvWDweueIut2qf1A8lI58xQl9Pu22w==
       type: null
       path: null
@@ -222,7 +222,7 @@ packages:
     name: '@shopify/hydrogen-react'
     version: 2026.4.2
     resolution:
-      tarball: https://registry.npmmirror.com/@shopify/hydrogen-react/-/hydrogen-react-2026.4.2.tgz
+      tarball: https://registry.npmjs.org/@shopify/hydrogen-react/-/hydrogen-react-2026.4.2.tgz
       integrity: sha512-hFLcpFlX0RBJKD1YJfgPZ9ZJiELNvUdB7D6TkxN+NKXcQSFgxGuT8+LQJu1/C755CzALiPHlMFMhzf9w+SL7UA==
       type: null
       path: null
@@ -244,7 +244,7 @@ packages:
     name: '@shopify/hydrogen'
     version: 2026.4.2
     resolution:
-      tarball: https://registry.npmmirror.com/@shopify/hydrogen/-/hydrogen-2026.4.2.tgz
+      tarball: https://registry.npmjs.org/@shopify/hydrogen/-/hydrogen-2026.4.2.tgz
       integrity: sha512-BMHg2AISg/3Z1O2XDMD8cxtfK+MPzWESa7T88E1x6N9yqrDJC6D/rU4R5j4OIWWUsHHjxItSQPFBMA0W/IL1+w==
       type: null
       path: null
@@ -269,7 +269,7 @@ packages:
     name: '@types/estree'
     version: 1.0.9
     resolution:
-      tarball: https://registry.npmmirror.com/@types/estree/-/estree-1.0.9.tgz
+      tarball: https://registry.npmjs.org/@types/estree/-/estree-1.0.9.tgz
       integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==
       type: null
       path: null
@@ -285,7 +285,7 @@ packages:
     name: '@types/trusted-types'
     version: 2.0.7
     resolution:
-      tarball: https://registry.npmmirror.com/@types/trusted-types/-/trusted-types-2.0.7.tgz
+      tarball: https://registry.npmjs.org/@types/trusted-types/-/trusted-types-2.0.7.tgz
       integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==
       type: null
       path: null
@@ -301,7 +301,7 @@ packages:
     name: '@xstate/fsm'
     version: 2.0.0
     resolution:
-      tarball: https://registry.npmmirror.com/@xstate/fsm/-/fsm-2.0.0.tgz
+      tarball: https://registry.npmjs.org/@xstate/fsm/-/fsm-2.0.0.tgz
       integrity: sha512-p/zcvBMoU2ap5byMefLkR+AM+Eh99CU/SDEQeccgKlmFNOMDwphaRGqdk+emvel/SaGZ7Rf9sDvzAplLzLdEVQ==
       type: null
       path: null
@@ -317,7 +317,7 @@ packages:
     name: ast-v8-to-istanbul
     version: 0.3.12
     resolution:
-      tarball: https://registry.npmmirror.com/ast-v8-to-istanbul/-/ast-v8-to-istanbul-0.3.12.tgz
+      tarball: https://registry.npmjs.org/ast-v8-to-istanbul/-/ast-v8-to-istanbul-0.3.12.tgz
       integrity: sha512-BRRC8VRZY2R4Z4lFIL35MwNXmwVqBityvOIwETtsCSwvjl0IdgFsy9NhdaA6j74nUdtJJlIypeRhpDam19Wq3g==
       type: null
       path: null
@@ -336,7 +336,7 @@ packages:
     name: buffer-from
     version: 1.1.2
     resolution:
-      tarball: https://registry.npmmirror.com/buffer-from/-/buffer-from-1.1.2.tgz
+      tarball: https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz
       integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==
       type: null
       path: null
@@ -352,7 +352,7 @@ packages:
     name: color-convert
     version: 1.9.3
     resolution:
-      tarball: https://registry.npmmirror.com/color-convert/-/color-convert-1.9.3.tgz
+      tarball: https://registry.npmjs.org/color-convert/-/color-convert-1.9.3.tgz
       integrity: sha512-QfAUtd+vFdAtFQcC8CCyYt1fYWxSqAiK2cSD6zDB8N3cpsEBAvRxp9zOGg6G/SHHJYAT88/az/IuDGALsNVbGg==
       type: null
       path: null
@@ -369,7 +369,7 @@ packages:
     name: color-name
     version: 1.1.3
     resolution:
-      tarball: https://registry.npmmirror.com/color-name/-/color-name-1.1.3.tgz
+      tarball: https://registry.npmjs.org/color-name/-/color-name-1.1.3.tgz
       integrity: sha512-72fSenhMw2HZMTVHeCA9KCmpEIbzWiQsjN+BHcBbS9vr1mtt+vJjPdksIBNUmKAW8TFUDPJK5SUU3QhE9NEXDw==
       type: null
       path: null
@@ -385,7 +385,7 @@ packages:
     name: color-name
     version: 1.1.4
     resolution:
-      tarball: https://registry.npmmirror.com/color-name/-/color-name-1.1.4.tgz
+      tarball: https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz
       integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==
       type: null
       path: null
@@ -401,7 +401,7 @@ packages:
     name: color-string
     version: 1.9.1
     resolution:
-      tarball: https://registry.npmmirror.com/color-string/-/color-string-1.9.1.tgz
+      tarball: https://registry.npmjs.org/color-string/-/color-string-1.9.1.tgz
       integrity: sha512-shrVawQFojnZv6xM40anx4CkoDP+fZsw/ZerEMsW/pyzsRbElpsL/DBVW7q3ExxwusdNXI3lXpuhEZkzs8p5Eg==
       type: null
       path: null
@@ -419,7 +419,7 @@ packages:
     name: color
     version: 3.2.1
     resolution:
-      tarball: https://registry.npmmirror.com/color/-/color-3.2.1.tgz
+      tarball: https://registry.npmjs.org/color/-/color-3.2.1.tgz
       integrity: sha512-aBl7dZI9ENN6fUGC7mWpMTPNHmWUSNan9tuWN6ahh5ZLNk9baLJOnSMlrQkHcrfFgz2/RigjUVAjdx36VcemKA==
       type: null
       path: null
@@ -437,7 +437,7 @@ packages:
     name: content-security-policy-builder
     version: 2.3.0
     resolution:
-      tarball: https://registry.npmmirror.com/content-security-policy-builder/-/content-security-policy-builder-2.3.0.tgz
+      tarball: https://registry.npmjs.org/content-security-policy-builder/-/content-security-policy-builder-2.3.0.tgz
       integrity: sha512-qmdEmn1M+WpadIeBLKr9Em8VJSCjtRINCSbYsyJHQ4liTwCmrLzIRpJdJpoVDnsvWUrR5iblYhQJqA4b4Hs/iw==
       type: null
       path: null
@@ -453,7 +453,7 @@ packages:
     name: estree-walker
     version: 3.0.3
     resolution:
-      tarball: https://registry.npmmirror.com/estree-walker/-/estree-walker-3.0.3.tgz
+      tarball: https://registry.npmjs.org/estree-walker/-/estree-walker-3.0.3.tgz
       integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==
       type: null
       path: null
@@ -470,7 +470,7 @@ packages:
     name: events
     version: 3.3.0
     resolution:
-      tarball: https://registry.npmmirror.com/events/-/events-3.3.0.tgz
+      tarball: https://registry.npmjs.org/events/-/events-3.3.0.tgz
       integrity: sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==
       type: null
       path: null
@@ -486,7 +486,7 @@ packages:
     name: flame-chart-js
     version: 2.3.1
     resolution:
-      tarball: https://registry.npmmirror.com/flame-chart-js/-/flame-chart-js-2.3.1.tgz
+      tarball: https://registry.npmjs.org/flame-chart-js/-/flame-chart-js-2.3.1.tgz
       integrity: sha512-wi3g+BEYEWcxnFrakPt7A/oXVfMnun6Uvjve3kfscXXCrgP6f1O8o5LOseXfHnVI1jxTWOINnzdXPN/NLw9guQ==
       type: null
       path: null
@@ -504,7 +504,7 @@ packages:
     name: graphql
     version: 16.14.0
     resolution:
-      tarball: https://registry.npmmirror.com/graphql/-/graphql-16.14.0.tgz
+      tarball: https://registry.npmjs.org/graphql/-/graphql-16.14.0.tgz
       integrity: sha512-BBvQ/406p+4CZbTpCbVPSxfzrZrbnuWSP1ELYgyS6B+hNeKzgrdB4JczCa5VZUBQrDa9hUngm0KnexY6pJRN5Q==
       type: null
       path: null
@@ -520,7 +520,7 @@ packages:
     name: immediate
     version: 3.0.6
     resolution:
-      tarball: https://registry.npmmirror.com/immediate/-/immediate-3.0.6.tgz
+      tarball: https://registry.npmjs.org/immediate/-/immediate-3.0.6.tgz
       integrity: sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ==
       type: null
       path: null
@@ -536,7 +536,7 @@ packages:
     name: is-arrayish
     version: 0.3.4
     resolution:
-      tarball: https://registry.npmmirror.com/is-arrayish/-/is-arrayish-0.3.4.tgz
+      tarball: https://registry.npmjs.org/is-arrayish/-/is-arrayish-0.3.4.tgz
       integrity: sha512-m6UrgzFVUYawGBh1dUsWR5M2Clqic9RVXC/9f8ceNlv2IcO9j9J/z8UoCLPqtsPBFNzEpfR3xftohbfqDx8EQA==
       type: null
       path: null
@@ -552,7 +552,7 @@ packages:
     name: is-buffer
     version: 1.1.6
     resolution:
-      tarball: https://registry.npmmirror.com/is-buffer/-/is-buffer-1.1.6.tgz
+      tarball: https://registry.npmjs.org/is-buffer/-/is-buffer-1.1.6.tgz
       integrity: sha512-NcdALwpXkTm5Zvvbk7owOUSvVvBKDgKP5/ewfXEznmQFfs4ZRmanOeKBTjRVjka3QFoN6XJ+9F3USqfHqTaU5w==
       type: null
       path: null
@@ -568,7 +568,7 @@ packages:
     name: is-even
     version: 1.0.0
     resolution:
-      tarball: https://registry.npmmirror.com/is-even/-/is-even-1.0.0.tgz
+      tarball: https://registry.npmjs.org/is-even/-/is-even-1.0.0.tgz
       integrity: sha512-LEhnkAdJqic4Dbqn58A0y52IXoHWlsueqQkKfMfdEnIYG8A1sm/GHidKkS6yvXlMoRrkM34csHnXQtOqcb+Jzg==
       type: null
       path: null
@@ -585,7 +585,7 @@ packages:
     name: is-number
     version: 3.0.0
     resolution:
-      tarball: https://registry.npmmirror.com/is-number/-/is-number-3.0.0.tgz
+      tarball: https://registry.npmjs.org/is-number/-/is-number-3.0.0.tgz
       integrity: sha512-4cboCqIpliH+mAvFNegjZQ4kgKc3ZUhQVr3HvWbSh5q3WH2v82ct+T2Y1hdU5Gdtorx/cLifQjqCbL7bpznLTg==
       type: null
       path: null
@@ -602,7 +602,7 @@ packages:
     name: is-odd
     version: 0.1.2
     resolution:
-      tarball: https://registry.npmmirror.com/is-odd/-/is-odd-0.1.2.tgz
+      tarball: https://registry.npmjs.org/is-odd/-/is-odd-0.1.2.tgz
       integrity: sha512-Ri7C2K7o5IrUU9UEI8losXJCCD/UtsaIrkR5sxIcFg4xQ9cRJXlWA5DQvTE0yDc0krvSNLsRGXN11UPS6KyfBw==
       type: null
       path: null
@@ -619,7 +619,7 @@ packages:
     name: is-promise
     version: 2.2.2
     resolution:
-      tarball: https://registry.npmmirror.com/is-promise/-/is-promise-2.2.2.tgz
+      tarball: https://registry.npmjs.org/is-promise/-/is-promise-2.2.2.tgz
       integrity: sha512-+lP4/6lKUBfQjZ2pdxThZvLUAafmZb8OAxFb8XXtiQmS35INgr85hdOGoEs124ez1FCnZJt6jau/T+alh58QFQ==
       type: null
       path: null
@@ -635,7 +635,7 @@ packages:
     name: isbot
     version: 5.1.40
     resolution:
-      tarball: https://registry.npmmirror.com/isbot/-/isbot-5.1.40.tgz
+      tarball: https://registry.npmjs.org/isbot/-/isbot-5.1.40.tgz
       integrity: sha512-yNeeynhhtIVRBk12tBV4eHNxwB42HzR4Q3Ea7vCOiJhImGaAIdIMrbJtacQlBizGLjUPw+akkFI5Dn9T70XoVQ==
       type: null
       path: null
@@ -651,7 +651,7 @@ packages:
     name: js-tokens
     version: 10.0.0
     resolution:
-      tarball: https://registry.npmmirror.com/js-tokens/-/js-tokens-10.0.0.tgz
+      tarball: https://registry.npmjs.org/js-tokens/-/js-tokens-10.0.0.tgz
       integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==
       type: null
       path: null
@@ -667,7 +667,7 @@ packages:
     name: kind-of
     version: 3.2.2
     resolution:
-      tarball: https://registry.npmmirror.com/kind-of/-/kind-of-3.2.2.tgz
+      tarball: https://registry.npmjs.org/kind-of/-/kind-of-3.2.2.tgz
       integrity: sha512-NOW9QQXMoZGg/oqnVNoNTTIFEIid1627WCffUBJEdMxYApq7mNE7CpzucIPc+ZQg25Phej7IJSmX3hO+oblOtQ==
       type: null
       path: null
@@ -684,7 +684,7 @@ packages:
     name: left-pad
     version: 1.3.0
     resolution:
-      tarball: https://registry.npmmirror.com/left-pad/-/left-pad-1.3.0.tgz
+      tarball: https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz
       integrity: sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==
       type: null
       path: null
@@ -700,7 +700,7 @@ packages:
     name: lie
     version: 3.3.0
     resolution:
-      tarball: https://registry.npmmirror.com/lie/-/lie-3.3.0.tgz
+      tarball: https://registry.npmjs.org/lie/-/lie-3.3.0.tgz
       integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==
       type: null
       path: null
@@ -717,7 +717,7 @@ packages:
     name: lit-element
     version: 4.2.2
     resolution:
-      tarball: https://registry.npmmirror.com/lit-element/-/lit-element-4.2.2.tgz
+      tarball: https://registry.npmjs.org/lit-element/-/lit-element-4.2.2.tgz
       integrity: sha512-aFKhNToWxoyhkNDmWZwEva2SlQia+jfG0fjIWV//YeTaWrVnOxD89dPKfigCUspXFmjzOEUQpOkejH5Ly6sG0w==
       type: null
       path: null
@@ -736,7 +736,7 @@ packages:
     name: lit-html
     version: 3.3.3
     resolution:
-      tarball: https://registry.npmmirror.com/lit-html/-/lit-html-3.3.3.tgz
+      tarball: https://registry.npmjs.org/lit-html/-/lit-html-3.3.3.tgz
       integrity: sha512-el8M6jK2o3RXBnrSHX3ZKrsN8zEV63pSExTO1wYJz7QndGYZ8353e2a5PPX+qHe2aGayfnchQmkAojaWAREOIA==
       type: null
       path: null
@@ -753,7 +753,7 @@ packages:
     name: lit
     version: 3.3.3
     resolution:
-      tarball: https://registry.npmmirror.com/lit/-/lit-3.3.3.tgz
+      tarball: https://registry.npmjs.org/lit/-/lit-3.3.3.tgz
       integrity: sha512-fycuvZg/hkpozL00lm1pEJH5nN/lr9ZXd6mJI2HSN4+Bzc+LDNdEApJ6HFbPkdFNHLvOplIIuJvxkS4XUxqirw==
       type: null
       path: null
@@ -772,7 +772,7 @@ packages:
     name: promise-worker-transferable
     version: 1.0.4
     resolution:
-      tarball: https://registry.npmmirror.com/promise-worker-transferable/-/promise-worker-transferable-1.0.4.tgz
+      tarball: https://registry.npmjs.org/promise-worker-transferable/-/promise-worker-transferable-1.0.4.tgz
       integrity: sha512-bN+0ehEnrXfxV2ZQvU2PetO0n4gqBD4ulq3MI1WOPLgr7/Mg9yRQkX5+0v1vagr74ZTsl7XtzlaYDo2EuCeYJw==
       type: null
       path: null
@@ -790,7 +790,7 @@ packages:
     name: react
     version: 19.2.6
     resolution:
-      tarball: https://registry.npmmirror.com/react/-/react-19.2.6.tgz
+      tarball: https://registry.npmjs.org/react/-/react-19.2.6.tgz
       integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==
       type: null
       path: null
@@ -806,7 +806,7 @@ packages:
     name: regexparam
     version: 2.0.2
     resolution:
-      tarball: https://registry.npmmirror.com/regexparam/-/regexparam-2.0.2.tgz
+      tarball: https://registry.npmjs.org/regexparam/-/regexparam-2.0.2.tgz
       integrity: sha512-A1PeDEYMrkLrfyOwv2jwihXbo9qxdGD3atBYQA9JJgreAx8/7rC6IUkWOw2NQlOxLp2wL0ifQbh1HuidDfYA6w==
       type: null
       path: null
@@ -822,7 +822,7 @@ packages:
     name: simple-swizzle
     version: 0.2.4
     resolution:
-      tarball: https://registry.npmmirror.com/simple-swizzle/-/simple-swizzle-0.2.4.tgz
+      tarball: https://registry.npmjs.org/simple-swizzle/-/simple-swizzle-0.2.4.tgz
       integrity: sha512-nAu1WFPQSMNr2Zn9PGSZK9AGn4t/y97lEm+MXTtUDwfP0ksAIX4nO+6ruD9Jwut4C49SB1Ws+fbXsm/yScWOHw==
       type: null
       path: null
@@ -839,7 +839,7 @@ packages:
     name: source-map-support
     version: 0.5.21
     resolution:
-      tarball: https://registry.npmmirror.com/source-map-support/-/source-map-support-0.5.21.tgz
+      tarball: https://registry.npmjs.org/source-map-support/-/source-map-support-0.5.21.tgz
       integrity: sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w==
       type: null
       path: null
@@ -857,7 +857,7 @@ packages:
     name: source-map
     version: 0.6.1
     resolution:
-      tarball: https://registry.npmmirror.com/source-map/-/source-map-0.6.1.tgz
+      tarball: https://registry.npmjs.org/source-map/-/source-map-0.6.1.tgz
       integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==
       type: null
       path: null
@@ -873,7 +873,7 @@ packages:
     name: type-fest
     version: 4.41.0
     resolution:
-      tarball: https://registry.npmmirror.com/type-fest/-/type-fest-4.41.0.tgz
+      tarball: https://registry.npmjs.org/type-fest/-/type-fest-4.41.0.tgz
       integrity: sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA==
       type: null
       path: null
@@ -889,7 +889,7 @@ packages:
     name: use-resize-observer
     version: 9.1.0
     resolution:
-      tarball: https://registry.npmmirror.com/use-resize-observer/-/use-resize-observer-9.1.0.tgz
+      tarball: https://registry.npmjs.org/use-resize-observer/-/use-resize-observer-9.1.0.tgz
       integrity: sha512-R25VqO9Wb3asSD4eqtcxk8sJalvIOYBqS8MNZlpDSQ4l4xMQxC/J7Id9HoTqPq8FwULIn0PVW+OAqF2dyYbjow==
       type: null
       path: null
@@ -906,7 +906,7 @@ packages:
     name: worktop
     version: 0.7.3
     resolution:
-      tarball: https://registry.npmmirror.com/worktop/-/worktop-0.7.3.tgz
+      tarball: https://registry.npmjs.org/worktop/-/worktop-0.7.3.tgz
       integrity: sha512-WBHP1hk8pLP7ahAw13fugDWcO0SUAOiCD6DHT/bfLWoCIA/PL9u7GKdudT2nGZ8EGR1APbGCAI6ZzKG1+X+PnQ==
       type: null
       path: null

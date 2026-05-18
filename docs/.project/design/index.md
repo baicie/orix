@@ -29,6 +29,7 @@ crates/
 | [CAS Store](./store.md) | `crates/store` | 内容可寻址全局包缓存。按 SHA-256 哈希对文件去重。 |
 | [Linker](./linker.md) | `crates/linker` | 构建 `node_modules/.pnpm/` 和符号链接树。平台感知（Windows junction 回退）。 |
 | [Resolver](./resolver.md) | `crates/resolver` | 通过 npm registry 查询将 `package.json` 依赖转换为完全解析的依赖图。 |
+| [Resolver 性能优化](./resolver-performance.md) | `crates/resolver`, `crates/registry`, `crates/core` | Resolve 阶段卡顿诊断、并发解析、packument 去重与缓存优化方案。 |
 | [Lockfile](./lockfile.md) | `crates/lockfile` | 管理 `orix-lock.yaml`：读写、diff、冻结 lockfile 验证。 |
 | [Registry & Fetcher](./fetcher.md) | `crates/registry` + `crates/fetcher` | npm registry API 的 HTTP 客户端；tarball 下载、完整性验证、解压。 |
 | [Workspace](./workspace.md) | `crates/workspace` | Monorepo 支持：`pnpm-workspace.yaml` 解析，`workspace:*` 协议解析。 |
