@@ -26,11 +26,11 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            artifact: orix-linux-x86_64-gnu-bin
+            npm_name: linux-x64-gnu
           - target: x86_64-unknown-linux-musl
-            artifact: orix-linux-x86_64-musl-bin
+            npm_name: linux-x64-musl
           - target: aarch64-unknown-linux-gnu
-            artifact: orix-linux-aarch64-gnu-bin
+            npm_name: linux-arm64-gnu
             linker: aarch64-linux-gnu-gcc
     steps:
       - uses: actions/checkout@v6
@@ -58,11 +58,18 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
         run: cargo build --release --package orix-cli --target ${{ matrix.target }}
 
-      - name: Upload binary
+      - name: Prepare package directory
+        shell: bash
+        run: |
+          mkdir -p dist/bin
+          cp target/${{ matrix.target }}/release/orix dist/bin/orix
+          chmod 755 dist/bin/orix
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/orix
+          name: npm-${{ matrix.npm_name }}
+          path: dist
 
   build-windows:
     name: Build / x86_64-pc-windows-msvc
@@ -82,11 +89,17 @@ jobs:
         shell: pwsh
         run: cargo build --release --package orix-cli --target x86_64-pc-windows-msvc
 
-      - name: Upload binary
+      - name: Prepare package directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist/bin" | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/orix.exe" "dist/bin/orix.exe"
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: orix-windows-x86_64-bin
-          path: target/x86_64-pc-windows-msvc/release/orix.exe
+          name: npm-win32-x64-msvc
+          path: dist
 
   build-macos:
     name: Build / ${{ matrix.target }}
@@ -96,10 +109,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-apple-darwin
-            artifact: orix-macos-x86_64-bin
+            npm_name: darwin-x64
             runner: macos-13
           - target: aarch64-apple-darwin
-            artifact: orix-macos-aarch64-bin
+            npm_name: darwin-arm64
             runner: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -115,11 +128,17 @@ jobs:
       - name: Build
         run: cargo build --release --package orix-cli --target ${{ matrix.target }}
 
-      - name: Upload binary
+      - name: Prepare package directory
+        run: |
+          mkdir -p dist/bin
+          cp target/${{ matrix.target }}/release/orix dist/bin/orix
+          chmod 755 dist/bin/orix
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/orix
+          name: npm-${{ matrix.npm_name }}
+          path: dist
 
   package-windows-msi:
     name: Package / Windows MSI
@@ -133,7 +152,7 @@ jobs:
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
-          name: orix-windows-x86_64-bin
+          name: npm-win32-x64-msvc
           path: bin
 
       - name: Install WiX Toolset
@@ -164,7 +183,7 @@ jobs:
 
           $wxs = Get-Content "${{ github.workspace }}\packaging\wix\Product.wxs" -Raw
           $wxs = $wxs -replace '\$\(var\.Version\)', $msiVersion
-          $wxs = $wxs -replace '\$\(var\.SourceDir\)', "${{ github.workspace }}\bin"
+          $wxs = $wxs -replace '\$\(var\.SourceDir\)', "${{ github.workspace }}\bin\bin"
           $wxs | Set-Content -Path "${{ github.workspace }}\packaging\wix\Product_compiled.wxs" -NoNewline
 
           & "$wixPath\candle.exe" `
@@ -200,7 +219,7 @@ jobs:
       - name: Download Linux x86_64 GNU binary
         uses: actions/download-artifact@v4
         with:
-          name: orix-linux-x86_64-gnu-bin
+          name: npm-linux-x64-gnu
           path: bin
 
       - name: Build deb
@@ -214,7 +233,7 @@ jobs:
           rm -rf "$deb_dir"
           mkdir -p "$deb_dir/DEBIAN" "$deb_dir/usr/bin" "${{ github.workspace }}/dist"
 
-          cp bin/orix "$deb_dir/usr/bin/orix"
+          cp bin/bin/orix "$deb_dir/usr/bin/orix"
           chmod 755 "$deb_dir/usr/bin/orix"
 
           sed \
@@ -252,41 +271,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download Linux x86_64 GNU binary
+      - name: Download binaries
         uses: actions/download-artifact@v4
         with:
-          name: orix-linux-x86_64-gnu-bin
-          path: bin/linux-x86_64-gnu
-
-      - name: Download Linux x86_64 MUSL binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-linux-x86_64-musl-bin
-          path: bin/linux-x86_64-musl
-
-      - name: Download Linux ARM64 GNU binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-linux-aarch64-gnu-bin
-          path: bin/linux-aarch64-gnu
-
-      - name: Download Windows binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-windows-x86_64-bin
-          path: bin/windows
-
-      - name: Download macOS x86_64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-macos-x86_64-bin
-          path: bin/macos-x86_64
-
-      - name: Download macOS ARM64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: orix-macos-aarch64-bin
-          path: bin/macos-aarch64
+          path: artifacts
 
       - name: Package archives
         run: |
@@ -305,16 +293,16 @@ jobs:
             rm -rf "$root"
           }
 
-          package_unix bin/linux-x86_64-gnu/orix x86_64-unknown-linux-gnu
-          package_unix bin/linux-x86_64-musl/orix x86_64-unknown-linux-musl
-          package_unix bin/linux-aarch64-gnu/orix aarch64-unknown-linux-gnu
-          package_unix bin/macos-x86_64/orix x86_64-apple-darwin
-          package_unix bin/macos-aarch64/orix aarch64-apple-darwin
+          package_unix artifacts/npm-linux-x64-gnu/bin/orix x86_64-unknown-linux-gnu
+          package_unix artifacts/npm-linux-x64-musl/bin/orix x86_64-unknown-linux-musl
+          package_unix artifacts/npm-linux-arm64-gnu/bin/orix aarch64-unknown-linux-gnu
+          package_unix artifacts/npm-darwin-x64/bin/orix x86_64-apple-darwin
+          package_unix artifacts/npm-darwin-arm64/bin/orix aarch64-apple-darwin
 
           win_root="orix-${VERSION}-x86_64-pc-windows-msvc"
           rm -rf "$win_root"
           mkdir -p "$win_root"
-          cp bin/windows/orix.exe "$win_root/orix.exe"
+          cp artifacts/npm-win32-x64-msvc/bin/orix.exe "$win_root/orix.exe"
           zip -qr "dist/${win_root}.zip" "$win_root"
           rm -rf "$win_root"
 
@@ -328,7 +316,7 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [package-windows-msi, package-deb, package-binaries]
+    needs: [package-windows-msi, package-deb, package-binaries, npm-publish]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
@@ -465,3 +453,84 @@ jobs:
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
+
+  npm-publish:
+    name: Publish npm packages
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync versions
+        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Restore platform packages
+        shell: bash
+        run: |
+          rm -rf dist
+          mkdir -p dist
+
+          for dir in artifacts/npm-*; do
+            name="$(basename "$dir" | sed 's/^npm-//')"
+            mkdir -p "dist/$name"
+            cp -R "$dir"/. "dist/$name/"
+          done
+
+      - name: Prepare main package
+        shell: bash
+        run: |
+          mkdir -p dist/main
+          cp -R npm/main/. dist/main/
+          cp README.md dist/main/README.md
+          cp LICENSE dist/main/LICENSE
+
+      - name: Build platform binaries
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          mkdir -p dist/darwin-arm64/bin
+          mkdir -p dist/darwin-x64/bin
+          mkdir -p dist/linux-x64-gnu/bin
+          mkdir -p dist/linux-arm64-gnu/bin
+          mkdir -p dist/linux-x64-musl/bin
+          mkdir -p dist/win32-x64-msvc/bin
+
+          cp artifacts/npm-darwin-arm64/bin/orix dist/darwin-arm64/bin/orix || true
+          cp artifacts/npm-darwin-x64/bin/orix dist/darwin-x64/bin/orix || true
+          cp artifacts/npm-linux-x64-gnu/bin/orix dist/linux-x64-gnu/bin/orix || true
+          cp artifacts/npm-linux-arm64-gnu/bin/orix dist/linux-arm64-gnu/bin/orix || true
+          cp artifacts/npm-linux-x64-musl/bin/orix dist/linux-x64-musl/bin/orix || true
+          cp artifacts/npm-win32-x64-msvc/bin/orix.exe dist/win32-x64-msvc/bin/orix.exe || true
+
+      - name: Publish platform packages
+        shell: bash
+        run: |
+          npm publish ./dist/darwin-arm64 --access public
+          npm publish ./dist/darwin-x64 --access public
+          npm publish ./dist/linux-x64-gnu --access public
+          npm publish ./dist/linux-arm64-gnu --access public
+          npm publish ./dist/linux-x64-musl --access public
+          npm publish ./dist/win32-x64-msvc --access public
+
+      - name: Publish main package
+        run: npm publish ./dist/main --access public

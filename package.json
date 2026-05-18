@@ -1,0 +1,12 @@
+{
+  "name": "orix-repo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "build": "cargo build --release --package orix-cli",
+    "sync-version": "node scripts/sync-version.mjs",
+    "check-package": "node scripts/check-package.mjs",
+    "pack:local": "node scripts/local-pack.mjs"
+  }
+}

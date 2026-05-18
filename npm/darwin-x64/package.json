@@ -1,0 +1,12 @@
+{
+  "name": "@orix-pnpm/orix-darwin-x64",
+  "version": "0.1.0",
+  "description": "Native binary for @orix-pnpm/orix on macOS x64",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  }
+}
