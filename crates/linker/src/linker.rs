@@ -32,10 +32,12 @@ impl Linker {
     }
 
     /// Build the full node_modules layout from a dependency graph.
+    /// Workspace packages (tarball is empty) are linked to their local source directories.
     pub fn link_graph(
         &self,
         graph: &DependencyGraph,
         direct_deps: &std::collections::HashSet<String>,
+        workspace: Option<&orix_workspace::Workspace>,
     ) -> Result<LinkReport> {
         let mut report = LinkReport {
             hardlinked_files: 0,
@@ -55,6 +57,32 @@ impl Linker {
 
         for pkg in graph.packages() {
             let pkg_key = pkg.id.key();
+
+            // Workspace packages: link directly to local source instead of store.
+            let is_workspace_pkg = pkg.tarball.is_empty();
+            if is_workspace_pkg && workspace.is_some() {
+                if let Some(ws) = workspace {
+                    if let Some(local_pkg) = ws
+                        .packages
+                        .iter()
+                        .find(|p| p.manifest.name.as_deref() == Some(&*pkg.id.name))
+                    {
+                        let top_link = Self::package_path_in_node_modules(
+                            &self.node_modules,
+                            pkg.id.name.as_str(),
+                        );
+                        if !top_link.exists() {
+                            if let Some(parent) = top_link.parent() {
+                                fs::create_dir_all(parent)?;
+                            }
+                            Self::create_symlink(&local_pkg.abs_path, &top_link)?;
+                            report.symlinks_created += 1;
+                        }
+                        continue;
+                    }
+                }
+            }
+
             let pkg_dir = Self::package_path_in_node_modules(
                 &virtual_store_dir.join(&pkg_key).join("node_modules"),
                 pkg.id.name.as_str(),
@@ -116,8 +144,6 @@ impl Linker {
                 if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
                     warn!(pkg = %pkg_key, "no files found in store or no files were linked");
                 }
-            } else {
-                warn!(pkg = %pkg_key, store = %store_files.display(), "store path does not exist, skipping");
             }
 
             // Create symlinks for this package's declared dependencies
@@ -501,7 +527,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["react".to_string()]);
-        linker.link_graph(&graph, &direct_deps)?;
+        linker.link_graph(&graph, &direct_deps, None)?;
 
         let report = linker.validate_layout(&direct_deps)?;
 
@@ -544,7 +570,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["@scope/pkg".to_string()]);
-        linker.link_graph(&graph, &direct_deps)?;
+        linker.link_graph(&graph, &direct_deps, None)?;
 
         let report = linker.validate_layout(&direct_deps)?;
 
@@ -575,7 +601,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["@scope/parent".to_string()]);
-        linker.link_graph(&graph, &direct_deps)?;
+        linker.link_graph(&graph, &direct_deps, None)?;
 
         let report = linker.validate_layout(&direct_deps)?;
 

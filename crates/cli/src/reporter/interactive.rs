@@ -4,7 +4,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use super::frame::FrameRenderer;
-use super::state::InstallState;
+use super::state::{InstallState, StepStatus};
 use super::terminal::{terminal_width, LiveTerminal};
 use orix_core::reporter::InstallEvent;
 
@@ -36,16 +36,36 @@ impl InteractiveReporter {
 
     /// Process an install event and re-render if needed.
     pub fn on_event(&mut self, event: InstallEvent) -> io::Result<()> {
+        let was_finished = self.state.finished || self.state.failed;
+        // Check event type before consuming it.
+        let force_phase_started = matches!(&event, InstallEvent::PhaseStarted { .. });
         self.state.apply(event);
+        let now_finished = self.state.finished || self.state.failed;
 
-        let force = self.state.finished || self.state.failed;
-        self.render(force)
+        // PhaseStarted: always render immediately so user sees "○ Resolving..." right away.
+        // Finished/Failed: force re-render so the final frame (with "Done in Xs") is shown.
+        let force = force_phase_started || now_finished;
+        self.render(force)?;
+
+        // On transition to terminal state, always call finish to restore the cursor.
+        if !was_finished && now_finished {
+            self.finish_internal()?;
+        }
+        Ok(())
     }
 
     fn render(&mut self, force: bool) -> io::Result<()> {
         let now = Instant::now();
 
-        if !force && now.duration_since(self.last_render_at) < self.min_render_interval {
+        // Skip throttle when any phase is actively running so the user sees live progress.
+        let any_running = matches!(self.state.resolve.status, StepStatus::Running)
+            || matches!(self.state.fetch.status, StepStatus::Running)
+            || matches!(self.state.link.status, StepStatus::Running);
+
+        if !force
+            && !any_running
+            && now.duration_since(self.last_render_at) < self.min_render_interval
+        {
             return Ok(());
         }
 
@@ -64,12 +84,14 @@ impl InteractiveReporter {
             terminal.render(&frame)?;
         }
 
-        if force {
-            if let Some(terminal) = self.terminal.take() {
-                terminal.finish(&frame)?;
-            }
-        }
+        Ok(())
+    }
 
+    /// Restore the cursor and clean up the terminal.
+    fn finish_internal(&mut self) -> io::Result<()> {
+        if let Some(terminal) = self.terminal.take() {
+            terminal.finish(&self.last_rendered_frame)?;
+        }
         Ok(())
     }
 }

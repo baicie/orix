@@ -55,6 +55,10 @@ impl PlainReporter {
                 )?;
             }
 
+            InstallEvent::ResolveProgress { done, total, .. } => {
+                writeln!(self.writer, "resolving packages: {done}/{total}")?;
+            }
+
             InstallEvent::FetchProgress { done, total, .. } => {
                 writeln!(self.writer, "fetching packages: {done}/{total}")?;
             }

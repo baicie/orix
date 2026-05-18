@@ -1,0 +1,67 @@
+lockfileVersion: 1
+saveRemoteCacheURLs: true
+importers:
+  .:
+    dependencies:
+      detect-libc:
+        version: 2.1.2
+        specifier: ^2.0.3
+        id: registry.npmjs.org/detect-libc/2.1.2
+        dev: false
+        optional: false
+        engines: '>=8'
+        os: []
+        cpu: []
+        dependencies: {}
+        optionalDependencies: {}
+    devDependencies: {}
+    optionalDependencies:
+      fsevents:
+        version: 2.3.3
+        specifier: ^2.3.3
+        id: registry.npmjs.org/fsevents/2.3.3
+        dev: false
+        optional: true
+        engines: ^8.16.0 || ^10.6.0 || >=11.0.0
+        os:
+        - darwin
+        cpu: []
+        dependencies: {}
+        optionalDependencies: {}
+    specifiers:
+      detect-libc: ^2.0.3
+      fsevents: ^2.3.3
+packages:
+  /detect-libc@2.1.2:
+    id: registry.npmjs.org/detect-libc/2.1.2
+    local: null
+    integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==
+    name: detect-libc
+    version: 2.1.2
+    resolution:
+      tarball: https://registry.npmmirror.com/detect-libc/-/detect-libc-2.1.2.tgz
+      integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==
+      type: null
+      path: null
+    dependencies: {}
+    optionalDependencies: {}
+    engines: '>=8'
+    os: []
+    cpu: []
+  /fsevents@2.3.3:
+    id: registry.npmjs.org/fsevents/2.3.3
+    local: null
+    integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
+    name: fsevents
+    version: 2.3.3
+    resolution:
+      tarball: https://registry.npmmirror.com/fsevents/-/fsevents-2.3.3.tgz
+      integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
+      type: null
+      path: null
+    dependencies: {}
+    optionalDependencies: {}
+    engines: ^8.16.0 || ^10.6.0 || >=11.0.0
+    os:
+    - darwin
+    cpu: []

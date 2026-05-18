@@ -75,6 +75,12 @@ impl Fetcher {
         for pkg in graph.packages() {
             let span = info_span!("fetch", package = %pkg.id);
 
+            // Skip workspace packages (they have no tarball and live on disk).
+            if pkg.tarball.is_empty() {
+                debug!(package = %pkg.id, "skipping workspace package (no tarball)");
+                continue;
+            }
+
             // Platform compatibility check: skip with warning if incompatible.
             if let Some(mismatch) = check_platform_compatibility(&pkg.os, &pkg.cpu) {
                 warn!(

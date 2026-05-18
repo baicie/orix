@@ -1406,6 +1406,7 @@ dependencies = [
  "anyhow",
  "orix-domain",
  "orix-store",
+ "orix-workspace",
  "serde",
  "serde_json",
  "tempfile",
@@ -1462,6 +1463,7 @@ dependencies = [
  "orix-manifest",
  "orix-registry",
  "orix-workspace",
+ "tokio",
  "tracing",
  "url",
 ]
@@ -1498,7 +1500,9 @@ dependencies = [
  "glob",
  "orix-manifest",
  "serde",
+ "serde_json",
  "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

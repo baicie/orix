@@ -76,14 +76,18 @@ impl FrameRenderer {
     }
 
     fn push_phases(&self, out: &mut String, state: &InstallState) {
-        out.push_str(&render_step(
+        out.push_str(&render_fetch_step(
             &state.resolve,
             "Resolving dependencies",
             "Resolved dependencies",
         ));
         out.push('\n');
 
-        out.push_str(&render_fetch_step(&state.fetch));
+        out.push_str(&render_fetch_step(
+            &state.fetch,
+            "Fetching packages",
+            "Fetched packages",
+        ));
         out.push('\n');
 
         if self.show_recent_packages
@@ -166,28 +170,25 @@ fn render_step(phase: &PhaseState, pending: &str, done: &str) -> String {
     }
 }
 
-fn render_fetch_step(phase: &PhaseState) -> String {
+fn render_fetch_step(phase: &PhaseState, pending: &str, done: &str) -> String {
     match phase.status {
-        StepStatus::Pending => "○ Fetching packages".to_string(),
+        StepStatus::Pending => format!("○ {pending}"),
         StepStatus::Running => {
             if phase.total > 0 {
-                format!("● Fetching packages {}/{}", phase.done, phase.total)
+                format!("● {pending} {}/{}", phase.done, phase.total)
             } else {
-                "● Fetching packages".to_string()
+                format!("● {pending}")
             }
         }
         StepStatus::Done => {
             if phase.total > 0 {
-                format!(
-                    "{CHECKMARK} Fetched packages {}/{}",
-                    phase.done, phase.total
-                )
+                format!("{CHECKMARK} {done} {}/{}", phase.done, phase.total)
             } else {
-                format!("{CHECKMARK} Fetched packages")
+                format!("{CHECKMARK} {done}")
             }
         }
-        StepStatus::Failed => format!("{CROSS} Fetching packages"),
-        StepStatus::Skipped => "- Fetching packages".to_string(),
+        StepStatus::Failed => format!("{CROSS} {pending}"),
+        StepStatus::Skipped => format!("- {pending}"),
     }
 }
 
@@ -287,6 +288,30 @@ mod tests {
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
         assert!(frame.contains("● Fetching packages 4/6"));
+    }
+
+    #[test]
+    fn test_render_resolve_running() {
+        let mut state = make_state();
+        state.resolve.status = StepStatus::Running;
+        state.resolve.done = 3;
+        state.resolve.total = 8;
+
+        let renderer = FrameRenderer::new(80);
+        let frame = renderer.render(&state);
+        assert!(frame.contains("● Resolving dependencies 3/8"));
+    }
+
+    #[test]
+    fn test_render_resolve_done() {
+        let mut state = make_state();
+        state.resolve.status = StepStatus::Done;
+        state.resolve.done = 8;
+        state.resolve.total = 8;
+
+        let renderer = FrameRenderer::new(80);
+        let frame = renderer.render(&state);
+        assert!(frame.contains("\u{2713} Resolved dependencies 8/8"));
     }
 
     #[test]

@@ -284,7 +284,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                         phase: InstallPhase::Link,
                     },
                 );
-                let linker = Linker::new(store, config.node_modules_dir());
+                let linker = Linker::new(store.clone(), config.node_modules_dir());
                 let direct_deps: HashSet<String> = manifest
                     .dependencies
                     .keys()
@@ -309,11 +309,55 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                         .unlink()
                         .with_context(|| "failed to clean old node_modules")?;
                     let report = linker
-                        .link_graph(&graph, &direct_deps)
+                        .link_graph(&graph, &direct_deps, workspace.as_ref())
                         .with_context(|| "failed to link packages")?;
                     debug!(target: "orix", "link (unlink+link_graph): {:?}", t2.elapsed());
                     report
                 };
+
+                if let Some(ref ws) = workspace {
+                    for ws_pkg in &ws.packages {
+                        let nm_dir = ws_pkg.abs_path.join("node_modules");
+                        let pkg_linker = Linker::new(store.clone(), nm_dir.clone());
+
+                        let pkg_deps: HashSet<String> = ws_pkg
+                            .manifest
+                            .dependencies
+                            .keys()
+                            .chain(ws_pkg.manifest.dev_dependencies.keys())
+                            .chain(ws_pkg.manifest.optional_dependencies.keys())
+                            .cloned()
+                            .collect();
+
+                        if pkg_linker
+                            .validate_layout(&pkg_deps)
+                            .map(|r| r.is_ok())
+                            .unwrap_or(false)
+                        {
+                            debug!(
+                                target: "orix",
+                                pkg = %ws_pkg.manifest.name.as_deref().unwrap_or("?"),
+                                "workspace pkg layout valid, skipping"
+                            );
+                        } else {
+                            pkg_linker.unlink().with_context(|| {
+                                format!(
+                                    "failed to clean old node_modules for {}",
+                                    ws_pkg.manifest.name.as_deref().unwrap_or("?")
+                                )
+                            })?;
+                            pkg_linker
+                                .link_graph(&graph, &pkg_deps, workspace.as_ref())
+                                .with_context(|| {
+                                    format!(
+                                        "failed to link packages for {}",
+                                        ws_pkg.manifest.name.as_deref().unwrap_or("?")
+                                    )
+                                })?;
+                        }
+                    }
+                }
+
                 send_event(
                     &opts.progress_tx,
                     InstallEvent::PhaseFinished {
@@ -421,37 +465,56 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             },
         );
 
+        let (resolve_progress_tx, mut resolve_progress_rx) =
+            mpsc::channel::<orix_resolver::ResolveProgressEvent>(128);
+        let install_progress_tx = opts.progress_tx.clone();
+        let resolve_progress_forwarder = tokio::spawn(async move {
+            while let Some(event) = resolve_progress_rx.recv().await {
+                send_event(
+                    &install_progress_tx,
+                    InstallEvent::ResolveProgress {
+                        done: event.index,
+                        total: event.total,
+                        package: Some(event.id.to_string()),
+                    },
+                );
+            }
+        });
+
         let graph = if let Some(ref ws) = workspace {
             let mut resolver = if let Some(ref token) = config.auth_token {
                 info!(registry = %config.registry, "using authenticated registry");
                 Resolver::with_auth(config.registry.clone(), token)
             } else {
                 Resolver::new(config.registry.clone())
-            };
+            }
+            .with_progress(resolve_progress_tx);
 
-            let mut manifests: Vec<&Manifest> = vec![&manifest];
-            manifests.extend(ws.packages.iter().map(|p| &p.manifest));
-            info!(
-                manifests = manifests.len(),
-                "resolving workspace manifests together"
-            );
-            resolver
-                .resolve_manifests(&manifests)
-                .await
-                .with_context(|| "failed to resolve workspace dependencies")?
+            let mut merged = orix_domain::DependencyGraph::new();
+            for pkg in std::iter::once(&manifest).chain(ws.packages.iter().map(|p| &p.manifest)) {
+                let sub = resolver
+                    .resolve_manifest_with_workspace(pkg, Some(ws))
+                    .await
+                    .with_context(|| "failed to resolve workspace dependencies")?;
+                merged.merge(sub);
+            }
+            merged
         } else {
             let mut resolver = if let Some(ref token) = config.auth_token {
                 info!(registry = %config.registry, "using authenticated registry");
                 Resolver::with_auth(config.registry.clone(), token)
             } else {
                 Resolver::new(config.registry.clone())
-            };
+            }
+            .with_progress(resolve_progress_tx);
 
             resolver
                 .resolve_manifest(&manifest)
                 .await
                 .with_context(|| "failed to resolve dependencies")?
         };
+
+        let _ = resolve_progress_forwarder.await;
 
         let old_count = old_lockfile
             .as_ref()
@@ -491,6 +554,16 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         },
     );
 
+    let total_to_fetch = graph.len();
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::FetchProgress {
+            done: 0,
+            total: total_to_fetch,
+            package: None,
+        },
+    );
+
     let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
     let install_progress_tx = opts.progress_tx.clone();
     let fetch_progress_forwarder = tokio::spawn(async move {
@@ -499,10 +572,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 FetchEvent::PackageFetched(package) => {
                     send_event(
                         &install_progress_tx,
-                        InstallEvent::FetchProgress {
-                            done: 0,
-                            total: 0,
-                            package: Some(package),
+                        InstallEvent::PackageFetched {
+                            name: package,
+                            version: None,
+                            cached: false,
                         },
                     );
                 }
@@ -520,7 +593,6 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         }
     });
 
-    let total_to_fetch = graph.len();
     let fetch_report = fetcher
         .fetch_all(&graph, concurrency, Some(fetch_progress_tx))
         .await
@@ -580,30 +652,52 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .cloned()
         .collect();
 
-    let linker = Linker::new(store, config.node_modules_dir());
+    let linker = Linker::new(store.clone(), config.node_modules_dir());
     linker
         .unlink()
         .with_context(|| "failed to clean old node_modules")?;
+
     let link_report = linker
-        .link_graph(&graph, &direct_deps)
+        .link_graph(&graph, &direct_deps, workspace.as_ref())
         .with_context(|| "failed to link packages")?;
+
+    if let Some(ref ws) = workspace {
+        for ws_pkg in &ws.packages {
+            let nm_dir = ws_pkg.abs_path.join("node_modules");
+            let pkg_linker = Linker::new(store.clone(), nm_dir.clone());
+            pkg_linker.unlink().with_context(|| {
+                format!(
+                    "failed to clean old node_modules for {}",
+                    ws_pkg.manifest.name.as_deref().unwrap_or("?")
+                )
+            })?;
+
+            let pkg_deps: HashSet<String> = ws_pkg
+                .manifest
+                .dependencies
+                .keys()
+                .chain(ws_pkg.manifest.dev_dependencies.keys())
+                .chain(ws_pkg.manifest.optional_dependencies.keys())
+                .cloned()
+                .collect();
+
+            pkg_linker
+                .link_graph(&graph, &pkg_deps, workspace.as_ref())
+                .with_context(|| {
+                    format!(
+                        "failed to link packages for {}",
+                        ws_pkg.manifest.name.as_deref().unwrap_or("?")
+                    )
+                })?;
+        }
+    }
+
     send_event(
         &opts.progress_tx,
         InstallEvent::PhaseFinished {
             phase: InstallPhase::Link,
         },
     );
-
-    if let Some(ref ws) = workspace {
-        for pkg in &ws.packages {
-            if let Some(ref name) = pkg.manifest.name {
-                let local_linked = linker.link_local_package(name, &pkg.abs_path)?;
-                if local_linked > 0 {
-                    info!(package = %name, "linked workspace local package");
-                }
-            }
-        }
-    }
 
     let layout_report = linker
         .validate_layout(&direct_deps)
@@ -727,10 +821,10 @@ async fn fetch_only_missing(
                 FetchEvent::PackageFetched(package) => {
                     send_event(
                         &install_progress_tx,
-                        InstallEvent::FetchProgress {
-                            done: 0,
-                            total: 0,
-                            package: Some(package),
+                        InstallEvent::PackageFetched {
+                            name: package,
+                            version: None,
+                            cached: false,
                         },
                     );
                 }

@@ -85,6 +85,16 @@ pub enum InstallEvent {
         removed: usize,
     },
 
+    /// Resolve progress update (emitted after each package is resolved).
+    ResolveProgress {
+        /// Packages resolved so far.
+        done: usize,
+        /// Total packages to resolve.
+        total: usize,
+        /// Currently resolved package name (for display).
+        package: Option<String>,
+    },
+
     /// Fetch progress update.
     FetchProgress {
         /// Packages completed.

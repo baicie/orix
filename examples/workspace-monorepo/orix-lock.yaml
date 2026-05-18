@@ -1,0 +1,54 @@
+lockfileVersion: 1
+saveRemoteCacheURLs: true
+importers:
+  .:
+    dependencies:
+      picocolors:
+        version: 1.1.1
+        specifier: ^1.1.1
+        id: registry.npmjs.org/picocolors/1.1.1
+        dev: false
+        optional: false
+        engines: null
+        os: []
+        cpu: []
+        dependencies: {}
+        optionalDependencies: {}
+    devDependencies: {}
+    optionalDependencies: {}
+    specifiers:
+      picocolors: ^1.1.1
+packages:
+  /@orix-example/shared@1.0.0:
+    id: registry.npmjs.org/@orix-example/shared/1.0.0
+    local: null
+    integrity: ''
+    name: '@orix-example/shared'
+    version: 1.0.0
+    resolution:
+      tarball: ''
+      integrity: ''
+      type: null
+      path: null
+    dependencies:
+      picocolors: ^1.1.1
+    optionalDependencies: {}
+    engines: null
+    os: []
+    cpu: []
+  /picocolors@1.1.1:
+    id: registry.npmjs.org/picocolors/1.1.1
+    local: null
+    integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==
+    name: picocolors
+    version: 1.1.1
+    resolution:
+      tarball: https://registry.npmmirror.com/picocolors/-/picocolors-1.1.1.tgz
+      integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==
+      type: null
+      path: null
+    dependencies: {}
+    optionalDependencies: {}
+    engines: null
+    os: []
+    cpu: []

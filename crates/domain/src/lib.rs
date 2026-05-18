@@ -356,6 +356,11 @@ impl DependencyGraph {
         self.inner.keys()
     }
 
+    /// Merge another graph into this one (packages with the same ID are deduplicated by ID).
+    pub fn merge(&mut self, other: DependencyGraph) {
+        self.inner.extend(other.inner);
+    }
+
     /// Number of packages in the graph.
     pub fn len(&self) -> usize {
         self.inner.len()

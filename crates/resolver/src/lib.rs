@@ -4,7 +4,7 @@
 
 mod resolver;
 
-pub use resolver::{Resolver, SkippedOptionalDep};
+pub use resolver::{ResolveProgressEvent, Resolver, SkippedOptionalDep};
 
 use anyhow::Result;
 use orix_domain::{PackageName, VersionConstraint};

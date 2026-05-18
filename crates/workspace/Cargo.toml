@@ -12,9 +12,13 @@ authors.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 glob = { workspace = true }
 orix-manifest = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

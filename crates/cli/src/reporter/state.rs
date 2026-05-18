@@ -151,6 +151,24 @@ impl InstallState {
                 self.phase_mut(phase).status = StepStatus::Running;
             }
 
+            InstallEvent::ResolveProgress {
+                done,
+                total,
+                package,
+            } => {
+                self.resolve.status = if done >= total && total > 0 {
+                    StepStatus::Done
+                } else {
+                    StepStatus::Running
+                };
+                self.resolve.done = done;
+                self.resolve.total = total;
+
+                if let Some(package) = package {
+                    self.push_recent_package(package);
+                }
+            }
+
             InstallEvent::Resolved {
                 direct,
                 total,
@@ -162,6 +180,8 @@ impl InstallState {
                 self.added = added;
                 self.removed = removed;
                 self.resolve.status = StepStatus::Done;
+                self.resolve.done = total;
+                self.resolve.total = total;
             }
 
             InstallEvent::FetchProgress {

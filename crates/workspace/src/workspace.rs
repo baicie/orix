@@ -42,14 +42,19 @@ struct WorkspaceFile {
 
 impl Workspace {
     /// Discover a workspace starting from the given root directory.
+    ///
+    /// Supports three configuration formats (checked in order):
+    /// 1. `pnpm-workspace.yaml` — pnpm-compatible YAML with `packages: [...]`
+    /// 2. `orix-workspace.yaml` — orix-specific YAML with `packages: [...]`
+    /// 3. `orix.packages` in root `package.json` — JSON array of glob strings
+    #[allow(clippy::manual_unwrap_or_default)]
     pub fn discover(root: PathBuf) -> Result<Self> {
-        let manifest_path = root.join("pnpm-workspace.yaml");
-        let packages = if manifest_path.exists() {
-            let source = std::fs::read_to_string(&manifest_path)
-                .with_context(|| "failed to read pnpm-workspace.yaml")?;
-            let workspace_file: WorkspaceFile = serde_yaml::from_str(&source)
-                .with_context(|| "failed to parse pnpm-workspace.yaml")?;
-            Self::find_packages(&root, &workspace_file.packages)?
+        let packages = if let Some(pkgs) = Self::discover_from_pnpm_yaml(&root)? {
+            pkgs
+        } else if let Some(pkgs) = Self::discover_from_orix_yaml(&root)? {
+            pkgs
+        } else if let Some(pkgs) = Self::discover_from_root_package_json(&root)? {
+            pkgs
         } else {
             Vec::new()
         };
@@ -59,6 +64,63 @@ impl Workspace {
             packages,
             lockfile_path: root.join("orix-lock.yaml"),
         })
+    }
+
+    /// Try discovering workspace from `pnpm-workspace.yaml`.
+    fn discover_from_pnpm_yaml(root: &Path) -> Result<Option<Vec<WorkspacePackage>>> {
+        let path = root.join("pnpm-workspace.yaml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let source =
+            std::fs::read_to_string(&path).with_context(|| "failed to read pnpm-workspace.yaml")?;
+        let workspace_file: WorkspaceFile =
+            serde_yaml::from_str(&source).with_context(|| "failed to parse pnpm-workspace.yaml")?;
+        let packages = Self::find_packages(root, &workspace_file.packages)?;
+        Ok(Some(packages))
+    }
+
+    /// Try discovering workspace from `orix-workspace.yaml`.
+    fn discover_from_orix_yaml(root: &Path) -> Result<Option<Vec<WorkspacePackage>>> {
+        let path = root.join("orix-workspace.yaml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let source =
+            std::fs::read_to_string(&path).with_context(|| "failed to read orix-workspace.yaml")?;
+        let workspace_file: WorkspaceFile =
+            serde_yaml::from_str(&source).with_context(|| "failed to parse orix-workspace.yaml")?;
+        let packages = Self::find_packages(root, &workspace_file.packages)?;
+        Ok(Some(packages))
+    }
+
+    /// Try discovering workspace from `orix.packages` field in root `package.json`.
+    fn discover_from_root_package_json(root: &Path) -> Result<Option<Vec<WorkspacePackage>>> {
+        let path = root.join("package.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let source =
+            std::fs::read_to_string(&path).with_context(|| "failed to read package.json")?;
+        let json: serde_json::Value =
+            serde_json::from_str(&source).with_context(|| "failed to parse package.json")?;
+
+        let packages_array = match json.get("orix").and_then(|v| v.get("packages")) {
+            Some(serde_json::Value::Array(arr)) => arr,
+            _ => return Ok(None),
+        };
+
+        let patterns: Vec<String> = packages_array
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+
+        if patterns.is_empty() {
+            return Ok(None);
+        }
+
+        let packages = Self::find_packages(root, &patterns)?;
+        Ok(Some(packages))
     }
 
     fn find_packages(root: &Path, patterns: &[String]) -> Result<Vec<WorkspacePackage>> {
@@ -107,21 +169,18 @@ impl Workspace {
     }
 
     /// Resolve a workspace protocol dependency to a local PackageId.
-    pub fn resolve_workspace_dep(&self, spec: &WorkspaceSpec) -> Option<WorkspacePackage> {
-        if let Some(ref name) = spec.name {
-            self.packages
-                .iter()
-                .find(|p| p.manifest.name.as_ref() == Some(name))
-                .cloned()
-        } else {
-            let abs = self.root.join(&spec.path);
-            let manifest = Manifest::read(&abs.join("package.json")).ok()?;
-            Some(WorkspacePackage {
-                relative_path: spec.path.clone(),
-                abs_path: abs,
-                manifest,
-            })
-        }
+    ///
+    /// For `workspace:*` (name=None, path=empty), the dependency `name` is used to find the package.
+    pub fn resolve_workspace_dep(
+        &self,
+        spec: &WorkspaceSpec,
+        dep_name: &str,
+    ) -> Option<WorkspacePackage> {
+        let name_to_find = spec.name.as_deref().unwrap_or(dep_name);
+        self.packages
+            .iter()
+            .find(|p| p.manifest.name.as_deref() == Some(name_to_find))
+            .cloned()
     }
 }
 
@@ -214,6 +273,7 @@ pub fn detect_workspace_cycles(workspace: &Workspace) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -278,5 +338,138 @@ mod tests {
             "external deps should not cause cycle: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn discover_skips_missing_workspace_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert!(ws.packages.is_empty());
+    }
+
+    #[test]
+    fn discover_prefers_pnpm_yaml_over_orix_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        std::fs::create_dir_all(root.join("packages/pkg1")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg1/package.json"),
+            r#"{"name":"pkg1"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/pkg1'",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("orix-workspace.yaml"),
+            "packages:\n  - 'packages/other'",
+        )
+        .unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert_eq!(ws.packages.len(), 1);
+        assert_eq!(ws.packages[0].manifest.name.as_deref(), Some("pkg1"));
+    }
+
+    #[test]
+    fn discover_prefers_orix_yaml_over_root_package_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        std::fs::create_dir_all(root.join("packages/pkg1")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg1/package.json"),
+            r#"{"name":"pkg1"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"orix":{"packages":["packages/other"]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("orix-workspace.yaml"),
+            "packages:\n  - 'packages/pkg1'",
+        )
+        .unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert_eq!(ws.packages.len(), 1);
+        assert_eq!(ws.packages[0].manifest.name.as_deref(), Some("pkg1"));
+    }
+
+    #[test]
+    fn discover_from_orix_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        std::fs::create_dir_all(root.join("apps/web")).unwrap();
+        std::fs::create_dir_all(root.join("libs/shared")).unwrap();
+        std::fs::write(root.join("apps/web/package.json"), r#"{"name":"@org/web"}"#).unwrap();
+        std::fs::write(
+            root.join("libs/shared/package.json"),
+            r#"{"name":"@org/shared"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("orix-workspace.yaml"),
+            "packages:\n  - 'apps/*'\n  - 'libs/*'",
+        )
+        .unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert_eq!(ws.packages.len(), 2);
+        let names: Vec<_> = ws
+            .packages
+            .iter()
+            .filter_map(|p| p.manifest.name.clone())
+            .collect();
+        assert!(names.contains(&"@org/web".to_string()));
+        assert!(names.contains(&"@org/shared".to_string()));
+    }
+
+    #[test]
+    fn discover_from_root_package_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        std::fs::create_dir_all(root.join("packages/pkg-a")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg-a/package.json"),
+            r#"{"name":"pkg-a"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","orix":{"packages":["packages/*"]}}"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert_eq!(ws.packages.len(), 1);
+        assert_eq!(ws.packages[0].manifest.name.as_deref(), Some("pkg-a"));
+    }
+
+    #[test]
+    fn discover_ignores_non_array_orix_packages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","orix":{"packages":"packages/*"}}"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::discover(root).unwrap();
+        assert!(ws.packages.is_empty());
     }
 }
