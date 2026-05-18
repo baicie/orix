@@ -54,6 +54,11 @@ impl Fetcher {
         self
     }
 
+    /// Returns a reference to the underlying store.
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
     /// Fetch all packages in the dependency graph into the store.
     ///
     /// Packages with platform/os/cpu restrictions that don't match the current machine

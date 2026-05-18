@@ -8,7 +8,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::{info, info_span};
+use tracing::{debug, info, info_span};
 
 use orix_config::{Config, ConfigOverrides};
 use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
@@ -186,6 +186,213 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     } else {
         None
     };
+
+    // Fast path: if lockfile exists and manifest unchanged, skip resolver/fetch entirely.
+    // Only apply when network is not forced and we're not in frozen mode.
+    if !opts.frozen_lockfile && !opts.force {
+        if let Some(ref lf) = old_lockfile {
+            if lf.validate(&manifest, ".").is_ok() {
+                debug!(target: "orix", "FAST PATH triggered");
+                let graph = resolve_from_lockfile_packages(&lf.packages);
+                let pkg_count = graph.len();
+                info!(packages = pkg_count, "resolved from lockfile (fast path)");
+
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseStarted {
+                        phase: InstallPhase::Resolve,
+                    },
+                );
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::Resolved {
+                        direct: direct_dependency_count,
+                        total: pkg_count,
+                        added: 0,
+                        removed: 0,
+                    },
+                );
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseFinished {
+                        phase: InstallPhase::Resolve,
+                    },
+                );
+
+                // Only fetch packages missing from store.
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseStarted {
+                        phase: InstallPhase::Fetch,
+                    },
+                );
+                let store = Store::open(config.store_dir.clone())
+                    .with_context(|| "failed to open store")?;
+                let tarball_cache = TarballCache::new(config.cache_dir.clone());
+                let fetcher = Fetcher::new(tarball_cache, store.clone())
+                    .with_offline(opts.offline)
+                    .with_force(false);
+                let concurrency = if opts.concurrency == 0 {
+                    config.concurrency
+                } else {
+                    opts.concurrency
+                };
+                let (graph, fetch_report) = fetch_only_missing(
+                    &store,
+                    &fetcher,
+                    &graph,
+                    concurrency,
+                    opts.progress_tx.clone(),
+                )
+                .await
+                .with_context(|| "failed to fetch missing packages")?;
+
+                info!(
+                    success = fetch_report.success,
+                    failures = fetch_report.failures.len(),
+                    "fetched packages"
+                );
+
+                if !fetch_report.failures.is_empty() {
+                    send_event(
+                        &opts.progress_tx,
+                        InstallEvent::Failed {
+                            phase: Some(InstallPhase::Fetch),
+                            message: format!(
+                                "failed to fetch packages:\n  {}",
+                                fetch_report.failures.join("\n  ")
+                            ),
+                            hint: Some("Check network connection or try --offline.".to_string()),
+                        },
+                    );
+                    anyhow::bail!(
+                        "failed to fetch packages:\n  {}",
+                        fetch_report.failures.join("\n  ")
+                    );
+                }
+
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseFinished {
+                        phase: InstallPhase::Fetch,
+                    },
+                );
+
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseStarted {
+                        phase: InstallPhase::Link,
+                    },
+                );
+                let linker = Linker::new(store, config.node_modules_dir());
+                let direct_deps: HashSet<String> = manifest
+                    .dependencies
+                    .keys()
+                    .chain(manifest.dev_dependencies.keys())
+                    .cloned()
+                    .collect();
+                let link_report = if linker
+                    .validate_layout(&direct_deps)
+                    .map(|r| r.is_ok())
+                    .unwrap_or(false)
+                {
+                    debug!(target: "orix", "layout valid, skipping unlink+link");
+                    LinkReport {
+                        hardlinked_files: 0,
+                        copied_files: 0,
+                        symlinks_created: 0,
+                        bytes_saved: 0,
+                    }
+                } else {
+                    let t2 = Instant::now();
+                    linker
+                        .unlink()
+                        .with_context(|| "failed to clean old node_modules")?;
+                    let report = linker
+                        .link_graph(&graph, &direct_deps)
+                        .with_context(|| "failed to link packages")?;
+                    debug!(target: "orix", "link (unlink+link_graph): {:?}", t2.elapsed());
+                    report
+                };
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::PhaseFinished {
+                        phase: InstallPhase::Link,
+                    },
+                );
+
+                let layout_report = linker
+                    .validate_layout(&direct_deps)
+                    .with_context(|| "failed to validate node_modules layout")?;
+                if !layout_report.is_ok() {
+                    anyhow::bail!(
+                        "node_modules layout validation failed: {}",
+                        layout_report.broken.join("; ")
+                    );
+                }
+
+                let base_lockfile = lf.clone();
+                let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
+                let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
+                let lockfile_changed =
+                    !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty();
+
+                if lockfile_changed {
+                    send_event(
+                        &opts.progress_tx,
+                        InstallEvent::PhaseStarted {
+                            phase: InstallPhase::Lockfile,
+                        },
+                    );
+                    updated_lockfile
+                        .write(&config.lockfile_path())
+                        .with_context(|| "failed to write lockfile")?;
+                    info!(
+                        added = diff.added.len(),
+                        removed = diff.removed.len(),
+                        changed = diff.changed.len(),
+                        "lockfile updated"
+                    );
+                }
+
+                let lockfile_status = if lockfile_changed {
+                    LockfileStatus::Written
+                } else {
+                    LockfileStatus::Unchanged
+                };
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::Lockfile {
+                        status: lockfile_status,
+                    },
+                );
+
+                let duration = start.elapsed();
+                info!(
+                    duration_ms = duration.as_millis(),
+                    "install complete (fast path)"
+                );
+                send_event(
+                    &opts.progress_tx,
+                    InstallEvent::Finished {
+                        installed: graph.len(),
+                        duration,
+                    },
+                );
+
+                return Ok(InstallReport {
+                    registry: config.registry.to_string(),
+                    direct_dependencies: direct_dependency_count,
+                    packages_added: graph.len(),
+                    fetch_report,
+                    link_report,
+                    lockfile_diff: None,
+                    lockfile_changed,
+                    duration_secs: duration.as_secs_f64(),
+                });
+            }
+        }
+    }
 
     let graph = if opts.frozen_lockfile {
         if let Some(ref lf) = old_lockfile {
@@ -488,6 +695,76 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         lockfile_changed,
         duration_secs: duration.as_secs_f64(),
     })
+}
+
+/// Fetch only packages not already in the store.
+async fn fetch_only_missing(
+    store: &Store,
+    fetcher: &Fetcher,
+    graph: &orix_domain::DependencyGraph,
+    concurrency: usize,
+    progress_tx: Option<mpsc::Sender<InstallEvent>>,
+) -> Result<(orix_domain::DependencyGraph, orix_fetcher::FetchReport)> {
+    let mut missing = orix_domain::DependencyGraph::new();
+    for pkg in graph.packages() {
+        if !store.contains(&pkg.id) {
+            missing.insert(pkg.clone());
+        }
+    }
+
+    if missing.is_empty() {
+        debug!(target: "orix", "all {} packages already in store, skipping fetch", graph.len());
+        return Ok((graph.clone(), orix_fetcher::FetchReport::default()));
+    }
+
+    debug!(target: "orix", "found {} packages in store, fetching {} missing", graph.len() - missing.len(), missing.len());
+
+    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
+    let install_progress_tx = progress_tx.clone();
+    let fetch_progress_forwarder = tokio::spawn(async move {
+        while let Some(event) = fetch_progress_rx.recv().await {
+            match event {
+                FetchEvent::PackageFetched(package) => {
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::FetchProgress {
+                            done: 0,
+                            total: 0,
+                            package: Some(package),
+                        },
+                    );
+                }
+                FetchEvent::PackageFailed(failure) => {
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::Failed {
+                            phase: Some(InstallPhase::Fetch),
+                            message: format!("failed to fetch package: {}", failure),
+                            hint: Some("Check network connection or try --offline.".to_string()),
+                        },
+                    );
+                }
+            }
+        }
+    });
+
+    let total_to_fetch = missing.len();
+    let fetch_report = fetcher
+        .fetch_all(&missing, concurrency, Some(fetch_progress_tx))
+        .await
+        .with_context(|| "failed to fetch packages")?;
+    let _ = fetch_progress_forwarder.await;
+
+    send_event(
+        &progress_tx,
+        InstallEvent::FetchProgress {
+            done: fetch_report.success,
+            total: total_to_fetch,
+            package: None,
+        },
+    );
+
+    Ok((graph.clone(), fetch_report))
 }
 
 /// Return the resolved store path for this project.

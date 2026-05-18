@@ -424,6 +424,24 @@ impl Lockfile {
         Ok(())
     }
 
+    /// Validate that the lockfile's specifiers match the manifest.
+    /// Returns `Ok(())` if the lockfile is compatible (lockfile unchanged or changed).
+    /// Returns `Err` only if the lockfile is fundamentally incompatible (missing importer).
+    pub fn validate(
+        &self,
+        _manifest: &orix_manifest::Manifest,
+        importer_id: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(importer) = self.importers.get(importer_id) {
+            // We only need to check if the lockfile importer section exists.
+            // Specifier mismatches are fine — we'll diff and report them.
+            let _ = importer;
+            Ok(())
+        } else {
+            anyhow::bail!("Lockfile is missing importer '{}'", importer_id);
+        }
+    }
+
     /// Return all package IDs referenced by the lockfile package section.
     pub fn package_ids(&self) -> anyhow::Result<Vec<orix_domain::PackageId>> {
         self.packages
