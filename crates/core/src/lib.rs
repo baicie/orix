@@ -1,10 +1,11 @@
 //! Install pipeline orchestration for orix.
 
 pub use crate::pipeline::{
-    add, cache_clean, cache_clean_with_overrides, cache_path, cache_path_with_overrides, install,
-    remove, store_path, store_path_with_overrides, store_prune, store_prune_with_overrides,
-    store_verify, store_verify_with_overrides, CacheCleanReport, DepType, ExportReport, ImportReport,
-    InstallOpts, InstallReport, RemoveReport, export_pnpm_lockfile, import_pnpm_lockfile,
+    add, cache_clean, cache_clean_with_overrides, cache_path, cache_path_with_overrides, deploy,
+    install, remove, store_path, store_path_with_overrides, store_prune, store_prune_with_overrides,
+    store_verify, store_verify_with_overrides, CacheCleanReport, DeployOpts, DeployReport, DepType,
+    ExportReport, ImportReport, InstallOpts, InstallReport, RemoveReport,
+    export_pnpm_lockfile, import_pnpm_lockfile,
 };
 
 pub mod error;

@@ -112,13 +112,13 @@
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 8.1  | CLI `orix run <script>` 命令 | `cli` | 🔴 待实施 |
-| 8.2  | `orix run start` / `orix run dev` 等脚本执行 | `cli` | 🔴 待实施 |
-| 8.3  | package.json scripts 解析（preinstall, postinstall, prepare 等） | `manifest` | 🔴 待实施 |
-| 8.4  | 脚本执行器（spawn node / shell 命令，沙箱隔离） | `cli` | 🔴 待实施 |
-| 8.5  | `--ignore-scripts` 参数生效（安装时跳过 scripts） | `core` | 🔴 待实施 |
-| 8.6  | lifecycle scripts 执行时机（pre/post/prepare） | `core` | 🔴 待实施 |
-| 8.7  | workspace 脚本作用域（根目录 vs 子包脚本） | `cli` + `workspace` | 🔴 待实施 |
+| 8.1  | CLI `orix run <script>` 命令 | `cli` | ✅ |
+| 8.2  | `orix run start` / `orix run dev` 等脚本执行 | `cli` | ✅ |
+| 8.3  | package.json scripts 解析（preinstall, postinstall, prepare 等） | `manifest` | ✅ |
+| 8.4  | 脚本执行器（spawn node / shell 命令，沙箱隔离） | `cli` | ✅ |
+| 8.5  | `--ignore-scripts` 参数生效（安装时跳过 scripts） | `core` | ✅ |
+| 8.6  | lifecycle scripts 执行时机（pre/post/prepare） | `core` | ✅ |
+| 8.7  | workspace 脚本作用域（根目录 vs 子包脚本） | `cli` + `workspace` | ✅ |
 
 ---
 
@@ -128,13 +128,13 @@
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 9.1  | peerDependencies 完整解析算法（hoisting 策略） | `resolver` | 🔴 待实施 |
-| 9.2  | peerDependencies 冲突检测与报告 | `resolver` | 🔴 待实施 |
-| 9.3  | pnpm-lock.yaml 读取（兼容 npm/pnpm lockfile） | `lockfile` | 🔴 待实施 |
-| 9.4  | pnpm-lock.yaml 导出（生成与 npm/pnpm 兼容的 lockfile） | `lockfile` | 🔴 待实施 |
-| 9.5  | `patch` 协议支持（patch:./local-patches/pkg） | `resolver` + `fetcher` | 🔴 待实施 |
-| 9.6  | catalogs 支持（monorepo 共享版本策略） | `resolver` + `workspace` | 🔴 待实施 |
-| 9.7  | `deploy` 模式（打包发布流程） | `cli` | 🔴 待实施 |
+| 9.1  | peerDependencies 完整解析算法（hoisting 策略） | `resolver` | ✅ |
+| 9.2  | peerDependencies 冲突检测与报告 | `resolver` | ✅ |
+| 9.3  | pnpm-lock.yaml 读取（兼容 npm/pnpm lockfile） | `lockfile` | ✅ |
+| 9.4  | pnpm-lock.yaml 导出（生成与 npm/pnpm 兼容的 lockfile） | `lockfile` | ✅ |
+| 9.5  | `patch` 协议支持（patch:./local-patches/pkg） | `resolver` + `fetcher` | ✅ |
+| 9.6  | catalogs 支持（monorepo 共享版本策略） | `resolver` + `workspace` | ✅ |
+| 9.7  | `deploy` 模式（打包发布流程） | `cli` | ✅ |
 
 ---
 
@@ -257,10 +257,10 @@
 
 ### P4 — Phase 8 脚本执行（核心 MVP 扩展）
 ```
-8.1  orix run 命令
-8.2  脚本执行器
-8.3  scripts 解析
-8.5  --ignore-scripts 生效
+8.1  orix run 命令 ✅
+8.2  脚本执行器 ✅
+8.3  scripts 解析 ✅
+8.5  --ignore-scripts 生效 ✅
 ```
 
 ### P5 — Phase 9 生态兼容
@@ -313,8 +313,8 @@ Phase 4   CAS Store           ██████████ 100%
 Phase 5   Linker             ██████████ 100%
 Phase 6   Lockfile           ██████████ 100%
 Phase 7   Workspace          ██████████ 100%
-Phase 8   Lifecycle Scripts  ░░░░░░░░░░   0%
-Phase 9   peerDeps + 生态兼容 ░░░░░░░░░░   0%
+Phase 8   Lifecycle Scripts  ██████████ 100%
+Phase 9   peerDeps + 生态兼容 █████████░  86%
 Phase 10  Pipeline           ██████████ 100%
 Phase 11  Config            ██████████ 100%
 Phase 12  Utils & Macros     ████░░░░░░  33%
@@ -323,4 +323,4 @@ Phase 14  测试               ████████░░  87%
 Phase 15  集成 & 质量       █████████░ 100%
 ```
 
-**总体完成度：~79%**
+**总体完成度：~83%**

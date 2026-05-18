@@ -25,6 +25,7 @@ orix-store = { workspace = true }
 orix-lockfile = { workspace = true }
 orix-linker = { workspace = true }
 orix-workspace = { workspace = true }
+glob = { workspace = true }
 
 [lints]
 workspace = true

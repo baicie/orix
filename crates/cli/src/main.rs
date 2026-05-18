@@ -8,10 +8,10 @@ use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use orix_core::{
-    add, cache_clean_with_overrides, cache_path_with_overrides, export_pnpm_lockfile,
+    add, cache_clean_with_overrides, cache_path_with_overrides, deploy, export_pnpm_lockfile,
     import_pnpm_lockfile, install, pipeline, remove, store_path_with_overrides,
-    store_prune_with_overrides, store_verify_with_overrides, ConfigOverrides, InstallOpts, Manifest,
-    ScriptRunner, Workspace,
+    store_prune_with_overrides, store_verify_with_overrides, ConfigOverrides, DeployOpts, InstallOpts,
+    Manifest, ScriptRunner, Workspace,
 };
 
 mod errors;
@@ -69,6 +69,7 @@ enum Command {
     StoreVerify,
     Import(ImportArgs),
     Export(ExportArgs),
+    Deploy(DeployArgs),
 }
 
 #[derive(Subcommand)]
@@ -170,6 +171,25 @@ struct ExportArgs {
     /// Output file path. Defaults to pnpm-lock.yaml in the project root.
     #[arg(default_value = "pnpm-lock.yaml")]
     path: PathBuf,
+}
+
+#[derive(Args)]
+struct DeployArgs {
+    /// Package name or path glob to deploy (required).
+    #[arg(short = 'F', long, required = true)]
+    filter: String,
+    /// Output directory for the deployed package.
+    #[arg(short, long, required = true)]
+    output: PathBuf,
+    /// Only include production dependencies (skip devDependencies).
+    #[arg(long, short = 'p')]
+    prod: bool,
+    /// Use frozen lockfile (no registry interaction).
+    #[arg(long)]
+    frozen_lockfile: bool,
+    /// Run deploy hooks (predeploy, postdeploy).
+    #[arg(long)]
+    hooks: bool,
 }
 
 #[derive(ValueEnum, Clone, Default)]
@@ -386,6 +406,27 @@ async fn main() -> Result<()> {
             match run_export(&dir, &output_path) {
                 Ok(report) => {
                     println!(" {} Exported {} packages to {}", CHECKMARK, report.packages_exported, output_path.display());
+                }
+                Err(e) => {
+                    eprintln!("{}", errors::format_error(&e, &dir));
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Deploy(args) => {
+            let output_path = if args.output.is_relative() {
+                dir.join(&args.output)
+            } else {
+                args.output.clone()
+            };
+            let opts = DeployOpts {
+                prod: args.prod,
+                frozen_lockfile: args.frozen_lockfile,
+                hooks: args.hooks,
+            };
+            match run_deploy(&dir, &args.filter, &output_path, &opts) {
+                Ok(report) => {
+                    println!(" {} Deployed {} packages ({} files)", CHECKMARK, report.packages_deployed, report.files_copied);
                 }
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -665,4 +706,14 @@ fn run_import(project_root: &std::path::Path, source_path: &std::path::Path) -> 
 
 fn run_export(project_root: &std::path::Path, output_path: &std::path::Path) -> anyhow::Result<orix_core::ExportReport> {
     export_pnpm_lockfile(project_root, output_path)
+}
+
+fn run_deploy(
+    project_root: &std::path::Path,
+    filter: &str,
+    output_dir: &std::path::Path,
+    opts: &DeployOpts,
+) -> anyhow::Result<orix_core::DeployReport> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(deploy(project_root, filter, output_dir, opts))
 }
