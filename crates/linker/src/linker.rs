@@ -484,6 +484,7 @@ mod tests {
             os: Vec::new(),
             cpu: Vec::new(),
             depnodes: Vec::new(),
+            patch: None,
         })
     }
 

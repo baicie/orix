@@ -1,5 +1,6 @@
 //! Package tarball fetcher.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -10,7 +11,7 @@ use tracing::{debug, info_span, warn};
 use orix_domain::{check_platform_compatibility, DependencyGraph};
 use orix_store::Store;
 
-use crate::{extract_tarball, TarballCache};
+use crate::{apply_patch, extract_tarball, TarballCache};
 
 /// Fetches package tarballs and imports them into the store.
 pub struct Fetcher {
@@ -20,6 +21,8 @@ pub struct Fetcher {
     offline: bool,
     /// If true, bypass cache and re-fetch all packages.
     force: bool,
+    /// Project root directory for resolving relative patch file paths.
+    project_root: PathBuf,
 }
 
 /// Progress events emitted while fetching packages.
@@ -33,12 +36,13 @@ pub enum FetchEvent {
 
 impl Fetcher {
     /// Create a new fetcher.
-    pub fn new(cache: TarballCache, store: Store) -> Self {
+    pub fn new(cache: TarballCache, store: Store, project_root: PathBuf) -> Self {
         Self {
             cache: Arc::new(cache),
             store: Arc::new(store),
             offline: false,
             force: false,
+            project_root,
         }
     }
 
@@ -51,6 +55,12 @@ impl Fetcher {
     /// Configure force mode (bypass cache, re-fetch all packages).
     pub fn with_force(mut self, force: bool) -> Self {
         self.force = force;
+        self
+    }
+
+    /// Configure project root (for resolving patch file paths).
+    pub fn with_project_root(mut self, root: PathBuf) -> Self {
+        self.project_root = root;
         self
     }
 

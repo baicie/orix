@@ -205,12 +205,65 @@ pub enum ConstraintKind {
     Latest,
     /// Dist-tag: "next", "beta", etc.
     Tag(String),
+    /// A local patch specification: "patch:pkg@1.0.0#./patches/pkg.patch"
+    Patch(PatchSpec),
+    /// A catalog: protocol reference: "catalog:" or "catalog:name"
+    Catalog(CatalogConstraint),
+}
+
+/// A catalog: protocol specification (domain-level).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CatalogConstraint {
+    /// The catalog name (None = default catalog, Some(name) = named catalog).
+    pub catalog_name: Option<String>,
+}
+
+/// A patch: protocol specification.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct PatchSpec {
+    /// The name of the package being patched.
+    pub package_name: PackageName,
+    /// The exact version of the package being patched.
+    pub package_version: Version,
+    /// The path to the patch file (relative to project root).
+    #[serde(rename = "path")]
+    pub patch_path: String,
+}
+
+/// A catalog: protocol specification.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CatalogSpec {
+    /// The catalog name (None = default catalog, Some(name) = named catalog).
+    pub catalog_name: Option<String>,
 }
 
 impl VersionConstraint {
     /// Parse a constraint string like "^1.0.0", ">=2.0", "latest", "next".
     pub fn parse(raw: &str) -> anyhow::Result<Self> {
         let raw = raw.trim().to_string();
+
+        // Handle patch: protocol.
+        if let Some(rest) = raw.strip_prefix("patch:") {
+            return Self::parse_patch_spec(rest)
+                .map(|spec| Self {
+                    raw,
+                    kind: ConstraintKind::Patch(spec),
+                });
+        }
+
+        // Handle catalog: protocol.
+        if let Some(after) = raw.strip_prefix("catalog:") {
+            let catalog_name = if after.is_empty() {
+                None
+            } else {
+                Some(after.to_string())
+            };
+            return Ok(Self {
+                raw,
+                kind: ConstraintKind::Catalog(CatalogConstraint { catalog_name }),
+            });
+        }
+
         if raw == "latest" {
             return Ok(Self {
                 raw: raw.clone(),
@@ -244,10 +297,47 @@ impl VersionConstraint {
         }
     }
 
+    fn parse_patch_spec(rest: &str) -> anyhow::Result<PatchSpec> {
+        // Format: <name>@<version>#<patch_path>
+        let hash_pos = rest.rfind('#').ok_or_else(|| {
+            anyhow::anyhow!("invalid patch: protocol format: expected 'name@version#path', got '{}'", rest)
+        })?;
+        let name_and_version = &rest[..hash_pos];
+        let patch_path = rest[hash_pos + 1..].to_string();
+
+        let at_pos = name_and_version.rfind('@').ok_or_else(|| {
+            anyhow::anyhow!("invalid patch: protocol format: expected 'name@version#path', got '{}'", rest)
+        })?;
+        let name_str = &name_and_version[..at_pos];
+        let version_str = &name_and_version[at_pos + 1..];
+
+        if name_str.is_empty() {
+            anyhow::bail!("invalid patch: protocol: empty package name");
+        }
+        if version_str.is_empty() {
+            anyhow::bail!("invalid patch: protocol: empty version");
+        }
+        if patch_path.is_empty() {
+            anyhow::bail!("invalid patch: protocol: empty patch path");
+        }
+
+        Ok(PatchSpec {
+            package_name: PackageName::from(name_str),
+            package_version: Version::parse(version_str)?,
+            patch_path,
+        })
+    }
+
     /// Returns true if this is an exact version constraint.
     #[inline]
     pub fn is_exact(&self) -> bool {
         matches!(self.kind, ConstraintKind::Exact(_))
+    }
+
+    /// Returns true if this is a patch: protocol constraint.
+    #[inline]
+    pub fn is_patch(&self) -> bool {
+        matches!(self.kind, ConstraintKind::Patch(_))
     }
 }
 
@@ -313,6 +403,9 @@ pub struct ResolvedPackage {
     /// Format: "name@version". Used by the linker to know which symlinks to create.
     #[serde(default)]
     pub depnodes: Vec<String>,
+    /// Patch applied to this package (if any, from patch: protocol).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<PatchSpec>,
 }
 
 // ─── DependencyGraph ───────────────────────────────────────────────────────────
@@ -321,6 +414,8 @@ pub struct ResolvedPackage {
 #[derive(Clone, Debug, Default)]
 pub struct DependencyGraph {
     inner: std::collections::BTreeMap<PackageId, ResolvedPackage>,
+    /// Diagnostic messages collected during resolution.
+    pub diagnostics: Vec<ResolverDiagnostic>,
 }
 
 impl DependencyGraph {
@@ -328,6 +423,7 @@ impl DependencyGraph {
     pub fn new() -> Self {
         Self {
             inner: Default::default(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -514,6 +610,176 @@ impl fmt::Display for PlatformMismatch {
                     f,
                     "CPU mismatch: package requires one of {:?}, current is '{}'",
                     package_supports, current
+                )
+            }
+        }
+    }
+}
+
+// ─── ScriptRef ────────────────────────────────────────────────────────────────
+
+/// A named script entry from package.json scripts.
+#[derive(Debug, Clone)]
+pub struct ScriptRef<'a> {
+    /// Script name (e.g., "prebuild", "build", "postbuild").
+    pub name: String,
+    /// Script command string.
+    pub command: &'a str,
+}
+
+// ─── PeerDependencies ─────────────────────────────────────────────────────────
+
+/// Peer context: the resolved peers visible from a package's installation point.
+/// Used by the peer-aware dependency resolver to determine which instance of a
+/// package to install.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
+pub struct PeerContext {
+    /// Resolved peer packages, keyed by name.
+    pub resolved: std::collections::BTreeMap<PackageName, PackageId>,
+}
+
+impl PeerContext {
+    /// Returns true if no peers are present.
+    pub fn is_empty(&self) -> bool {
+        self.resolved.is_empty()
+    }
+
+    /// Insert a resolved peer.
+    pub fn insert(&mut self, name: PackageName, id: PackageId) {
+        self.resolved.insert(name, id);
+    }
+
+    /// Generate the peer suffix for lockfile keys, sorted by package name.
+    /// Format: "(react@18.2.0)(lodash@4.17.21)"
+    /// Empty context produces an empty string.
+    pub fn key(&self) -> String {
+        let mut parts: Vec<String> = self
+            .resolved
+            .iter()
+            .map(|(_, id)| format!("({})", id))
+            .collect();
+        parts.sort();
+        parts.join("")
+    }
+}
+
+/// Package instance ID: combines source identity (name + version) with the peer
+/// context at the installation point. Two packages with the same source but
+/// different peer environments resolve to different instance IDs.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct PackageInstanceId {
+    /// Source package identity.
+    pub package: PackageId,
+    /// Peer environment at the installation point.
+    pub peer_context: PeerContext,
+}
+
+impl PackageInstanceId {
+    /// Create a new package instance ID.
+    pub fn new(package: PackageId, peer_context: PeerContext) -> Self {
+        Self {
+            package,
+            peer_context,
+        }
+    }
+
+    /// Generate the full lockfile key including peer suffix.
+    /// Format: "name@ver(peer1@ver1)(peer2@ver2)"
+    pub fn key(&self) -> String {
+        let suffix = self.peer_context.key();
+        if suffix.is_empty() {
+            self.package.key()
+        } else {
+            format!("{}{}", self.package.key(), suffix)
+        }
+    }
+
+    /// Return a version of this instance ID without peer context
+    /// (for lockfile v1 compatibility).
+    pub fn without_peers(&self) -> PackageInstanceId {
+        PackageInstanceId {
+            package: self.package.clone(),
+            peer_context: PeerContext::default(),
+        }
+    }
+}
+
+/// Peer requirement: describes what a package declares as a peer dependency.
+#[derive(Debug, Clone)]
+pub struct PeerRequirement {
+    /// Package that makes this requirement.
+    pub requester: PackageId,
+    /// Name of the required peer package.
+    pub name: PackageName,
+    /// Version constraint on the peer.
+    pub range: VersionConstraint,
+    /// Whether the peer is optional.
+    pub optional: bool,
+}
+
+// ─── Resolver diagnostics ─────────────────────────────────────────────────────
+
+/// Diagnostic messages produced during dependency resolution.
+#[derive(Debug, Clone)]
+pub enum ResolverDiagnostic {
+    /// A required peer dependency was not found in the environment.
+    MissingPeer {
+        requester: PackageId,
+        peer_name: PackageName,
+        range: VersionConstraint,
+    },
+    /// An optional peer dependency was not found (informational only).
+    OptionalPeerMissing {
+        requester: PackageId,
+        peer_name: PackageName,
+        range: VersionConstraint,
+    },
+    /// A peer dependency version conflict detected.
+    PeerVersionConflict {
+        requester: PackageId,
+        peer_name: PackageName,
+        requested_range: VersionConstraint,
+        found_version: Version,
+    },
+}
+
+impl fmt::Display for ResolverDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResolverDiagnostic::MissingPeer {
+                requester,
+                peer_name,
+                range,
+            } => {
+                writeln!(f, "warning: unmet peer dependency")?;
+                writeln!(f, "  {} requires {}@{}", requester, peer_name, range.raw)?;
+                write!(f, "hint: install the required peer dependency")
+            }
+            ResolverDiagnostic::OptionalPeerMissing {
+                requester,
+                peer_name,
+                range,
+            } => {
+                writeln!(f, "info: optional peer not found")?;
+                write!(f, "  {} prefers {}@{} (optional)", requester, peer_name, range.raw)
+            }
+            ResolverDiagnostic::PeerVersionConflict {
+                requester,
+                peer_name,
+                requested_range,
+                found_version,
+            } => {
+                writeln!(f, "warning: peer dependency version conflict")?;
+                writeln!(
+                    f,
+                    "  {} requires {}@{}",
+                    requester, peer_name, requested_range.raw
+                )?;
+                writeln!(f, "  found {}@{}", peer_name, found_version)?;
+                write!(
+                    f,
+                    "hint: update {} to satisfy the range, or install a compatible {} version",
+                    peer_name, requester
                 )
             }
         }
@@ -726,5 +992,72 @@ mod tests {
             "https://registry.npmjs.org/@scope/pkg/-/pkg-1.2.3.tgz"
         );
         Ok(())
+    }
+
+    #[test]
+    fn peer_context_key_generates_sorted_suffix() {
+        let mut ctx = PeerContext::default();
+        ctx.insert(PackageName::from("lodash"), PackageId::new(PackageName::from("lodash"), Version::parse("4.17.21").unwrap()));
+        ctx.insert(PackageName::from("react"), PackageId::new(PackageName::from("react"), Version::parse("18.2.0").unwrap()));
+        let key = ctx.key();
+        assert!(key.contains("(lodash@4.17.21)"));
+        assert!(key.contains("(react@18.2.0)"));
+    }
+
+    #[test]
+    fn peer_context_key_empty_when_no_peers() {
+        let ctx = PeerContext::default();
+        assert!(ctx.is_empty());
+        assert_eq!(ctx.key(), "");
+    }
+
+    #[test]
+    fn package_instance_id_key_includes_peer_suffix() {
+        let mut ctx = PeerContext::default();
+        ctx.insert(PackageName::from("react"), PackageId::new(PackageName::from("react"), Version::parse("18.2.0").unwrap()));
+        let instance = PackageInstanceId::new(
+            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            ctx,
+        );
+        let key = instance.key();
+        assert!(key.contains("react-dom@18.2.0"));
+        assert!(key.contains("react@18.2.0"));
+    }
+
+    #[test]
+    fn package_instance_id_key_without_peers_matches_package_key() {
+        let ctx = PeerContext::default();
+        let instance = PackageInstanceId::new(
+            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            ctx,
+        );
+        assert_eq!(instance.key(), instance.without_peers().key());
+    }
+
+    #[test]
+    fn resolver_diagnostic_display_formats_missing_peer() {
+        let diag = ResolverDiagnostic::MissingPeer {
+            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            peer_name: PackageName::from("react"),
+            range: VersionConstraint::parse("^18.0.0").unwrap(),
+        };
+        let msg = diag.to_string();
+        assert!(msg.contains("unmet peer dependency"));
+        assert!(msg.contains("react-dom@18.2.0"));
+        assert!(msg.contains("^18.0.0"));
+    }
+
+    #[test]
+    fn resolver_diagnostic_display_formats_peer_conflict() {
+        let diag = ResolverDiagnostic::PeerVersionConflict {
+            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            peer_name: PackageName::from("react"),
+            requested_range: VersionConstraint::parse("^18.0.0").unwrap(),
+            found_version: Version::parse("17.0.2").unwrap(),
+        };
+        let msg = diag.to_string();
+        assert!(msg.contains("version conflict"));
+        assert!(msg.contains("found"));
+        assert!(msg.contains("17.0.2"));
     }
 }

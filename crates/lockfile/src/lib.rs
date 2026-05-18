@@ -1,11 +1,15 @@
 //! orix-lock.yaml management.
 
+mod pnpm;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Version};
+
+pub use pnpm::{PnpmImportError, PnpmLockfile};
 
 /// Lockfile format version.
 pub const LOCKFILE_VERSION: i32 = 1;
@@ -551,6 +555,7 @@ pub fn resolve_from_lockfile_packages(packages: &BTreeMap<String, PackageLock>) 
             os: pkg.os.clone().unwrap_or_default(),
             cpu: pkg.cpu.clone().unwrap_or_default(),
             depnodes,
+            patch: None,
         };
         graph.insert(resolved);
     }
@@ -668,6 +673,7 @@ mod tests {
             os: Vec::new(),
             cpu: Vec::new(),
             depnodes: Vec::new(),
+            patch: None,
         })
     }
 

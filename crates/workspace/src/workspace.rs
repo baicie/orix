@@ -9,8 +9,39 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use orix_manifest::Manifest;
+use crate::WorkspaceSpec;
+use std::collections::HashMap;
 
-use super::WorkspaceSpec;
+/// A catalog reference parsed from package.json.
+/// Examples: "catalog:", "catalog:react19"
+#[derive(Debug, Clone)]
+pub struct CatalogSpec {
+    /// The catalog name (None = default catalog).
+    pub catalog_name: Option<String>,
+}
+
+impl CatalogSpec {
+    /// Parse a catalog: protocol specifier.
+    ///
+    /// Supports:
+    /// - `catalog:` — references the default catalog
+    /// - `catalog:name` — references a named catalog (e.g., `catalog:react19`)
+    pub fn parse(spec: &str) -> Option<Self> {
+        let spec = spec.trim();
+        if let Some(after) = spec.strip_prefix("catalog:") {
+            if after.is_empty() {
+                return Some(Self { catalog_name: None });
+            }
+            return Some(Self {
+                catalog_name: Some(after.to_string()),
+            });
+        }
+        None
+    }
+}
+
+/// A resolved catalog entry: maps package names to their version constraints.
+pub type Catalog = HashMap<String, String>;
 
 /// A discovered workspace package.
 #[derive(Debug, Clone)]
@@ -32,12 +63,34 @@ pub struct Workspace {
     pub packages: Vec<WorkspacePackage>,
     /// Lockfile path for the workspace.
     pub lockfile_path: PathBuf,
+    /// The default catalog (package name -> version constraint).
+    pub catalog: Catalog,
+    /// Named catalogs (catalog name -> package name -> version constraint).
+    pub catalogs: HashMap<String, Catalog>,
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self {
+            root: PathBuf::new(),
+            packages: Vec::new(),
+            lockfile_path: PathBuf::new(),
+            catalog: Catalog::new(),
+            catalogs: HashMap::new(),
+        }
+    }
 }
 
 /// A pnpm-workspace.yaml file.
 #[derive(Debug, Deserialize)]
 struct WorkspaceFile {
     packages: Vec<String>,
+    /// The default catalog (simplified catalog entry).
+    #[serde(default)]
+    catalog: Option<Catalog>,
+    /// Named catalogs.
+    #[serde(default)]
+    catalogs: HashMap<String, Catalog>,
 }
 
 impl Workspace {
@@ -49,25 +102,46 @@ impl Workspace {
     /// 3. `orix.packages` in root `package.json` — JSON array of glob strings
     #[allow(clippy::manual_unwrap_or_default)]
     pub fn discover(root: PathBuf) -> Result<Self> {
-        let packages = if let Some(pkgs) = Self::discover_from_pnpm_yaml(&root)? {
-            pkgs
-        } else if let Some(pkgs) = Self::discover_from_orix_yaml(&root)? {
-            pkgs
-        } else if let Some(pkgs) = Self::discover_from_root_package_json(&root)? {
-            pkgs
-        } else {
-            Vec::new()
-        };
+        let (packages, catalog, catalogs) =
+            if let Some((pkgs, cat, cats)) = Self::discover_from_pnpm_yaml(&root)? {
+                (pkgs, cat, cats)
+            } else if let Some((pkgs, cat, cats)) = Self::discover_from_orix_yaml(&root)? {
+                (pkgs, cat, cats)
+            } else if let Some(pkgs) = Self::discover_from_root_package_json(&root)? {
+                (pkgs, Catalog::new(), HashMap::new())
+            } else {
+                (Vec::new(), Catalog::new(), HashMap::new())
+            };
 
         Ok(Self {
             root: root.clone(),
             packages,
             lockfile_path: root.join("orix-lock.yaml"),
+            catalog,
+            catalogs,
         })
     }
 
+    /// Resolve a `catalog:` or `catalog:name` specifier to its version constraint.
+    ///
+    /// Returns the version constraint string for the given package name,
+    /// or `None` if the catalog entry is not found.
+    pub fn resolve_catalog(&self, spec: &str, package_name: &str) -> Option<String> {
+        let catalog_spec = CatalogSpec::parse(spec)?;
+
+        let cat = if let Some(ref name) = catalog_spec.catalog_name {
+            self.catalogs.get(name)?
+        } else {
+            &self.catalog
+        };
+
+        cat.get(package_name).cloned()
+    }
+
     /// Try discovering workspace from `pnpm-workspace.yaml`.
-    fn discover_from_pnpm_yaml(root: &Path) -> Result<Option<Vec<WorkspacePackage>>> {
+    fn discover_from_pnpm_yaml(
+        root: &Path,
+    ) -> Result<Option<(Vec<WorkspacePackage>, Catalog, HashMap<String, Catalog>)>> {
         let path = root.join("pnpm-workspace.yaml");
         if !path.exists() {
             return Ok(None);
@@ -77,11 +151,15 @@ impl Workspace {
         let workspace_file: WorkspaceFile =
             serde_yaml::from_str(&source).with_context(|| "failed to parse pnpm-workspace.yaml")?;
         let packages = Self::find_packages(root, &workspace_file.packages)?;
-        Ok(Some(packages))
+        let catalog = workspace_file.catalog.unwrap_or_default();
+        let catalogs = workspace_file.catalogs;
+        Ok(Some((packages, catalog, catalogs)))
     }
 
     /// Try discovering workspace from `orix-workspace.yaml`.
-    fn discover_from_orix_yaml(root: &Path) -> Result<Option<Vec<WorkspacePackage>>> {
+    fn discover_from_orix_yaml(
+        root: &Path,
+    ) -> Result<Option<(Vec<WorkspacePackage>, Catalog, HashMap<String, Catalog>)>> {
         let path = root.join("orix-workspace.yaml");
         if !path.exists() {
             return Ok(None);
@@ -91,7 +169,9 @@ impl Workspace {
         let workspace_file: WorkspaceFile =
             serde_yaml::from_str(&source).with_context(|| "failed to parse orix-workspace.yaml")?;
         let packages = Self::find_packages(root, &workspace_file.packages)?;
-        Ok(Some(packages))
+        let catalog = workspace_file.catalog.unwrap_or_default();
+        let catalogs = workspace_file.catalogs;
+        Ok(Some((packages, catalog, catalogs)))
     }
 
     /// Try discovering workspace from `orix.packages` field in root `package.json`.
@@ -181,6 +261,15 @@ impl Workspace {
             .iter()
             .find(|p| p.manifest.name.as_deref() == Some(name_to_find))
             .cloned()
+    }
+
+    /// Find a workspace package by its package name.
+    ///
+    /// Returns `None` if no package with that name exists in the workspace.
+    pub fn find_package_by_name(&self, name: &str) -> Option<&WorkspacePackage> {
+        self.packages
+            .iter()
+            .find(|p| p.manifest.name.as_deref() == Some(name))
     }
 }
 
@@ -301,6 +390,8 @@ mod tests {
             root: PathBuf::from("."),
             packages,
             lockfile_path: PathBuf::from("orix-lock.yaml"),
+            catalog: Catalog::new(),
+            catalogs: HashMap::new(),
         }
     }
 

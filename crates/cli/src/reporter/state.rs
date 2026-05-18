@@ -274,6 +274,19 @@ impl InstallState {
                     self.phase_mut(phase).status = StepStatus::Failed;
                 }
             }
+
+            InstallEvent::ScriptsPhaseStarted { .. } => {
+                self.scripts.status = StepStatus::Running;
+            }
+
+            InstallEvent::ScriptFinished { .. } => {
+                // Each script increments done count.
+                self.scripts.done += 1;
+            }
+
+            InstallEvent::ScriptsPhaseSkipped { .. } => {
+                self.scripts.status = StepStatus::Skipped;
+            }
         }
     }
 

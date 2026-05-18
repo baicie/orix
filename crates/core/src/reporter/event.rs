@@ -144,4 +144,26 @@ pub enum InstallEvent {
         /// Optional hint for the user.
         hint: Option<String>,
     },
+
+    /// A scripts phase (preinstall/install/postinstall) started.
+    ScriptsPhaseStarted {
+        /// Which lifecycle event.
+        event: String,
+    },
+
+    /// A single script finished during a scripts phase.
+    ScriptFinished {
+        /// Script name.
+        name: String,
+        /// Duration in milliseconds.
+        duration_ms: u64,
+        /// Exit code if available.
+        exit_code: Option<i32>,
+    },
+
+    /// All scripts were skipped (e.g., --ignore-scripts).
+    ScriptsPhaseSkipped {
+        /// Reason for skipping.
+        reason: String,
+    },
 }

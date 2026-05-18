@@ -147,6 +147,26 @@ impl Manifest {
             .find(|(name, _)| name == cmd_name)
             .map(|(_, path)| package_root.join(path))
     }
+
+    /// Returns the command for a given script name, or None if not defined.
+    pub fn script(&self, name: &str) -> Option<&str> {
+        self.scripts.get(name).map(String::as_str)
+    }
+
+    /// Returns the lifecycle chain for a script (preX, X, postX), in execution order.
+    /// Only includes scripts that are actually defined.
+    pub fn lifecycle_chain(&self, name: &str) -> Vec<orix_domain::ScriptRef<'_>> {
+        let mut scripts = Vec::with_capacity(3);
+        for candidate in &[format!("pre{name}"), name.to_string(), format!("post{name}")] {
+            if let Some(command) = self.scripts.get(candidate) {
+                scripts.push(orix_domain::ScriptRef {
+                    name: candidate.clone(),
+                    command,
+                });
+            }
+        }
+        scripts
+    }
 }
 
 #[cfg(test)]
@@ -249,5 +269,78 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|(k, _)| k == "tool-a"));
         assert!(entries.iter().any(|(k, _)| k == "tool-b"));
+    }
+
+    #[test]
+    fn test_script_returns_command_when_defined() {
+        let mut scripts = BTreeMap::new();
+        scripts.insert("build".to_string(), "tsc".to_string());
+        scripts.insert("dev".to_string(), "vite".to_string());
+        let manifest = Manifest {
+            name: Some("my-pkg".into()),
+            scripts,
+            ..Default::default()
+        };
+        assert_eq!(manifest.script("build"), Some("tsc"));
+        assert_eq!(manifest.script("dev"), Some("vite"));
+        assert_eq!(manifest.script("missing"), None);
+    }
+
+    #[test]
+    fn test_script_empty_when_not_defined() {
+        let manifest: Manifest = Manifest {
+            name: Some("my-pkg".into()),
+            scripts: BTreeMap::new(),
+            ..Default::default()
+        };
+        assert_eq!(manifest.script("build"), None);
+    }
+
+    #[test]
+    fn test_lifecycle_chain_includes_all_three_when_present() {
+        let mut scripts = BTreeMap::new();
+        scripts.insert("prebuild".to_string(), "echo pre".to_string());
+        scripts.insert("build".to_string(), "tsc".to_string());
+        scripts.insert("postbuild".to_string(), "echo post".to_string());
+        let manifest = Manifest {
+            name: Some("my-pkg".into()),
+            scripts,
+            ..Default::default()
+        };
+        let chain = manifest.lifecycle_chain("build");
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0].name, "prebuild");
+        assert_eq!(chain[0].command, "echo pre");
+        assert_eq!(chain[1].name, "build");
+        assert_eq!(chain[1].command, "tsc");
+        assert_eq!(chain[2].name, "postbuild");
+        assert_eq!(chain[2].command, "echo post");
+    }
+
+    #[test]
+    fn test_lifecycle_chain_includes_only_present_scripts() {
+        let mut scripts = BTreeMap::new();
+        scripts.insert("build".to_string(), "tsc".to_string());
+        scripts.insert("postbuild".to_string(), "echo post".to_string());
+        let manifest = Manifest {
+            name: Some("my-pkg".into()),
+            scripts,
+            ..Default::default()
+        };
+        let chain = manifest.lifecycle_chain("build");
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[0].name, "build");
+        assert_eq!(chain[1].name, "postbuild");
+    }
+
+    #[test]
+    fn test_lifecycle_chain_empty_when_none_defined() {
+        let manifest: Manifest = Manifest {
+            name: Some("my-pkg".into()),
+            scripts: BTreeMap::new(),
+            ..Default::default()
+        };
+        let chain = manifest.lifecycle_chain("build");
+        assert!(chain.is_empty());
     }
 }

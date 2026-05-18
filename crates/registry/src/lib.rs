@@ -130,4 +130,24 @@ impl RegistryClient {
     pub fn cache(&self) -> &Arc<PackumentCache> {
         &self.cache
     }
+
+    /// Synchronously fetch a packument (blocking).
+    ///
+    /// Used by peer dependency resolution which is called from synchronous contexts.
+    /// Checks the in-memory cache before making a blocking HTTP request.
+    pub fn fetch_packument_sync(&mut self, name: &PackageName) -> Result<Packument> {
+        use std::time::Duration;
+
+        if let Some(cached) = self.cache.get_sync(name.as_str()) {
+            return Ok(cached);
+        }
+
+        let rt = tokio::runtime::Handle::current();
+        let packument = rt.block_on(self.fetch_packument(name))?;
+
+        // Also cache the sync result.
+        let _ = self.cache.insert_sync(name.as_str().to_string(), packument.clone(), Duration::MAX);
+
+        Ok(packument)
+    }
 }

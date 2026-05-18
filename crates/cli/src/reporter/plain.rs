@@ -122,6 +122,22 @@ impl PlainReporter {
                     writeln!(self.writer, "hint: {hint}")?;
                 }
             }
+
+            InstallEvent::ScriptsPhaseStarted { event } => {
+                writeln!(self.writer, "[scripts] starting lifecycle: {event}")?;
+            }
+
+            InstallEvent::ScriptFinished { name, duration_ms, exit_code } => {
+                let code_str = exit_code.map_or("?".to_string(), |c| c.to_string());
+                writeln!(
+                    self.writer,
+                    "[scripts] finished {name} ({duration_ms}ms, exit {code_str})"
+                )?;
+            }
+
+            InstallEvent::ScriptsPhaseSkipped { reason } => {
+                writeln!(self.writer, "[scripts] skipped: {reason}")?;
+            }
         }
 
         self.writer.flush()

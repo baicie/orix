@@ -2,9 +2,11 @@
 
 mod cache;
 mod fetcher;
+mod patch;
 
 pub use cache::TarballCache;
 pub use fetcher::{FetchEvent, FetchReport, Fetcher};
+pub use patch::apply_patch;
 
 use std::fs;
 use std::path::{Path, PathBuf};

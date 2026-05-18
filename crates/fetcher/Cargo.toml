@@ -23,6 +23,7 @@ tar = { workspace = true }
 flate2 = { workspace = true }
 tempfile = { workspace = true }
 tracing = { workspace = true }
+patch = { workspace = true }
 orix-domain = { workspace = true }
 orix-store = { workspace = true }
 

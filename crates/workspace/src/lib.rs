@@ -4,7 +4,7 @@
 
 mod workspace;
 
-pub use workspace::{detect_workspace_cycles, Workspace, WorkspacePackage};
+pub use workspace::{detect_workspace_cycles, Catalog, CatalogSpec, Workspace, WorkspacePackage};
 
 use std::path::PathBuf;
 
@@ -51,7 +51,6 @@ impl WorkspaceSpec {
         // workspace:^, workspace:~, workspace:>=, workspace:<= — constraint variant
         for prefix in WORKSPACE_PREFIXES {
             if let Some(rest) = spec.strip_prefix(prefix) {
-                // constraint_part = "1.0.0", full_constraint = "^1.0.0"
                 let constraint_part = rest;
                 let full_constraint = &prefix["workspace:".len()..];
                 let version = constraint_part
@@ -71,7 +70,6 @@ impl WorkspaceSpec {
 
         // workspace:* — bare workspace reference
         if let Some(after) = spec.strip_prefix("workspace:") {
-            // workspace:* has name = None (matches any), constraint = "*"
             if after == "*" {
                 return Self {
                     name: None,
@@ -132,7 +130,6 @@ mod tests {
     #[test]
     fn parse_workspace_caret() {
         let spec = WorkspaceSpec::parse("workspace:^1.0.0");
-        // name = version (1.0.0), constraint = full spec (^1.0.0)
         assert_eq!(spec.name, Some("1.0.0".to_string()));
         assert_eq!(spec.constraint, Some("^1.0.0".to_string()));
         assert_eq!(spec.version_constraint(), "1.0.0");
@@ -181,7 +178,6 @@ mod tests {
         assert!(WorkspaceSpec::parse("workspace:^1.0.0").is_workspace_spec());
         assert!(WorkspaceSpec::parse("workspace:file:../utils").is_workspace_spec());
         assert!(WorkspaceSpec::parse("workspace:@scope/pkg").is_workspace_spec());
-        // Plain names are NOT workspace specs
         assert!(!WorkspaceSpec::parse("@scope/pkg").is_workspace_spec());
     }
 

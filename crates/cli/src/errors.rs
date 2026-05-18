@@ -154,6 +154,28 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
         );
     }
 
+    // Script errors
+    if top.contains("script") && (top.contains("not found") || top.contains("failed")) {
+        if top.contains("not found") {
+            return format!(
+                "{} Script not found.\n  \
+                   Hint: Check your package.json scripts field for available scripts.",
+                EMOJI_ERR
+            );
+        }
+        return format!(
+            "{} Script failed.\n  {}",
+            EMOJI_ERR, top
+        );
+    }
+    if top.contains("disabled by --ignore-scripts") {
+        return format!(
+            "{} Lifecycle scripts are disabled.\n  \
+               Run without --ignore-scripts to enable script execution.",
+            EMOJI_ERR
+        );
+    }
+
     // Generic fallback
     format!(
         "{} An error occurred:\n{}\n\n\

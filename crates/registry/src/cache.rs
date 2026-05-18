@@ -28,6 +28,8 @@ impl CacheEntry {
 #[derive(Default)]
 pub struct PackumentCache {
     inner: RwLock<std::collections::HashMap<String, CacheEntry>>,
+    /// Synchronous cache backed by parking_lot RwLock.
+    sync_inner: parking_lot::RwLock<std::collections::HashMap<String, CacheEntry>>,
 }
 
 impl PackumentCache {
@@ -52,11 +54,14 @@ impl PackumentCache {
     /// Insert a packument into the cache with the default TTL.
     pub async fn insert(&self, name: String, packument: Packument) {
         let entry = CacheEntry {
-            packument,
+            packument: packument.clone(),
             expires_at: Instant::now() + PACKUMENT_CACHE_TTL,
         };
         let mut guard = self.inner.write().await;
-        guard.insert(name, entry);
+        guard.insert(name.clone(), entry);
+        drop(guard);
+        // Also update the synchronous cache for use by peer resolution.
+        self.insert_sync(name, packument, PACKUMENT_CACHE_TTL);
     }
 
     /// Remove a packument from the cache.
@@ -78,6 +83,29 @@ impl PackumentCache {
     pub async fn clear(&self) {
         let mut guard = self.inner.write().await;
         guard.clear();
+    }
+
+    /// Synchronously get a packument from the cache (blocking).
+    pub fn get_sync(&self, name: &str) -> Option<Packument> {
+        let guard = self.sync_inner.read();
+        let entry = guard.get(name)?;
+        if Instant::now() >= entry.expires_at {
+            drop(guard);
+            let mut guard = self.sync_inner.write();
+            guard.remove(name);
+            return None;
+        }
+        Some(entry.packument.clone())
+    }
+
+    /// Synchronously insert a packument into the cache (blocking).
+    pub fn insert_sync(&self, name: String, packument: Packument, ttl: Duration) {
+        let entry = CacheEntry {
+            packument,
+            expires_at: Instant::now() + ttl,
+        };
+        let mut guard = self.sync_inner.write();
+        guard.insert(name, entry);
     }
 }
 

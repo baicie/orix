@@ -28,8 +28,12 @@ pub struct Config {
     pub fetch_timeout_secs: u64,
     /// Number of fetch retries.
     pub fetch_retries: u32,
-    /// Run lifecycle scripts (default: false, MVP skips all scripts).
+    /// Skip running lifecycle scripts during install.
     pub ignore_scripts: bool,
+    /// Package name allowlist for running dependency lifecycle scripts.
+    /// Only packages in this list will have their lifecycle scripts executed.
+    /// An empty list means only project scripts are allowed.
+    pub allow_scripts: Vec<String>,
     /// Save exact versions instead of caret/tilde in package.json.
     pub save_exact: bool,
     /// Fail install if engine constraints are not met.
@@ -53,6 +57,10 @@ pub struct ConfigOverrides {
     pub store_dir: Option<PathBuf>,
     /// Local tarball cache directory override.
     pub cache_dir: Option<PathBuf>,
+    /// Skip running lifecycle scripts.
+    pub ignore_scripts: Option<bool>,
+    /// Package name allowlist for running dependency lifecycle scripts.
+    pub allow_scripts: Option<Vec<String>>,
 }
 
 /// Color output preference.
@@ -94,7 +102,8 @@ impl Config {
             concurrency: 10,
             fetch_timeout_secs: 30,
             fetch_retries: 3,
-            ignore_scripts: true,
+            ignore_scripts: false,
+            allow_scripts: Vec::new(),
             save_exact: false,
             engine_strict: false,
             color: ColorChoice::Auto,
@@ -159,6 +168,9 @@ impl Config {
         if let Some(v) = first_env(["ORIX_SIDE_EFFECTS_CACHE", "RPNPM_SIDE_EFFECTS_CACHE"]) {
             self.side_effects_cache = v == "true" || v == "1";
         }
+        if let Some(v) = first_env(["ORIX_ALLOW_SCRIPTS", "RPNPM_ALLOW_SCRIPTS"]) {
+            self.allow_scripts = v.split(',').map(String::from).collect();
+        }
     }
 
     fn merge_overrides(&mut self, overrides: &ConfigOverrides) {
@@ -172,6 +184,12 @@ impl Config {
         }
         if let Some(cache_dir) = &overrides.cache_dir {
             self.cache_dir = cache_dir.clone();
+        }
+        if let Some(ignore_scripts) = overrides.ignore_scripts {
+            self.ignore_scripts = ignore_scripts;
+        }
+        if let Some(allow_scripts) = &overrides.allow_scripts {
+            self.allow_scripts = allow_scripts.clone();
         }
     }
 
@@ -208,6 +226,9 @@ impl Config {
             }
             "concurrency" => self.concurrency = value.parse().unwrap_or(self.concurrency),
             "ignore-scripts" => self.ignore_scripts = value == "true" || value == "1",
+            "allow-scripts" => {
+                self.allow_scripts = value.split(',').map(String::from).collect();
+            }
             "save-exact" => self.save_exact = value == "true" || value == "1",
             "engine-strict" => self.engine_strict = value == "true" || value == "1",
             "hoist-patterns" => {
@@ -312,6 +333,8 @@ mod tests {
                 registry: Some("https://cli.example.test/".to_string()),
                 store_dir: None,
                 cache_dir: None,
+                ignore_scripts: None,
+                allow_scripts: None,
             },
         )?;
 
@@ -334,6 +357,8 @@ mod tests {
                 registry: None,
                 store_dir: Some(PathBuf::from("D:/orix-cli-store")),
                 cache_dir: Some(PathBuf::from("D:/orix-cli-cache")),
+                ignore_scripts: None,
+                allow_scripts: None,
             },
         )?;
 
@@ -367,6 +392,34 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let config = Config::load(temp.path())?;
         assert!(config.side_effects_cache);
+        Ok(())
+    }
+
+    #[test]
+    fn ignore_scripts_defaults_to_false() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let config = Config::load(temp.path())?;
+        assert!(!config.ignore_scripts);
+        Ok(())
+    }
+
+    #[test]
+    fn allow_scripts_defaults_to_empty() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let config = Config::load(temp.path())?;
+        assert!(config.allow_scripts.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn allow_scripts_parsed_from_npmrc() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        fs::write(
+            temp.path().join(".npmrc"),
+            "allow-scripts=esbuild,@swc/core",
+        )?;
+        let config = Config::load(temp.path())?;
+        assert_eq!(config.allow_scripts, vec!["esbuild", "@swc/core"]);
         Ok(())
     }
 }

@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
-use tracing::warn;
 
 use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, Version,
@@ -17,7 +16,7 @@ use orix_registry::{Packument, RegistryClient};
 use orix_workspace::{Workspace, WorkspaceSpec};
 use url::Url;
 
-/// Progress event emitted after each package is resolved.
+/// An optional dependency that was skipped due to platform mismatch.
 #[derive(Debug, Clone)]
 pub struct ResolveProgressEvent {
     /// Resolved package id.
@@ -40,9 +39,9 @@ pub struct SkippedOptionalDep {
 /// Select the best version for a package from a packument.
 fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) -> Result<Version> {
     match &constraint.kind {
-        ConstraintKind::Exact(v) => Ok(v.clone()),
+        orix_domain::ConstraintKind::Exact(v) => Ok(v.clone()),
 
-        ConstraintKind::Range(range) => {
+        orix_domain::ConstraintKind::Range(range) => {
             let mut candidates: Vec<_> = packument
                 .versions
                 .keys()
@@ -55,18 +54,106 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
                 .with_context(|| format!("no version satisfies {}", constraint.raw))
         }
 
-        ConstraintKind::Latest => packument
+        orix_domain::ConstraintKind::Latest => packument
             .dist_tags
             .get("latest")
             .and_then(|v| Version::parse(v).ok())
             .with_context(|| "no dist-tags.latest found in packument"),
 
-        ConstraintKind::Tag(tag) => packument
+        orix_domain::ConstraintKind::Tag(tag) => packument
             .dist_tags
             .get(tag)
             .and_then(|v| Version::parse(v).ok())
             .with_context(|| format!("tag '{}' not found in packument", tag)),
+
+        orix_domain::ConstraintKind::Patch(spec) => {
+            // The patch spec includes the exact version already.
+            Ok(spec.package_version.clone())
+        }
+
+        orix_domain::ConstraintKind::Catalog(_) => {
+            // Catalog expansion should happen before version selection.
+            // If we reach here, the catalog was not expanded.
+            anyhow::bail!(
+                "catalog reference '{}' was not expanded — workspace catalog not available",
+                constraint.raw
+            );
+        }
     }
+}
+
+/// Resolve a single peer dependency against the current resolution context.
+///
+/// Returns `None` if the peer cannot be resolved — the caller decides whether
+/// to emit a diagnostic based on whether the peer is optional.
+fn resolve_peer_dep(
+    peer_name: &PackageName,
+    peer_range: &str,
+    memo: &BTreeMap<(PackageName, String), PackageId>,
+    registry: &mut RegistryClient,
+) -> Option<PackageId> {
+    let constraint = VersionConstraint::parse(peer_range).ok()?;
+    let key = (peer_name.clone(), constraint.raw.clone());
+
+    // Check if already resolved in this batch.
+    if let Some(id) = memo.get(&key) {
+        return Some(id.clone());
+    }
+
+    // Synchronous registry lookup for peer resolution.
+    // This adds a network hop per unique unresolved peer, which is acceptable
+    // since peers are typically already in the memo or are well-known packages.
+    let packument = registry.fetch_packument_sync(peer_name).ok()?;
+    let version = select_version_impl(&packument, &constraint).ok()?;
+    let metadata = packument.versions.get(&version.to_string())?;
+    let tarball = metadata.dist.tarball.clone();
+    let integrity = metadata
+        .dist
+        .integrity
+        .clone()
+        .or(metadata.dist.shasum.clone())
+        .unwrap_or_default();
+    let deps: Vec<(PackageName, String)> = metadata
+        .dependencies
+        .iter()
+        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+        .collect();
+    let dev_deps: Vec<(PackageName, String)> = metadata
+        .dev_dependencies
+        .iter()
+        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+        .collect();
+    let opt_deps: Vec<(PackageName, String)> = metadata
+        .optional_dependencies
+        .iter()
+        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+        .collect();
+    let peer_deps: Vec<(PackageName, String)> = metadata
+        .peer_dependencies
+        .iter()
+        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+        .collect();
+    let depnodes: Vec<String> = deps
+        .iter()
+        .chain(opt_deps.iter())
+        .map(|(n, _)| n.to_string())
+        .chain(peer_deps.iter().map(|(n, _)| n.to_string()))
+        .collect();
+    let resolved = ResolvedPackage {
+        id: PackageId::new(peer_name.clone(), version.clone()),
+        integrity,
+        tarball,
+        dependencies: deps,
+        dev_dependencies: dev_deps,
+        optional_dependencies: opt_deps,
+        peer_dependencies: peer_deps,
+        engines: metadata.engines.as_ref().and_then(|e| e.node.clone()),
+        os: metadata.os.clone(),
+        cpu: metadata.cpu.clone(),
+        depnodes,
+        patch: None,
+    };
+    Some(resolved.id.clone())
 }
 
 /// Core resolution loop. Takes independent mutable references to avoid borrow conflicts.
@@ -129,12 +216,9 @@ async fn resolve_batch_impl(
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
 
-        if !peer_deps.is_empty() {
-            warn!(
-                package = %pkg_id,
-                count = peer_deps.len(),
-                "peerDependencies are not resolved in MVP mode"
-            );
+        // Resolve each peer dependency against the current memo.
+        for (peer_name, peer_range) in &peer_deps {
+            let _ = resolve_peer_dep(peer_name, peer_range, memo, registry);
         }
 
         let depnodes: Vec<String> = deps
@@ -143,6 +227,12 @@ async fn resolve_batch_impl(
             .map(|(n, _)| n.to_string())
             .chain(peer_deps.iter().map(|(n, _)| n.to_string()))
             .collect();
+
+        // Extract patch spec if this is a patch: protocol dependency.
+        let patch = match &constraint.kind {
+            ConstraintKind::Patch(spec) => Some(spec.clone()),
+            _ => None,
+        };
 
         let resolved = ResolvedPackage {
             id: pkg_id.clone(),
@@ -156,6 +246,7 @@ async fn resolve_batch_impl(
             os: metadata.os.clone(),
             cpu: metadata.cpu.clone(),
             depnodes,
+            patch,
         };
 
         resolved_count += 1;
@@ -345,6 +436,7 @@ impl Resolver {
                             os: local_pkg.manifest.os.clone(),
                             cpu: local_pkg.manifest.cpu.clone(),
                             depnodes: Vec::new(),
+                            patch: None,
                         };
                         graph.insert(resolved);
                         self.memo.insert(key, pkg_id);
@@ -355,6 +447,36 @@ impl Resolver {
 
             let Ok(constraint) = VersionConstraint::parse(raw) else {
                 continue;
+            };
+
+            // Expand catalog: protocol references using workspace catalogs.
+            let constraint = if let Some(ws) = workspace {
+                if let orix_domain::ConstraintKind::Catalog(cat_constraint) = &constraint.kind {
+                    if let Some(resolved_version) =
+                        ws.resolve_catalog(raw, name.as_str())
+                    {
+                        // Replace catalog reference with the actual version constraint.
+                        VersionConstraint::parse(&resolved_version).unwrap_or_else(|_| {
+                            // Fallback: treat resolved version as exact version.
+                            VersionConstraint {
+                                raw: resolved_version.clone(),
+                                kind: orix_domain::ConstraintKind::Exact(
+                                    Version::parse(&resolved_version)
+                                        .unwrap_or_else(|_| {
+                                            #[allow(clippy::unwrap_used)]
+                                            Version::parse("0.0.0").unwrap()
+                                        }),
+                                ),
+                            }
+                        })
+                    } else {
+                        constraint
+                    }
+                } else {
+                    constraint
+                }
+            } else {
+                constraint
             };
 
             to_resolve.push((PackageName::from(name.as_str()), constraint));

@@ -174,6 +174,7 @@ fn lockfile_update_small(c: &mut Criterion) {
         os: Vec::new(),
         cpu: Vec::new(),
         depnodes: Vec::new(),
+        patch: None,
     });
     graph.insert(ResolvedPackage {
         id: lodash_id.clone(),
@@ -187,6 +188,7 @@ fn lockfile_update_small(c: &mut Criterion) {
         os: Vec::new(),
         cpu: Vec::new(),
         depnodes: Vec::new(),
+        patch: None,
     });
     graph.insert(ResolvedPackage {
         id: ts_id,
@@ -200,6 +202,7 @@ fn lockfile_update_small(c: &mut Criterion) {
         os: Vec::new(),
         cpu: Vec::new(),
         depnodes: Vec::new(),
+        patch: None,
     });
 
     group.bench_function("update_with_3_packages", |b| {

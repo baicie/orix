@@ -13,13 +13,14 @@ use tracing::{debug, info, info_span};
 use orix_config::{Config, ConfigOverrides};
 use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
 use orix_linker::{LinkReport, Linker};
-use orix_lockfile::{resolve_from_lockfile_packages, Lockfile};
+use orix_lockfile::{resolve_from_lockfile_packages, Lockfile, PnpmLockfile};
 use orix_manifest::Manifest;
 use orix_resolver::Resolver;
 use orix_store::Store;
 use orix_workspace::{detect_workspace_cycles, Workspace};
 
 use crate::reporter::{InstallEvent, InstallPhase, LockfileStatus};
+use crate::script::{LifecycleEvent, ScriptRunner};
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
@@ -105,6 +106,73 @@ fn send_event(tx: &Option<mpsc::Sender<InstallEvent>>, event: InstallEvent) {
     }
 }
 
+/// Run a single lifecycle event for the project root, sending progress events.
+async fn run_project_lifecycle(
+    event: LifecycleEvent,
+    manifest: &Manifest,
+    config: &Config,
+    project_root: &Path,
+    progress_tx: &Option<mpsc::Sender<InstallEvent>>,
+) {
+    send_event(
+        progress_tx,
+        InstallEvent::ScriptsPhaseStarted {
+            event: event.script_name().to_string(),
+        },
+    );
+
+    let runner = ScriptRunner::new(
+        config.clone(),
+        manifest.clone(),
+        project_root.to_path_buf(),
+        None,
+    );
+
+    let result = runner.run_lifecycle(event, &orix_domain::PackageId::new(
+        orix_domain::PackageName::from(""),
+        orix_domain::Version::parse("0.0.0").unwrap(),
+    )).await;
+
+    match result {
+        Ok(()) => {
+            send_event(progress_tx, InstallEvent::ScriptFinished {
+                name: event.script_name().to_string(),
+                duration_ms: 0,
+                exit_code: Some(0),
+            });
+        }
+        Err(crate::script::ScriptError::Disabled) => {
+            send_event(progress_tx, InstallEvent::ScriptsPhaseSkipped {
+                reason: "scripts disabled by --ignore-scripts".to_string(),
+            });
+        }
+        Err(crate::script::ScriptError::MissingScript(..)) => {
+            // Script not defined — skip silently.
+        }
+        Err(crate::script::ScriptError::Failed { name, code }) => {
+            send_event(progress_tx, InstallEvent::ScriptFinished {
+                name,
+                duration_ms: 0,
+                exit_code: code,
+            });
+        }
+        Err(crate::script::ScriptError::Terminated { name }) => {
+            send_event(progress_tx, InstallEvent::ScriptFinished {
+                name,
+                duration_ms: 0,
+                exit_code: None,
+            });
+        }
+        Err(crate::script::ScriptError::Spawn { name, .. }) => {
+            send_event(progress_tx, InstallEvent::ScriptFinished {
+                name,
+                duration_ms: 0,
+                exit_code: Some(-1),
+            });
+        }
+    }
+}
+
 /// Top-level install orchestration.
 pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallReport> {
     let _span = info_span!("install", root = %project_root.display());
@@ -116,6 +184,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             registry: opts.registry.clone(),
             store_dir: opts.store_dir.clone(),
             cache_dir: opts.cache_dir.clone(),
+            ignore_scripts: Some(opts.ignore_scripts),
+            allow_scripts: None,
         },
     )
     .with_context(|| "failed to load configuration")?;
@@ -130,6 +200,16 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let direct_dependency_count = manifest.dependencies.len() + manifest.dev_dependencies.len();
+
+    // Phase 1: Run preinstall lifecycle (before resolution)
+    run_project_lifecycle(
+        LifecycleEvent::Preinstall,
+        &manifest,
+        &config,
+        project_root,
+        &opts.progress_tx,
+    )
+    .await;
 
     send_event(
         &opts.progress_tx,
@@ -229,7 +309,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 let store = Store::open(config.store_dir.clone())
                     .with_context(|| "failed to open store")?;
                 let tarball_cache = TarballCache::new(config.cache_dir.clone());
-                let fetcher = Fetcher::new(tarball_cache, store.clone())
+                let fetcher = Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
                     .with_offline(opts.offline)
                     .with_force(false);
                 let concurrency = if opts.concurrency == 0 {
@@ -538,7 +618,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
     let tarball_cache = TarballCache::new(config.cache_dir.clone());
-    let fetcher = Fetcher::new(tarball_cache, store.clone())
+    let fetcher = Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
         .with_offline(opts.offline)
         .with_force(opts.force);
     let concurrency = if opts.concurrency == 0 {
@@ -699,6 +779,16 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         },
     );
 
+    // Phase: Run install lifecycle (after link, before lockfile write)
+    run_project_lifecycle(
+        LifecycleEvent::Install,
+        &manifest,
+        &config,
+        project_root,
+        &opts.progress_tx,
+    )
+    .await;
+
     let layout_report = linker
         .validate_layout(&direct_deps)
         .with_context(|| "failed to validate node_modules layout")?;
@@ -770,6 +860,31 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     );
 
     let duration = start.elapsed();
+    info!(duration_ms = duration.as_millis(), "install complete");
+
+    // Phase: Run postinstall and prepare lifecycle (after lockfile, before final validation)
+    run_project_lifecycle(
+        LifecycleEvent::Postinstall,
+        &manifest,
+        &config,
+        project_root,
+        &opts.progress_tx,
+    )
+    .await;
+
+    // Initial install: also run prepare
+    let is_initial_install = old_lockfile.is_none();
+    if is_initial_install {
+        run_project_lifecycle(
+            LifecycleEvent::Prepare,
+            &manifest,
+            &config,
+            project_root,
+            &opts.progress_tx,
+        )
+        .await;
+    }
+
     info!(duration_ms = duration.as_millis(), "install complete");
     send_event(
         &opts.progress_tx,
@@ -1084,4 +1199,84 @@ pub async fn remove(
         removed_packages: removed,
         install_report: report,
     })
+}
+
+/// Report from an import operation.
+#[derive(Debug, Clone)]
+pub struct ImportReport {
+    /// Number of packages imported.
+    pub packages_imported: usize,
+    /// Number of warnings generated during import.
+    pub warnings: usize,
+}
+
+/// Report from an export operation.
+#[derive(Debug, Clone)]
+pub struct ExportReport {
+    /// Number of packages exported.
+    pub packages_exported: usize,
+}
+
+/// Import a pnpm-lock.yaml file and convert it to orix-lock.yaml.
+pub fn import_pnpm_lockfile(source_path: &Path, project_root: &Path) -> Result<ImportReport> {
+    let pnpm_lockfile = PnpmLockfile::read(source_path)
+        .map_err(|e| anyhow::anyhow!("failed to read pnpm-lock.yaml: {}", e))?;
+
+    if !pnpm_lockfile.is_supported() {
+        let version = pnpm_lockfile.version();
+        anyhow::bail!("unsupported pnpm lockfile version: {:?}", version);
+    }
+
+    let mut warnings = 0;
+
+    if pnpm_lockfile.importers.is_empty() {
+        eprintln!(
+            "warning: pnpm-lock.yaml has no importers section; the lockfile may be empty or corrupted"
+        );
+        warnings += 1;
+    }
+
+    let orix_lockfile = pnpm_lockfile.into_orix_lockfile();
+    let packages_imported = orix_lockfile.packages.len();
+    let output_path = project_root.join("orix-lock.yaml");
+
+    orix_lockfile
+        .write(&output_path)
+        .with_context(|| "failed to write orix-lock.yaml")?;
+
+    info!(
+        packages = packages_imported,
+        importers = orix_lockfile.importers.len(),
+        "imported pnpm-lock.yaml"
+    );
+
+    Ok(ImportReport {
+        packages_imported,
+        warnings,
+    })
+}
+
+/// Export orix-lock.yaml to pnpm-lock.yaml format.
+pub fn export_pnpm_lockfile(project_root: &Path, output_path: &Path) -> Result<ExportReport> {
+    let lockfile_path = project_root.join("orix-lock.yaml");
+    let orix_lockfile = Lockfile::read(&lockfile_path)
+        .with_context(|| "failed to read orix-lock.yaml")?;
+
+    let packages_exported = orix_lockfile.packages.len();
+
+    // Re-serialize through orix YAML (same format, just outputs to a different path).
+    let yaml = serde_yaml::to_string(&orix_lockfile)
+        .context("failed to serialize lockfile")?;
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output_path, yaml)?;
+
+    info!(
+        packages = packages_exported,
+        importers = orix_lockfile.importers.len(),
+        "exported pnpm-lock.yaml"
+    );
+
+    Ok(ExportReport { packages_exported })
 }
