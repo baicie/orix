@@ -1,8 +1,8 @@
-# @orix-pnpm/orix-darwin-x64
+# @orix/orix-darwin-x64
 
-Native binary for [@orix-pnpm/orix](https://github.com/baicie/orix) on macOS x64.
+Native binary for [@orix/orix](https://github.com/baicie/orix) on macOS x64.
 
-This package is automatically selected by the main `@orix-pnpm/orix` package based on your OS and CPU architecture.
+This package is automatically selected by the main `@orix/orix` package based on your OS and CPU architecture.
 
 ## Platform
 
@@ -11,12 +11,12 @@ This package is automatically selected by the main `@orix-pnpm/orix` package bas
 
 ## Installation
 
-This package is installed automatically when you install `@orix-pnpm/orix`:
+This package is installed automatically when you install `@orix/orix`:
 
 ```bash
-npm install -g @orix-pnpm/orix
+npm install -g @orix/orix
 # or
-pnpm add -g @orix-pnpm/orix
+pnpm add -g @orix/orix
 ```
 
 ## Description

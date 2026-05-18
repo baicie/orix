@@ -5,9 +5,9 @@ High-performance package manager written in Rust, compatible with pnpm.
 ## Installation
 
 ```bash
-npm install -g @orix-pnpm/orix
+npm install -g @orix/orix
 # or
-pnpm add -g @orix-pnpm/orix
+pnpm add -g @orix/orix
 ```
 
 ## Usage

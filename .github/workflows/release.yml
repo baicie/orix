@@ -528,6 +528,9 @@ jobs:
           cp artifacts/npm-linux-x64-musl/bin/orix dist/linux-x64-musl/bin/orix || true
           cp artifacts/npm-win32-x64-msvc/bin/orix.exe dist/win32-x64-msvc/bin/orix.exe || true
 
+      - name: Publish main package
+        run: npm publish ./dist/main --access public
+
       - name: Publish platform packages
         shell: bash
         run: |
@@ -537,6 +540,3 @@ jobs:
           npm publish ./dist/linux-arm64-gnu --access public
           npm publish ./dist/linux-x64-musl --access public
           npm publish ./dist/win32-x64-msvc --access public
-
-      - name: Publish main package
-        run: npm publish ./dist/main --access public
