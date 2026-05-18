@@ -302,3 +302,5 @@ pub async fn run_lifecycle_scripts(
 ```
 
 脚本在沙箱环境中运行（受限的 PATH，默认无网络访问）。
+
+Phase 8 的完整命令、执行器、安全策略、workspace 作用域和测试计划见 [Lifecycle Scripts](./lifecycle-scripts.md)。

@@ -106,80 +106,113 @@
 
 ---
 
-## Phase 8 — 安装管道（Pipeline）
+## Phase 8 — Lifecycle Scripts + Script Execution
+
+详细设计：[Lifecycle Scripts 设计](design/lifecycle-scripts.md)
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 8.1  | core::install() 完整管道编排 | `core` | ✅ |
-| 8.2  | core::add()（修改 package.json + install） | `core` | ✅ |
-| 8.3  | core::remove()（修改 package.json + install） | `core` | ✅ |
-| 8.4  | frozen-lockfile 流程（resolve from lockfile） | `core` | ✅ |
-| 8.5  | force 流程（重新获取所有包） | `core` | ✅ |
-| 8.6  | CoreError 枚举（聚合所有子 crate 错误） | `core` | ✅ |
-| 8.7  | InstallReport / FetchReport / LinkReport 结构 | `core` | ✅ |
+| 8.1  | CLI `orix run <script>` 命令 | `cli` | 🔴 待实施 |
+| 8.2  | `orix run start` / `orix run dev` 等脚本执行 | `cli` | 🔴 待实施 |
+| 8.3  | package.json scripts 解析（preinstall, postinstall, prepare 等） | `manifest` | 🔴 待实施 |
+| 8.4  | 脚本执行器（spawn node / shell 命令，沙箱隔离） | `cli` | 🔴 待实施 |
+| 8.5  | `--ignore-scripts` 参数生效（安装时跳过 scripts） | `core` | 🔴 待实施 |
+| 8.6  | lifecycle scripts 执行时机（pre/post/prepare） | `core` | 🔴 待实施 |
+| 8.7  | workspace 脚本作用域（根目录 vs 子包脚本） | `cli` + `workspace` | 🔴 待实施 |
 
 ---
 
-## Phase 9 — Config
+## Phase 9 — peerDependencies + 生态兼容
+
+详细设计：[生态兼容设计](design/ecosystem-compat.md)
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 9.1  | Config 结构体（registry, store_dir, cache_dir, etc.） | `config` | ✅ |
-| 9.2  | .npmrc 文件解析 | `config` | ✅ |
-| 9.3  | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ✅ |
-| 9.4  | 用户 ~/.npmrc 加载 | `config` | ✅ |
-| 9.5  | CLI 参数覆盖（最高优先级） | `config` | ✅ |
-| 9.6  | hoist-patterns / side-effects-cache 配置 | `config` | ✅ |
+| 9.1  | peerDependencies 完整解析算法（hoisting 策略） | `resolver` | 🔴 待实施 |
+| 9.2  | peerDependencies 冲突检测与报告 | `resolver` | 🔴 待实施 |
+| 9.3  | pnpm-lock.yaml 读取（兼容 npm/pnpm lockfile） | `lockfile` | 🔴 待实施 |
+| 9.4  | pnpm-lock.yaml 导出（生成与 npm/pnpm 兼容的 lockfile） | `lockfile` | 🔴 待实施 |
+| 9.5  | `patch` 协议支持（patch:./local-patches/pkg） | `resolver` + `fetcher` | 🔴 待实施 |
+| 9.6  | catalogs 支持（monorepo 共享版本策略） | `resolver` + `workspace` | 🔴 待实施 |
+| 9.7  | `deploy` 模式（打包发布流程） | `cli` | 🔴 待实施 |
 
 ---
 
-## Phase 10 — Utils & Macros
+## Phase 10 — 安装管道（Pipeline）
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 10.1 | 包名规范化（normalize_name → 小写 + 规范化斜杠） | `utils` | ✅ |
-| 10.2 | 路径工具函数 | `utils` | ✅ |
-| 10.3 | 过程宏（预留） | `macros` | ⚠️ stub |
+| 10.1 | core::install() 完整管道编排 | `core` | ✅ |
+| 10.2 | core::add()（修改 package.json + install） | `core` | ✅ |
+| 10.3 | core::remove()（修改 package.json + install） | `core` | ✅ |
+| 10.4 | frozen-lockfile 流程（resolve from lockfile） | `core` | ✅ |
+| 10.5 | force 流程（重新获取所有包） | `core` | ✅ |
+| 10.6 | CoreError 枚举（聚合所有子 crate 错误） | `core` | ✅ |
+| 10.7 | InstallReport / FetchReport / LinkReport 结构 | `core` | ✅ |
 
 ---
 
-## Phase 11 — Domain
+## Phase 11 — Config
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 11.1 | PackageId / Version / PackageName / VersionConstraint | `domain` | ✅ |
-| 11.2 | ResolvedPackage / DependencyGraph | `domain` | ✅ |
-| 11.3 | PackageKey / ImporterId 类型别名 | `domain` | ✅ |
-| 11.4 | Integritty string 解析器 | `domain` | ✅ |
-| 11.5 | tarball URL builder | `domain` | ✅ |
+| 11.1 | Config 结构体（registry, store_dir, cache_dir, etc.） | `config` | ✅ |
+| 11.2 | .npmrc 文件解析 | `config` | ✅ |
+| 11.3 | 环境变量覆盖（RPNPM_REGISTRY, RPNPM_STORE, etc.） | `config` | ✅ |
+| 11.4 | 用户 ~/.npmrc 加载 | `config` | ✅ |
+| 11.5 | CLI 参数覆盖（最高优先级） | `config` | ✅ |
+| 11.6 | hoist-patterns / side-effects-cache 配置 | `config` | ✅ |
 
 ---
 
-## Phase 12 — 测试
+## Phase 12 — Utils & Macros
 
 | ID   | 任务 | Crate | 状态 |
 |------|------|-------|------|
-| 12.1 | manifest 解析测试（fixture: valid/invalid package.json） | `manifest` | ✅ |
-| 12.2 | resolver 单元测试（semver 选择逻辑） | `resolver` | ✅ |
-| 12.3 | store 文件去重测试 | `store` | ✅ |
-| 12.4 | linker 布局算法测试 | `linker` | ✅ |
-| 12.5 | lockfile 读写/diff 测试 | `lockfile` | ✅ |
-| 12.6 | integration tests（真实 npm 包安装测试） | `tests/` | ✅ |
-| 12.7 | Windows CI 测试（symlink / junction 行为） | CI | 🔴 待实施 |
+| 12.1 | 包名规范化（normalize_name → 小写 + 规范化斜杠） | `utils` | ✅ |
+| 12.2 | 路径工具函数 | `utils` | ✅ |
+| 12.3 | 过程宏（预留） | `macros` | ⚠️ stub |
 
 ---
 
-## Phase 13 — 集成 & 质量
+## Phase 13 — Domain
+
+| ID   | 任务 | Crate | 状态 |
+|------|------|-------|------|
+| 13.1 | PackageId / Version / PackageName / VersionConstraint | `domain` | ✅ |
+| 13.2 | ResolvedPackage / DependencyGraph | `domain` | ✅ |
+| 13.3 | PackageKey / ImporterId 类型别名 | `domain` | ✅ |
+| 13.4 | Integritty string 解析器 | `domain` | ✅ |
+| 13.5 | tarball URL builder | `domain` | ✅ |
+
+---
+
+## Phase 14 — 测试
+
+| ID   | 任务 | Crate | 状态 |
+|------|------|-------|------|
+| 14.1 | manifest 解析测试（fixture: valid/invalid package.json） | `manifest` | ✅ |
+| 14.2 | resolver 单元测试（semver 选择逻辑） | `resolver` | ✅ |
+| 14.3 | store 文件去重测试 | `store` | ✅ |
+| 14.4 | linker 布局算法测试 | `linker` | ✅ |
+| 14.5 | lockfile 读写/diff 测试 | `lockfile` | ✅ |
+| 14.6 | integration tests（真实 npm 包安装测试） | `tests/` | ✅ |
+| 14.7 | Windows CI 测试（symlink / junction 行为） | CI | 🔴 待实施 |
+| 14.8 | lifecycle scripts 执行测试 | `cli` | 🔴 待实施 |
+
+---
+
+## Phase 15 — 集成 & 质量
 
 | ID   | 任务 | 状态 |
 |------|------|------|
-| 13.1 | `cargo xtask check` 完整（fmt + clippy + test） | ✅ |
-| 13.2 | `cargo deny check` CI 集成 | ✅ |
-| 13.3 | `cargo machete` 依赖检查 | ✅ |
-| 13.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ✅ |
-| 13.5 | 文档：README.md | ✅ |
-| 13.6 | 文档：CONTRIBUTING.md | ✅ |
-| 13.7 | 性能测试 / benchmark | ✅ |
+| 15.1 | `cargo xtask check` 完整（fmt + clippy + test） | ✅ |
+| 15.2 | `cargo deny check` CI 集成 | ✅ |
+| 15.3 | `cargo machete` 依赖检查 | ✅ |
+| 15.4 | CI/CD workflows（Ubuntu + Windows + macOS） | ✅ |
+| 15.5 | 文档：README.md | ✅ |
+| 15.6 | 文档：CONTRIBUTING.md | ✅ |
+| 15.7 | 性能测试 / benchmark | ✅ |
 
 ---
 
@@ -204,7 +237,7 @@
 ```
 1.3  CLI 进度条输出 ✅
 1.4  人类可读错误信息 ✅
-13.5 README.md ✅
+15.5 README.md ✅
 ```
 
 ### P2 — Store 管理命令
@@ -222,7 +255,22 @@
 7.8  循环依赖检测 ✅
 ```
 
-### P4 — 细节打磨
+### P4 — Phase 8 脚本执行（核心 MVP 扩展）
+```
+8.1  orix run 命令
+8.2  脚本执行器
+8.3  scripts 解析
+8.5  --ignore-scripts 生效
+```
+
+### P5 — Phase 9 生态兼容
+```
+9.1  peerDependencies 完整解析
+9.3  pnpm-lock.yaml 读取
+9.5  patch 协议
+```
+
+### P6 — 细节打磨
 ```
 2.4  platform/os/cpu 过滤 ✅
 2.5  peerDependencies MVP ✅
@@ -237,20 +285,20 @@
 6.4  lockfile diff ✅
 6.6  lockfile 原子写入 ✅
 8.5  force 流程 ✅
-9.2  .npmrc 解析 ✅
-9.3  环境变量覆盖 ✅
+11.2 .npmrc 解析 ✅
+11.3 环境变量覆盖 ✅
 ```
 
-### P5 — 可选增强
+### P7 — 可选增强
 ```
-10.1 包名规范化 ✅
-10.2 路径工具函数 ✅
-11.4 integrity string 解析 ✅
-11.5 tarball URL builder ✅
-12.7 Windows CI 测试
-13.2 cargo deny
-13.3 cargo machete ✅
-13.7 benchmark ✅
+12.1 包名规范化 ✅
+12.2 路径工具函数 ✅
+13.4 integrity string 解析 ✅
+13.5 tarball URL builder ✅
+14.7 Windows CI 测试
+15.2 cargo deny
+15.3 cargo machete ✅
+15.7 benchmark ✅
 ```
 
 ---
@@ -258,19 +306,21 @@
 ## 当前进度总览
 
 ```
-Phase 1  CLI + manifest      ██████████ 100%
-Phase 2  Resolver            ██████████ 100%
-Phase 3  Fetcher            ██████████ 100%
-Phase 4  CAS Store           ██████████ 100%
-Phase 5  Linker             ██████████ 100%
-Phase 6  Lockfile           ██████████ 100%
-Phase 7  Workspace          ██████████ 100%
-Phase 8  Pipeline           ██████████ 100%
-Phase 9  Config            ██████████ 100%
-Phase 10 Utils & Macros     ██████░░░░  67%
-Phase 11 Domain            ██████████ 100%
-Phase 12 测试               ███████░░░  86%
-Phase 13 集成 & 质量       ████████░░ 100%
+Phase 1   CLI + manifest      ██████████ 100%
+Phase 2   Resolver            ██████████ 100%
+Phase 3   Fetcher            ██████████ 100%
+Phase 4   CAS Store           ██████████ 100%
+Phase 5   Linker             ██████████ 100%
+Phase 6   Lockfile           ██████████ 100%
+Phase 7   Workspace          ██████████ 100%
+Phase 8   Lifecycle Scripts  ░░░░░░░░░░   0%
+Phase 9   peerDeps + 生态兼容 ░░░░░░░░░░   0%
+Phase 10  Pipeline           ██████████ 100%
+Phase 11  Config            ██████████ 100%
+Phase 12  Utils & Macros     ████░░░░░░  33%
+Phase 13  Domain            ██████████ 100%
+Phase 14  测试               ████████░░  87%
+Phase 15  集成 & 质量       █████████░ 100%
 ```
 
-**总体完成度：~93%**
+**总体完成度：~79%**

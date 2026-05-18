@@ -173,8 +173,8 @@ orix install
 
 待完善：
 
-- Phase 8：`orix store prune` 和 `orix store verify` 目前在 CLI 层仍是 stub。
-- Phase 9：peerDependencies、lifecycle scripts、pnpm-lock.yaml 兼容、`patch` 协议、catalogs / deploy。
+- Phase 8：lifecycle scripts 执行、`orix run` 命令。
+- Phase 9：peerDependencies 完整算法、pnpm-lock.yaml 兼容、`patch` 协议、catalogs / deploy。
 
 高风险区域：
 

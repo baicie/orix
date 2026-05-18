@@ -212,6 +212,8 @@ orix export-pnpm-lock   # 写入 pnpm-lock.yaml 以兼容 pnpm
 
 这需要实现完整的 pnpm lockfile schema，包括 peer 解析键。
 
+Phase 9 的具体读取、导出、peer suffix package key 和 v1 -> v2 迁移方案见 [生态兼容设计](./ecosystem-compat.md)。
+
 ## 文件位置
 
 - 单工作区根目录：`./orix-lock.yaml`

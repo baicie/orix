@@ -35,6 +35,8 @@ crates/
 | [CLI & Config](./cli-config.md) | `crates/cli` + `crates/config` | CLI 命令（`install`、`add`、`remove`、`store`），从 `.npmrc` 和环境变量加载配置。 |
 | [安装管道](./core.md) | `crates/core` | 编排完整安装流程：resolve → fetch → store → link → lockfile。 |
 | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) | `crates/manifest` + `crates/domain` + `crates/utils` + `crates/macros` | `package.json` 输入模型、共享领域类型、integrity/parser、路径工具和过程宏边界。 |
+| [Lifecycle Scripts](./lifecycle-scripts.md) | `crates/cli` + `crates/core` + `crates/manifest` + `crates/workspace` | `orix run`、安装 lifecycle、脚本执行器、安全策略和 workspace 作用域。 |
+| [生态兼容](./ecosystem-compat.md) | `crates/resolver` + `crates/lockfile` + `crates/workspace` + `crates/fetcher` + `crates/core` | peerDependencies、pnpm-lock.yaml、patch、catalogs 和 deploy。 |
 | [测试、集成与质量](./testing-quality.md) | `tests/` + CI | 测试分层、端到端 fixture、Windows 链接测试、`make check` 和质量工具。 |
 
 ## TODO 覆盖情况
@@ -48,12 +50,14 @@ crates/
 | Phase 5 Linker | [Linker](./linker.md) |
 | Phase 6 Lockfile | [Lockfile](./lockfile.md) |
 | Phase 7 Workspace | [Workspace](./workspace.md) |
-| Phase 8 Pipeline | [安装管道](./core.md) |
-| Phase 9 Config | [CLI & Config](./cli-config.md) |
-| Phase 10 Utils & Macros | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
-| Phase 11 Domain | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
-| Phase 12 测试 | [测试、集成与质量](./testing-quality.md) |
-| Phase 13 集成 & 质量 | [测试、集成与质量](./testing-quality.md) |
+| Phase 8 Lifecycle Scripts | [Lifecycle Scripts](./lifecycle-scripts.md)、[CLI & Config](./cli-config.md)、[安装管道](./core.md) |
+| Phase 9 peerDeps + 生态兼容 | [生态兼容](./ecosystem-compat.md)、[Resolver](./resolver.md)、[Lockfile](./lockfile.md) |
+| Phase 10 Pipeline | [安装管道](./core.md) |
+| Phase 11 Config | [CLI & Config](./cli-config.md) |
+| Phase 12 Utils & Macros | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 13 Domain | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 14 测试 | [测试、集成与质量](./testing-quality.md) |
+| Phase 15 集成 & 质量 | [测试、集成与质量](./testing-quality.md) |
 
 ## 设计原则
 
@@ -112,10 +116,23 @@ lockfile.read() → DependencyGraph (来自 lockfile)
                          → Linker
 ```
 
-## 推迟到第三阶段+
+## Phase 8 — Lifecycle Scripts + Script Execution
 
-- 完整的 peerDependencies 解析算法
-- 生命周期脚本（preinstall、postinstall 等）
-- pnpm-lock.yaml 导入/导出
-- `patch` 协议
-- catalogs
+详见 [Lifecycle Scripts](./lifecycle-scripts.md)。覆盖以下功能：
+
+- `orix run <script>` 命令执行 package.json 中定义的脚本
+- 生命周期钩子（preinstall, postinstall, prepare, prepublishOnly 等）
+- `--ignore-scripts` 参数跳过脚本执行
+- workspace 作用域脚本
+
+## Phase 9 — peerDependencies + 生态兼容
+
+详见 [生态兼容](./ecosystem-compat.md)。覆盖以下功能：
+
+- peerDependencies 完整解析算法（hoisting 策略）
+- peerDependencies 冲突检测与报告
+- pnpm-lock.yaml 读取兼容
+- pnpm-lock.yaml 导出兼容
+- `patch` 协议支持
+- catalogs 支持
+- `deploy` 模式

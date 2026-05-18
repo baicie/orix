@@ -367,6 +367,19 @@ prepare
 
 但要加白名单或配置，因为脚本执行有安全风险。
 
+### Phase 9：peerDeps + 生态兼容
+
+支持：
+
+```txt
+peerDependencies 完整解析（hoisting 策略）
+pnpm-lock.yaml 读取兼容
+pnpm-lock.yaml 导出兼容
+patch 协议
+catalogs
+deploy
+```
+
 ## 9. 最难的地方
 
 真正难点不是下载包，而是这些：

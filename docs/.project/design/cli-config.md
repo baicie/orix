@@ -68,6 +68,24 @@ orix store status
 orix store path
 ```
 
+### Run（脚本执行）
+
+```bash
+# 执行当前 package 的 scripts.build
+orix run build
+
+# 参数透传给主脚本
+orix run dev -- --host 0.0.0.0
+
+# 在 workspace 子包中执行
+orix run --workspace @scope/ui build
+
+# 递归执行所有 workspace package 中存在的脚本
+orix run --recursive --if-present test
+```
+
+详细执行模型、PATH、环境变量、安全策略和 workspace 拓扑顺序见 [Lifecycle Scripts](./lifecycle-scripts.md)。
+
 ### 其他
 
 ```bash
@@ -126,6 +144,9 @@ enum Command {
 
     /// 管理包 store
     Store(StoreArgs),
+
+    /// 执行 package.json scripts
+    Run(RunArgs),
 }
 
 #[derive(Args)]
@@ -175,6 +196,28 @@ struct RemoveArgs {
     /// 要移除的包
     #[arg(trailing_var_arg = true)]
     packages: Vec<String>,
+}
+
+#[derive(Args)]
+struct RunArgs {
+    /// 要执行的 script 名称
+    script: String,
+
+    /// 脚本不存在时成功退出
+    #[arg(long)]
+    if_present: bool,
+
+    /// 在指定 workspace package 中执行
+    #[arg(long)]
+    workspace: Option<String>,
+
+    /// 在所有 workspace package 中按拓扑顺序执行
+    #[arg(long, short = 'r')]
+    recursive: bool,
+
+    /// 传给脚本的剩余参数
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
 }
 
 #[derive(Subcommand)]
