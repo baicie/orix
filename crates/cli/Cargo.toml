@@ -19,6 +19,8 @@ clap = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tracing-subscriber = { workspace = true }
 orix-core = { workspace = true }
+crossterm = { workspace = true }
+unicode-width = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

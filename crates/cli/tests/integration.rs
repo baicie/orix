@@ -293,14 +293,15 @@ fn install_fetches_package_from_mock_registry() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // PlainReporter outputs to stderr; summary may appear there or stdout
+    let combined = format!("{stdout}{stderr}");
+    // PlainReporter format: "resolved: +N direct, +N total" and "packages: N direct"
     assert!(
-        stdout.contains("Packages: +1 direct, +1 total"),
-        "expected package summary in output"
+        combined.contains("resolved: +1 direct, +1 total"),
+        "expected resolved summary in output"
     );
-    assert!(
-        stdout.contains("Done in"),
-        "expected install duration in output"
-    );
+    assert!(combined.contains("done:"), "expected done in output");
 
     assert!(project.path().join("orix-lock.yaml").exists());
     // Verify the package was actually installed in the store (not just fetched+linked).

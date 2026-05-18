@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, info_span};
 
+use orix_config::{Config, ConfigOverrides};
 use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
 use orix_linker::{LinkReport, Linker};
 use orix_lockfile::{resolve_from_lockfile_packages, Lockfile};
@@ -18,59 +19,7 @@ use orix_resolver::Resolver;
 use orix_store::Store;
 use orix_workspace::{detect_workspace_cycles, Workspace};
 
-pub use orix_config::{Config, ConfigOverrides};
-
-/// Progress event emitted during install.
-#[derive(Debug, Clone)]
-pub enum InstallEvent {
-    /// Install metadata is available for rendering.
-    Started {
-        /// Registry URL used for resolution and downloads.
-        registry: String,
-        /// Number of direct dependencies declared by the root manifest.
-        direct_dependencies: usize,
-    },
-    /// Total number of packages to resolve.
-    ResolvingTotal(usize),
-    /// A package is being resolved.
-    ResolvingPackage(String),
-    /// Dependency resolution has completed.
-    Resolved {
-        /// Number of packages in the resolved graph.
-        total_packages: usize,
-    },
-    /// Total number of packages to fetch.
-    FetchingTotal(usize),
-    /// A package has been fetched, extracted, and imported.
-    FetchingPackage(String),
-    /// A package failed to download.
-    FetchFailure(String),
-    /// Fetching has completed.
-    Fetched {
-        /// Number of packages successfully fetched.
-        success: usize,
-        /// Number of packages considered for fetching.
-        total: usize,
-    },
-    /// Packages are being linked.
-    Linking,
-    /// Packages have been linked.
-    Linked,
-    /// Lockfile is being written.
-    WritingLockfile,
-    /// Lockfile write/check completed.
-    LockfileDone {
-        /// Whether the lockfile changed.
-        changed: bool,
-    },
-    /// Install has finished successfully.
-    Finished {
-        /// Wall-clock time in seconds.
-        duration_secs: f64,
-    },
-    /// Install failed before completion.
-    Failed,
-}
+use crate::reporter::{InstallEvent, InstallPhase, LockfileStatus};
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
@@ -181,11 +130,30 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let direct_dependency_count = manifest.dependencies.len() + manifest.dev_dependencies.len();
+
     send_event(
         &opts.progress_tx,
         InstallEvent::Started {
-            registry: config.registry.to_string(),
-            direct_dependencies: direct_dependency_count,
+            command: "orix install".to_string(),
+        },
+    );
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::RegistrySelected {
+            url: config.registry.to_string(),
+            authenticated: config.auth_token.is_some(),
+        },
+    );
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::DirectPackages {
+            count: direct_dependency_count,
+            names: manifest
+                .dependencies
+                .keys()
+                .chain(manifest.dev_dependencies.keys())
+                .cloned()
+                .collect(),
         },
     );
 
@@ -198,6 +166,14 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         info!(packages = ws.packages.len(), "discovered workspace");
         let cycle = detect_workspace_cycles(ws);
         if !cycle.is_empty() {
+            send_event(
+                &opts.progress_tx,
+                InstallEvent::Failed {
+                    phase: Some(InstallPhase::Resolve),
+                    message: format!("circular workspace dependency: {}", cycle.join(" -> ")),
+                    hint: Some("Check pnpm-workspace.yaml for circular references.".to_string()),
+                },
+            );
             anyhow::bail!(
                 "circular workspace dependency detected: {}",
                 cycle.join(" -> ")
@@ -211,9 +187,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         None
     };
 
-    // Resolve dependency graph
     let graph = if opts.frozen_lockfile {
-        // Frozen lockfile mode: verify lockfile matches manifest, use lockfile packages directly
         if let Some(ref lf) = old_lockfile {
             lf.validate_frozen(&manifest, ".")
                 .with_context(|| "frozen lockfile validation failed")?;
@@ -222,36 +196,32 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             info!(packages = g.len(), "resolved from lockfile (frozen mode)");
             g
         } else {
+            send_event(
+                &opts.progress_tx,
+                InstallEvent::Failed {
+                    phase: Some(InstallPhase::Resolve),
+                    message: "frozen lockfile mode requires an existing lockfile".to_string(),
+                    hint: Some("Run `orix install` without --frozen-lockfile first.".to_string()),
+                },
+            );
             anyhow::bail!("frozen lockfile mode requires an existing lockfile");
         }
     } else {
-        // Normal mode: resolve from registry, with workspace awareness
-        let mut resolver = if let Some(ref token) = config.auth_token {
-            info!(registry = %config.registry, "using authenticated registry");
-            Resolver::with_auth(config.registry.clone(), token)
-        } else {
-            Resolver::new(config.registry.clone())
-        };
-
-        // Collect root-level deps for progress reporting
-        let root_deps: Vec<_> = manifest
-            .dependencies
-            .keys()
-            .chain(manifest.dev_dependencies.keys())
-            .cloned()
-            .collect();
         send_event(
             &opts.progress_tx,
-            InstallEvent::ResolvingTotal(root_deps.len()),
+            InstallEvent::PhaseStarted {
+                phase: InstallPhase::Resolve,
+            },
         );
-        for name in &root_deps {
-            send_event(
-                &opts.progress_tx,
-                InstallEvent::ResolvingPackage(name.clone()),
-            );
-        }
 
         let graph = if let Some(ref ws) = workspace {
+            let mut resolver = if let Some(ref token) = config.auth_token {
+                info!(registry = %config.registry, "using authenticated registry");
+                Resolver::with_auth(config.registry.clone(), token)
+            } else {
+                Resolver::new(config.registry.clone())
+            };
+
             let mut manifests: Vec<&Manifest> = vec![&manifest];
             manifests.extend(ws.packages.iter().map(|p| &p.manifest));
             info!(
@@ -263,20 +233,38 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 .await
                 .with_context(|| "failed to resolve workspace dependencies")?
         } else {
+            let mut resolver = if let Some(ref token) = config.auth_token {
+                info!(registry = %config.registry, "using authenticated registry");
+                Resolver::with_auth(config.registry.clone(), token)
+            } else {
+                Resolver::new(config.registry.clone())
+            };
+
             resolver
                 .resolve_manifest(&manifest)
                 .await
                 .with_context(|| "failed to resolve dependencies")?
         };
 
+        let old_count = old_lockfile
+            .as_ref()
+            .map(|lf| lf.packages.len())
+            .unwrap_or(0);
+        let added = graph.len().saturating_sub(old_count);
+        let removed = old_count.saturating_sub(graph.len());
+
+        send_event(
+            &opts.progress_tx,
+            InstallEvent::Resolved {
+                direct: direct_dependency_count,
+                total: graph.len(),
+                added,
+                removed,
+            },
+        );
+
         graph
     };
-    send_event(
-        &opts.progress_tx,
-        InstallEvent::Resolved {
-            total_packages: graph.len(),
-        },
-    );
 
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
     let tarball_cache = TarballCache::new(config.cache_dir.clone());
@@ -289,32 +277,55 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         opts.concurrency
     };
 
-    send_event(&opts.progress_tx, InstallEvent::FetchingTotal(graph.len()));
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::PhaseStarted {
+            phase: InstallPhase::Fetch,
+        },
+    );
+
     let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
     let install_progress_tx = opts.progress_tx.clone();
     let fetch_progress_forwarder = tokio::spawn(async move {
         while let Some(event) = fetch_progress_rx.recv().await {
             match event {
                 FetchEvent::PackageFetched(package) => {
-                    send_event(&install_progress_tx, InstallEvent::FetchingPackage(package))
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::FetchProgress {
+                            done: 0,
+                            total: 0,
+                            package: Some(package),
+                        },
+                    );
                 }
                 FetchEvent::PackageFailed(failure) => {
-                    send_event(&install_progress_tx, InstallEvent::FetchFailure(failure));
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::Failed {
+                            phase: Some(InstallPhase::Fetch),
+                            message: format!("failed to fetch package: {}", failure),
+                            hint: Some("Check network connection or try --offline.".to_string()),
+                        },
+                    );
                 }
             }
         }
     });
 
+    let total_to_fetch = graph.len();
     let fetch_report = fetcher
         .fetch_all(&graph, concurrency, Some(fetch_progress_tx))
         .await
         .with_context(|| "failed to fetch packages")?;
     let _ = fetch_progress_forwarder.await;
+
     send_event(
         &opts.progress_tx,
-        InstallEvent::Fetched {
-            success: fetch_report.success,
-            total: graph.len(),
+        InstallEvent::FetchProgress {
+            done: fetch_report.success,
+            total: total_to_fetch,
+            package: None,
         },
     );
 
@@ -325,13 +336,36 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     );
 
     if !fetch_report.failures.is_empty() {
+        send_event(
+            &opts.progress_tx,
+            InstallEvent::Failed {
+                phase: Some(InstallPhase::Fetch),
+                message: format!(
+                    "failed to fetch packages:\n  {}",
+                    fetch_report.failures.join("\n  ")
+                ),
+                hint: Some("Check network connection or try --offline.".to_string()),
+            },
+        );
         anyhow::bail!(
             "failed to fetch packages:\n  {}",
             fetch_report.failures.join("\n  ")
         );
     }
 
-    send_event(&opts.progress_tx, InstallEvent::Linking);
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::PhaseFinished {
+            phase: InstallPhase::Fetch,
+        },
+    );
+
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::PhaseStarted {
+            phase: InstallPhase::Link,
+        },
+    );
     let direct_deps: HashSet<String> = manifest
         .dependencies
         .keys()
@@ -346,10 +380,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let link_report = linker
         .link_graph(&graph, &direct_deps)
         .with_context(|| "failed to link packages")?;
-    send_event(&opts.progress_tx, InstallEvent::Linked);
+    send_event(
+        &opts.progress_tx,
+        InstallEvent::PhaseFinished {
+            phase: InstallPhase::Link,
+        },
+    );
 
-    // Link workspace local packages directly to their source directories
-    // (bypass .orix/ for workspace:* references)
     if let Some(ref ws) = workspace {
         for pkg in &ws.packages {
             if let Some(ref name) = pkg.manifest.name {
@@ -371,17 +408,20 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         );
     }
 
-    // Write lockfile (unless frozen)
     let mut lockfile_changed = false;
     let lockfile_diff: Option<LockfileDiffReport> = if !opts.frozen_lockfile {
-        send_event(&opts.progress_tx, InstallEvent::WritingLockfile);
+        send_event(
+            &opts.progress_tx,
+            InstallEvent::PhaseStarted {
+                phase: InstallPhase::Lockfile,
+            },
+        );
         let base_lockfile = old_lockfile
             .as_ref()
             .cloned()
             .unwrap_or_else(Lockfile::empty);
         let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
 
-        // Compute diff before writing so we have the old vs new comparison
         let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
         let diff_report = LockfileDiffReport {
             added: diff.added.clone(),
@@ -411,10 +451,20 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     } else {
         None
     };
+
+    let lockfile_status = if !opts.frozen_lockfile {
+        if lockfile_changed {
+            LockfileStatus::Written
+        } else {
+            LockfileStatus::Unchanged
+        }
+    } else {
+        LockfileStatus::Skipped
+    };
     send_event(
         &opts.progress_tx,
-        InstallEvent::LockfileDone {
-            changed: lockfile_changed,
+        InstallEvent::Lockfile {
+            status: lockfile_status,
         },
     );
 
@@ -423,7 +473,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     send_event(
         &opts.progress_tx,
         InstallEvent::Finished {
-            duration_secs: duration.as_secs_f64(),
+            installed: graph.len(),
+            duration,
         },
     );
 
@@ -646,7 +697,6 @@ pub async fn remove(
 
     let report = install(project_root, opts).await?;
 
-    // Prune orphaned packages from the lockfile after reinstall
     let lockfile_path = project_root.join("orix-lock.yaml");
     if lockfile_path.exists() {
         let mut lockfile = Lockfile::read(&lockfile_path)
