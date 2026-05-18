@@ -52,6 +52,10 @@ enum Task {
     Doc,
     /// Run security and dependency policy checks if tools are installed.
     Security,
+    /// Run the same checks as CI (format, check, clippy, test, docs, deny).
+    ///
+    /// Use before pushing or opening a PR to catch issues locally.
+    CiLocal,
     /// Perform a full release: check → publish crates → git tag → push.
     ///
     /// Version is read from Cargo.toml unless overridden with --version.
@@ -161,6 +165,35 @@ fn main() -> Result<()> {
             run_optional("cargo-deny", &["check"])?;
             run_optional("cargo-audit", &["audit"])?;
             run_optional("cargo-machete", &["--with-metadata"])?;
+        }
+        Task::CiLocal => {
+            eprintln!("=== Running CI checks locally ===\n");
+
+            eprintln!("[1/5] Format check...");
+            run("cargo", ["fmt", "--all", "--", "--check"])?;
+
+            eprintln!("\n[2/5] Check...");
+            run(
+                "cargo",
+                ["check", "--workspace", "--all-targets", "--all-features"],
+            )?;
+
+            eprintln!("\n[3/5] Clippy...");
+            run_clippy()?;
+
+            eprintln!("\n[4/5] Tests...");
+            run("cargo", ["test", "--workspace", "--all-features"])?;
+
+            eprintln!("\n[5/5] Docs...");
+            run(
+                "cargo",
+                ["doc", "--workspace", "--all-features", "--no-deps"],
+            )?;
+
+            eprintln!("\n[bonus] Cargo deny...");
+            run_optional("cargo-deny", &["check"])?;
+
+            eprintln!("\n=== All CI checks passed ===");
         }
         Task::Release {
             dry_run,
