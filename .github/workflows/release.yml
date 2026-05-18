@@ -468,7 +468,7 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          token: ${{ secrets.NPM_TOKEN }}
+          scope: "@orix"
 
       - name: Extract version
         id: version
@@ -529,10 +529,13 @@ jobs:
           cp artifacts/npm-win32-x64-msvc/bin/orix.exe dist/win32-x64-msvc/bin/orix.exe || true
 
       - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish ./dist/main --access public
 
       - name: Publish platform packages
-        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm publish ./dist/darwin-arm64 --access public
           npm publish ./dist/darwin-x64 --access public
