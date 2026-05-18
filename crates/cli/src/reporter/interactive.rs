@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use super::frame::FrameRenderer;
 use super::state::{InstallState, StepStatus};
 use super::terminal::{terminal_width, LiveTerminal};
+use crate::styles::ColorState;
 use orix_core::reporter::InstallEvent;
 
 /// Reporter that renders live-updating frames in a TTY.
@@ -20,17 +21,20 @@ pub struct InteractiveReporter {
     last_render_at: Instant,
     /// Minimum interval between renders in milliseconds.
     min_render_interval: Duration,
+    /// Color state.
+    color_state: ColorState,
 }
 
 impl InteractiveReporter {
     /// Create a new interactive reporter using stderr.
-    pub fn new() -> Self {
+    pub fn new(color_state: ColorState) -> Self {
         Self {
             state: InstallState::default(),
             terminal: Some(LiveTerminal::new(io::stderr())),
             last_rendered_frame: String::new(),
             last_render_at: Instant::now() - Duration::from_secs(1),
             min_render_interval: Duration::from_millis(33),
+            color_state,
         }
     }
 
@@ -70,7 +74,7 @@ impl InteractiveReporter {
         }
 
         let width = terminal_width();
-        let renderer = FrameRenderer::new(width);
+        let renderer = FrameRenderer::new(width, self.color_state);
         let frame = renderer.render(&self.state);
 
         if !force && frame == self.last_rendered_frame {
@@ -98,7 +102,7 @@ impl InteractiveReporter {
 
 impl Default for InteractiveReporter {
     fn default() -> Self {
-        Self::new()
+        Self::new(ColorState::Disabled)
     }
 }
 
@@ -109,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_render_throttled() -> io::Result<()> {
-        let mut reporter = InteractiveReporter::new();
+        let mut reporter = InteractiveReporter::new(ColorState::Disabled);
 
         reporter.on_event(InstallEvent::Started {
             command: "orix install".to_string(),
@@ -128,7 +132,7 @@ mod tests {
 
     #[test]
     fn test_render_finished() -> io::Result<()> {
-        let mut reporter = InteractiveReporter::new();
+        let mut reporter = InteractiveReporter::new(ColorState::Disabled);
 
         reporter.on_event(InstallEvent::Started {
             command: "orix install".to_string(),

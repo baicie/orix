@@ -2,13 +2,17 @@
 
 use std::path::Path;
 
+use crate::styles::{ColorState, Style};
+
 /// Categorizes common error patterns into user-friendly messages.
-pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
+pub fn format_error(error: &anyhow::Error, project_root: &Path, color_state: ColorState) -> String {
     let cause_chain = error.chain().collect::<Vec<_>>();
     let top = cause_chain
         .first()
         .map(|e| e.to_string())
         .unwrap_or_default();
+
+    let err_prefix = Style::ErrorPrefix.paint(EMOJI_ERR, color_state);
 
     // Workspace errors
     if (top.contains("workspace") || top.contains("pnpm-workspace"))
@@ -18,7 +22,8 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} Failed to read workspace configuration.\n  \
                Check pnpm-workspace.yaml for YAML syntax errors.\n  \
                {}",
-            EMOJI_ERR, top
+            err_prefix,
+            Style::Error.paint(&top, color_state)
         );
     }
 
@@ -28,15 +33,16 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} No package.json found in {}.\n  \
                Hint: Run this command in a directory containing a package.json,\n  \
                or use -C <path> to specify the project directory.",
-            EMOJI_ERR,
-            project_root.display()
+            err_prefix,
+            Style::Registry.paint(&project_root.display().to_string(), color_state)
         );
     }
     if top.contains("failed to parse") && top.contains("package.json") {
         return format!(
             "{} Invalid package.json: {}\n  \
                Hint: Check the JSON syntax of your package.json.",
-            EMOJI_ERR, top
+            err_prefix,
+            Style::Error.paint(&top, color_state)
         );
     }
 
@@ -46,14 +52,14 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} Lockfile mismatch.\n  \
                Your package.json dependencies have changed but the lockfile\n  \
                wasn't updated. Run 'orix install' without --frozen-lockfile first.",
-            EMOJI_ERR
+            err_prefix
         );
     }
     if top.contains("No lockfile found") {
         return format!(
             "{} No lockfile found.\n  \
                Run 'orix install' without --frozen-lockfile to generate one.",
-            EMOJI_ERR
+            err_prefix
         );
     }
 
@@ -64,14 +70,16 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
                 "{} Failed to resolve workspace dependencies.\n  \
                    Check that all packages referenced in pnpm-workspace.yaml exist.\n  \
                    {}",
-                EMOJI_ERR, top
+                err_prefix,
+                Style::Error.paint(&top, color_state)
             );
         }
         return format!(
             "{} Failed to resolve dependencies.\n  \
                Check your package.json for typos and valid version ranges.\n  \
                {}",
-            EMOJI_ERR, top
+            err_prefix,
+            Style::Error.paint(&top, color_state)
         );
     }
 
@@ -82,7 +90,8 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             return format!(
                 "{} Package '{}' not found in the registry.\n  \
                    Check the package name and version in package.json.",
-                EMOJI_ERR, pkg
+                err_prefix,
+                Style::PackageName.paint(&pkg, color_state)
             );
         }
         if top.contains("network") || top.contains("connection") || top.contains("timeout") {
@@ -91,7 +100,8 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
                    Check your internet connection and registry URL.\n  \
                    Run 'orix install --offline' to use cached packages only.\n  \
                    {}",
-                EMOJI_ERR, top
+                err_prefix,
+                Style::Error.paint(&top, color_state)
             );
         }
         if top.contains("403") || top.contains("unauthorized") || top.contains("authentication") {
@@ -99,15 +109,15 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
                 "{} Authentication failed for the registry.\n  \
                    Set your token with: npm config set //registry.npmjs.org/:_authToken YOUR_TOKEN\n  \
                    Or set the RPNPM_REGISTRY_TOKEN environment variable.",
-                EMOJI_ERR
+                err_prefix
             );
         }
         return format!(
             "{} Failed to fetch packages.\n{}\n  \
                Hint: Try again, check your registry/cache settings, or run with {} for the full trace.",
-            EMOJI_ERR,
-            format_details(error),
-            INFO_ARG
+            err_prefix,
+            format_details(error, color_state),
+            Style::Info.paint(INFO_ARG, color_state)
         );
     }
 
@@ -117,13 +127,14 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             return format!(
                 "{} Permission denied when creating symlinks.\n  \
                    On Windows, try running as Administrator or enable Developer Mode.",
-                EMOJI_ERR
+                err_prefix
             );
         }
         return format!(
             "{} Failed to create node_modules structure.\n  \
                {}",
-            EMOJI_ERR, top
+            err_prefix,
+            Style::Error.paint(&top, color_state)
         );
     }
 
@@ -133,7 +144,8 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} Cannot access the package store.\n  \
                Check that the store directory is writable.\n  \
                {}",
-            EMOJI_ERR, top
+            err_prefix,
+            Style::Error.paint(&top, color_state)
         );
     }
     if top.contains("store verification failed") || top.contains("store verify") {
@@ -141,7 +153,7 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} Store integrity check failed.\n  \
                Run 'orix store verify' for details,\n  \
                or 'orix store prune' to clean up corrupted entries.",
-            EMOJI_ERR
+            err_prefix
         );
     }
 
@@ -150,7 +162,7 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
         return format!(
             "{} Offline mode: required packages not in cache.\n  \
                Run 'orix install' without --offline first.",
-            EMOJI_ERR
+            err_prefix
         );
     }
 
@@ -160,16 +172,20 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             return format!(
                 "{} Script not found.\n  \
                    Hint: Check your package.json scripts field for available scripts.",
-                EMOJI_ERR
+                err_prefix
             );
         }
-        return format!("{} Script failed.\n  {}", EMOJI_ERR, top);
+        return format!(
+            "{} Script failed.\n  {}",
+            err_prefix,
+            Style::Error.paint(&top, color_state)
+        );
     }
     if top.contains("disabled by --ignore-scripts") {
         return format!(
             "{} Lifecycle scripts are disabled.\n  \
                Run without --ignore-scripts to enable script execution.",
-            EMOJI_ERR
+            err_prefix
         );
     }
 
@@ -177,20 +193,27 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
     format!(
         "{} An error occurred:\n{}\n\n\
            Run with {} for more details.",
-        EMOJI_ERR,
-        format_details(error),
-        INFO_ARG
+        err_prefix,
+        format_details(error, color_state),
+        Style::Info.paint(INFO_ARG, color_state)
     )
 }
 
-fn format_details(error: &anyhow::Error) -> String {
+fn format_details(error: &anyhow::Error, color_state: ColorState) -> String {
     error
         .chain()
         .map(|cause| {
             cause
                 .to_string()
                 .lines()
-                .map(|line| format!("  {}", line))
+                .map(|line| {
+                    let padded = format!("  {}", line);
+                    if color_state == ColorState::Enabled {
+                        Style::Muted.paint(&padded, color_state)
+                    } else {
+                        padded
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         })

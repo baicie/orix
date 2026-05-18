@@ -14,8 +14,11 @@ use orix_core::{
     InstallOpts, Manifest, ScriptRunner, Workspace,
 };
 
+use crate::styles::{ColorState, Style};
+
 mod errors;
 mod reporter;
+mod styles;
 
 #[derive(Parser)]
 #[command(name = "orix")]
@@ -199,7 +202,7 @@ enum LockfileFormat {
 }
 
 #[derive(ValueEnum, Clone, Default)]
-enum ColorChoice {
+pub(crate) enum ColorChoice {
     Always,
     Never,
     #[default]
@@ -215,6 +218,8 @@ fn init_tracing(level: &str) {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(&cli.log);
+
+    let color_state = ColorState::from_choice(cli.color.clone());
 
     #[allow(clippy::cmp_owned)]
     let dir = if cli.dir == PathBuf::from(".") {
@@ -259,14 +264,15 @@ async fn main() -> Result<()> {
                             &anyhow::anyhow!(
                                 "-D and -O can only be used when installing package names"
                             ),
-                            &dir
+                            &dir,
+                            color_state
                         )
                     );
                     std::process::exit(1);
                 }
 
-                if let Err(e) = run_install(&dir, &install_opts).await {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                if let Err(e) = run_install(&dir, &install_opts, color_state).await {
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             } else {
@@ -277,7 +283,8 @@ async fn main() -> Result<()> {
                             &anyhow::anyhow!(
                                 "--frozen-lockfile cannot be used when installing package names"
                             ),
-                            &dir
+                            &dir,
+                            color_state
                         )
                     );
                     std::process::exit(1);
@@ -291,19 +298,21 @@ async fn main() -> Result<()> {
                     pipeline::DepType::Production
                 };
 
-                let run = match run_add(&dir, &args.packages, dep_type, &install_opts).await {
+                let run = match run_add(&dir, &args.packages, dep_type, &install_opts, color_state)
+                    .await
+                {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!("{}", errors::format_error(&e, &dir));
+                        eprintln!("{}", errors::format_error(&e, &dir, color_state));
                         std::process::exit(1);
                     }
                 };
                 if !run.rendered_summary {
-                    print_summary(&run.report);
+                    print_summary(&run.report, color_state);
                 }
                 println!(
                     " {} Added {} packages (total installed: {})",
-                    CHECKMARK,
+                    Style::Checkmark.paint(CHECKMARK, color_state),
                     args.packages.len(),
                     run.report.packages_added
                 );
@@ -319,19 +328,19 @@ async fn main() -> Result<()> {
                 pipeline::DepType::Production
             };
 
-            let run = match run_add(&dir, &args.packages, dep_type, &opts).await {
+            let run = match run_add(&dir, &args.packages, dep_type, &opts, color_state).await {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             };
             if !run.rendered_summary {
-                print_summary(&run.report);
+                print_summary(&run.report, color_state);
             }
             println!(
                 " {} Added {} packages (total installed: {})",
-                CHECKMARK,
+                Style::Checkmark.paint(CHECKMARK, color_state),
                 args.packages.len(),
                 run.report.packages_added
             );
@@ -341,41 +350,47 @@ async fn main() -> Result<()> {
             let report = match remove(&dir, &args.packages, &opts).await {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             };
             println!(
                 " {} Removed packages: {:?}",
-                REMOVE, report.removed_packages
+                Style::Cross.paint(REMOVE, color_state),
+                report.removed_packages
             );
             println!(
                 " {} Packages remaining: {}",
-                INFO, report.install_report.packages_added
+                Style::InfoPrefix.paint(INFO, color_state),
+                report.install_report.packages_added
             );
         }
 
         Command::Run(args) => {
-            if let Err(e) = run_script(&dir, &args).await {
-                eprintln!("{}", errors::format_error(&e, &dir));
+            if let Err(e) = run_script(&dir, &args, color_state).await {
+                eprintln!("{}", errors::format_error(&e, &dir, color_state));
                 std::process::exit(1);
             }
         }
 
         Command::Store(command) => match command {
-            StoreCommand::Path => print_store_path(&dir, &config_overrides),
-            StoreCommand::Prune { dry_run } => print_store_prune(&dir, &config_overrides, dry_run),
-            StoreCommand::Verify => print_store_verify(&dir, &config_overrides),
+            StoreCommand::Path => print_store_path(&dir, &config_overrides, color_state),
+            StoreCommand::Prune { dry_run } => {
+                print_store_prune(&dir, &config_overrides, dry_run, color_state)
+            }
+            StoreCommand::Verify => print_store_verify(&dir, &config_overrides, color_state),
         },
 
         Command::Cache(command) => match command {
-            CacheCommand::Path => print_cache_path(&dir, &config_overrides),
-            CacheCommand::Clean => print_cache_clean(&dir, &config_overrides),
+            CacheCommand::Path => print_cache_path(&dir, &config_overrides, color_state),
+            CacheCommand::Clean => print_cache_clean(&dir, &config_overrides, color_state),
         },
 
-        Command::StorePath => print_store_path(&dir, &config_overrides),
-        Command::StorePrune { dry_run } => print_store_prune(&dir, &config_overrides, dry_run),
-        Command::StoreVerify => print_store_verify(&dir, &config_overrides),
+        Command::StorePath => print_store_path(&dir, &config_overrides, color_state),
+        Command::StorePrune { dry_run } => {
+            print_store_prune(&dir, &config_overrides, dry_run, color_state)
+        }
+        Command::StoreVerify => print_store_verify(&dir, &config_overrides, color_state),
 
         Command::Import(args) => {
             let input_path = if args.path.is_relative() {
@@ -387,16 +402,20 @@ async fn main() -> Result<()> {
                 Ok(report) => {
                     println!(
                         " {} Imported {} packages from {}",
-                        CHECKMARK,
+                        Style::Checkmark.paint(CHECKMARK, color_state),
                         report.packages_imported,
-                        input_path.display()
+                        Style::Registry.paint(&input_path.display().to_string(), color_state)
                     );
                     if report.warnings > 0 {
-                        println!(" {} {} warnings (see above)", INFO, report.warnings);
+                        println!(
+                            " {} {} warnings (see above)",
+                            Style::Warning.paint(INFO, color_state),
+                            report.warnings
+                        );
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             }
@@ -412,13 +431,13 @@ async fn main() -> Result<()> {
                 Ok(report) => {
                     println!(
                         " {} Exported {} packages to {}",
-                        CHECKMARK,
+                        Style::Checkmark.paint(CHECKMARK, color_state),
                         report.packages_exported,
-                        output_path.display()
+                        Style::Registry.paint(&output_path.display().to_string(), color_state)
                     );
                 }
                 Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             }
@@ -438,11 +457,13 @@ async fn main() -> Result<()> {
                 Ok(report) => {
                     println!(
                         " {} Deployed {} packages ({} files)",
-                        CHECKMARK, report.packages_deployed, report.files_copied
+                        Style::Checkmark.paint(CHECKMARK, color_state),
+                        report.packages_deployed,
+                        report.files_copied
                     );
                 }
                 Err(e) => {
-                    eprintln!("{}", errors::format_error(&e, &dir));
+                    eprintln!("{}", errors::format_error(&e, &dir, color_state));
                     std::process::exit(1);
                 }
             }
@@ -457,102 +478,164 @@ const CROSS: &str = "\u{2717}";
 const INFO: &str = "\u{2139}";
 const REMOVE: &str = "\u{2716}";
 
-fn print_store_path(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+fn print_store_path(
+    project_root: &std::path::Path,
+    overrides: &ConfigOverrides,
+    color_state: ColorState,
+) {
     let path = match store_path_with_overrides(project_root, overrides) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("{}", errors::format_error(&e, project_root));
+            eprintln!("{}", errors::format_error(&e, project_root, color_state));
             std::process::exit(1);
         }
     };
     println!("{}", path.display());
 }
 
-fn print_store_prune(project_root: &std::path::Path, overrides: &ConfigOverrides, dry_run: bool) {
+fn print_store_prune(
+    project_root: &std::path::Path,
+    overrides: &ConfigOverrides,
+    dry_run: bool,
+    color_state: ColorState,
+) {
     let report = match store_prune_with_overrides(project_root, dry_run, overrides) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", errors::format_error(&e, project_root));
+            eprintln!("{}", errors::format_error(&e, project_root, color_state));
             std::process::exit(1);
         }
     };
     if dry_run {
         println!(
             " {} Would remove {} packages and {} content files",
-            INFO, report.packages_removed, report.files_removed
+            Style::InfoPrefix.paint(INFO, color_state),
+            Style::Success.paint(&report.packages_removed.to_string(), color_state),
+            report.files_removed
         );
     } else {
         println!(
             " {} Removed {} packages and {} content files",
-            CHECKMARK, report.packages_removed, report.files_removed
+            Style::Checkmark.paint(CHECKMARK, color_state),
+            Style::Success.paint(&report.packages_removed.to_string(), color_state),
+            report.files_removed
         );
     }
-    println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
+    println!(
+        " {} Bytes reclaimed: {}",
+        Style::InfoPrefix.paint(INFO, color_state),
+        report.bytes_reclaimed
+    );
 }
 
-fn print_store_verify(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+fn print_store_verify(
+    project_root: &std::path::Path,
+    overrides: &ConfigOverrides,
+    color_state: ColorState,
+) {
     let report = match store_verify_with_overrides(project_root, overrides) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", errors::format_error(&e, project_root));
+            eprintln!("{}", errors::format_error(&e, project_root, color_state));
             std::process::exit(1);
         }
     };
-    println!(" {} Packages checked: {}", INFO, report.packages_checked);
-    println!(" {} Files checked: {}", INFO, report.files_checked);
+    println!(
+        " {} Packages checked: {}",
+        Style::InfoPrefix.paint(INFO, color_state),
+        report.packages_checked
+    );
+    println!(
+        " {} Files checked: {}",
+        Style::InfoPrefix.paint(INFO, color_state),
+        report.files_checked
+    );
     if report.is_ok() {
-        println!(" {} Store verified", CHECKMARK);
+        println!(
+            " {} Store verified",
+            Style::Checkmark.paint(CHECKMARK, color_state)
+        );
     } else {
         for missing in &report.missing {
-            eprintln!("{} missing: {}", CROSS, missing);
+            eprintln!(
+                "{} missing: {}",
+                Style::Cross.paint(CROSS, color_state),
+                missing
+            );
         }
         for corrupted in &report.corrupted {
-            eprintln!("{} corrupted: {}", CROSS, corrupted);
+            eprintln!(
+                "{} corrupted: {}",
+                Style::Cross.paint(CROSS, color_state),
+                corrupted
+            );
         }
         std::process::exit(1);
     }
 }
 
-fn print_cache_path(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+fn print_cache_path(
+    project_root: &std::path::Path,
+    overrides: &ConfigOverrides,
+    color_state: ColorState,
+) {
     let path = match cache_path_with_overrides(project_root, overrides) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("{}", errors::format_error(&e, project_root));
+            eprintln!("{}", errors::format_error(&e, project_root, color_state));
             std::process::exit(1);
         }
     };
     println!("{}", path.display());
 }
 
-fn print_cache_clean(project_root: &std::path::Path, overrides: &ConfigOverrides) {
+fn print_cache_clean(
+    project_root: &std::path::Path,
+    overrides: &ConfigOverrides,
+    color_state: ColorState,
+) {
     let report = match cache_clean_with_overrides(project_root, overrides) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", errors::format_error(&e, project_root));
+            eprintln!("{}", errors::format_error(&e, project_root, color_state));
             std::process::exit(1);
         }
     };
 
     if report.existed {
-        println!(" {} Cleared cache: {}", CHECKMARK, report.path.display());
-        println!(" {} Bytes reclaimed: {}", INFO, report.bytes_reclaimed);
+        println!(
+            " {} Cleared cache: {}",
+            Style::Checkmark.paint(CHECKMARK, color_state),
+            Style::Registry.paint(&report.path.display().to_string(), color_state)
+        );
+        println!(
+            " {} Bytes reclaimed: {}",
+            Style::InfoPrefix.paint(INFO, color_state),
+            report.bytes_reclaimed
+        );
     } else {
         println!(
             " {} Cache is already empty: {}",
-            INFO,
-            report.path.display()
+            Style::InfoPrefix.paint(INFO, color_state),
+            Style::Registry.paint(&report.path.display().to_string(), color_state)
         );
     }
 }
 
 /// Run the install command and print the final install summary.
-async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
-    let run = run_with_progress(opts.clone(), |install_opts| async move {
-        install(project_root, &install_opts).await
-    })
+async fn run_install(
+    project_root: &std::path::Path,
+    opts: &InstallOpts,
+    color_state: ColorState,
+) -> Result<()> {
+    let run = run_with_progress(
+        opts.clone(),
+        |install_opts| async move { install(project_root, &install_opts).await },
+        color_state,
+    )
     .await?;
     if !run.rendered_summary {
-        print_summary(&run.report);
+        print_summary(&run.report, color_state);
     }
     Ok(())
 }
@@ -562,10 +645,13 @@ async fn run_add(
     packages: &[String],
     dep_type: pipeline::DepType,
     opts: &InstallOpts,
+    color_state: ColorState,
 ) -> Result<InstallRun> {
-    run_with_progress(opts.clone(), |install_opts| async move {
-        add(project_root, packages, dep_type, &install_opts).await
-    })
+    run_with_progress(
+        opts.clone(),
+        |install_opts| async move { add(project_root, packages, dep_type, &install_opts).await },
+        color_state,
+    )
     .await
 }
 
@@ -574,7 +660,11 @@ struct InstallRun {
     rendered_summary: bool,
 }
 
-async fn run_with_progress<F, Fut>(mut opts: InstallOpts, operation: F) -> Result<InstallRun>
+async fn run_with_progress<F, Fut>(
+    mut opts: InstallOpts,
+    operation: F,
+    color_state: ColorState,
+) -> Result<InstallRun>
 where
     F: FnOnce(InstallOpts) -> Fut,
     Fut: std::future::Future<Output = Result<orix_core::InstallReport>>,
@@ -583,7 +673,7 @@ where
     opts.progress_tx = Some(tx.clone());
 
     let reporter = tokio::spawn(async move {
-        let mut reporter = reporter::Reporter::auto(false);
+        let mut reporter = reporter::Reporter::auto(false, color_state);
         while let Some(event) = rx.recv().await {
             if let Err(e) = reporter.on_event(event) {
                 eprintln!("reporter error: {}", e);
@@ -601,7 +691,11 @@ where
 }
 
 /// Run a user script via `orix run`.
-async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::Result<()> {
+async fn run_script(
+    project_root: &std::path::Path,
+    args: &RunArgs,
+    color_state: ColorState,
+) -> anyhow::Result<()> {
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let config = orix_core::Config::load(project_root)?;
@@ -619,19 +713,33 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
                 Ok(output) => {
                     println!(
                         " {} {} (exit {})",
-                        CHECKMARK,
-                        pkg_name,
-                        output.status.code().unwrap_or(-1)
+                        Style::Checkmark.paint(CHECKMARK, color_state),
+                        Style::PackageName.paint(&pkg_name, color_state),
+                        Style::Duration
+                            .paint(&output.status.code().unwrap_or(-1).to_string(), color_state)
                     );
                 }
                 Err(orix_core::ScriptError::MissingScript(..)) => {
-                    println!(" - {} (no script)", pkg_name);
+                    println!(
+                        " {} {} (no script)",
+                        Style::Muted.paint("-", color_state),
+                        pkg_name
+                    );
                 }
                 Err(orix_core::ScriptError::Disabled) => {
-                    println!(" - {} (scripts disabled)", pkg_name);
+                    println!(
+                        " {} {} (scripts disabled)",
+                        Style::Muted.paint("-", color_state),
+                        pkg_name
+                    );
                 }
                 Err(e) => {
-                    eprintln!(" {} {}: {}", CROSS, pkg_name, e);
+                    eprintln!(
+                        " {} {}: {}",
+                        Style::Cross.paint(CROSS, color_state),
+                        Style::PackageName.paint(&pkg_name, color_state),
+                        Style::Error.paint(&e.to_string(), color_state)
+                    );
                     failed = true;
                 }
             }
@@ -669,18 +777,23 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
     Ok(())
 }
 
-fn print_summary(report: &orix_core::InstallReport) {
-    print_install_header();
+fn print_summary(report: &orix_core::InstallReport, color_state: ColorState) {
+    print_install_header(color_state);
     println!(
         "Packages: +{} direct, +{} total",
-        report.direct_dependencies, report.packages_added
+        Style::Success.paint(&report.direct_dependencies.to_string(), color_state),
+        Style::Success.paint(&report.packages_added.to_string(), color_state)
     );
-    println!("Registry: {}", report.registry);
+    println!(
+        "Registry: {}",
+        Style::Registry.paint(&report.registry, color_state)
+    );
     println!();
     println!("Resolved dependencies");
     println!(
         "Fetched packages {}/{}",
-        report.fetch_report.success, report.packages_added
+        Style::Success.paint(&report.fetch_report.success.to_string(), color_state),
+        report.packages_added
     );
     println!("Linked dependencies");
     if report.lockfile_changed {
@@ -689,12 +802,17 @@ fn print_summary(report: &orix_core::InstallReport) {
         println!("Lockfile unchanged");
     }
     println!();
-    println!("Done in {:.2}s", report.duration_secs);
+    println!(
+        "Done in {}",
+        Style::Duration.paint(&format!("{:.2}s", report.duration_secs), color_state)
+    );
 }
 
-fn print_install_header() {
-    println!("orix install");
-    println!("----------------------------------------");
+fn print_install_header(color_state: ColorState) {
+    let title = Style::Bold.paint("orix install", color_state);
+    println!("{}", title);
+    let sep = Style::Header.paint("----------------------------------------", color_state);
+    println!("{}", sep);
     println!();
 }
 

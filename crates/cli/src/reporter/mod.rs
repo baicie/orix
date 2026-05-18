@@ -14,6 +14,7 @@
 //! - Pipeline never prints directly; all output goes through `Reporter::on_event`.
 //! - Progress UI goes to stderr, not stdout.
 //! - Final frame is rendered once (no intermediate flicker left behind).
+//! - Colors are controlled by `ColorState` which is derived from the `--color` CLI flag.
 
 mod frame;
 mod interactive;
@@ -25,6 +26,7 @@ pub use orix_core::reporter::InstallEvent;
 
 use std::io;
 
+use crate::styles::ColorState;
 use interactive::InteractiveReporter;
 use plain::PlainReporter;
 use terminal::stderr_is_terminal;
@@ -42,11 +44,11 @@ impl Reporter {
     ///
     /// - TTY stderr -> `InteractiveReporter`
     /// - non-TTY or `--no-progress` -> `PlainReporter`
-    pub fn auto(no_progress: bool) -> Self {
+    pub fn auto(no_progress: bool, color_state: ColorState) -> Self {
         if !no_progress && stderr_is_terminal() {
-            Self::Interactive(InteractiveReporter::new().into())
+            Self::Interactive(InteractiveReporter::new(color_state).into())
         } else {
-            Self::Plain(PlainReporter::new())
+            Self::Plain(PlainReporter::new(color_state))
         }
     }
 
@@ -54,14 +56,16 @@ impl Reporter {
     #[cfg(test)]
     #[allow(dead_code)]
     pub fn interactive() -> Self {
-        Self::Interactive(InteractiveReporter::new().into())
+        let color_state = ColorState::Disabled;
+        Self::Interactive(InteractiveReporter::new(color_state).into())
     }
 
     /// Force plain reporter.
     #[cfg(test)]
     #[allow(dead_code)]
     pub fn plain() -> Self {
-        Self::Plain(PlainReporter::new())
+        let color_state = ColorState::Disabled;
+        Self::Plain(PlainReporter::new(color_state))
     }
 
     /// Dispatch an install event to the active reporter.
