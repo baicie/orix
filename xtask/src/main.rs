@@ -193,6 +193,9 @@ fn main() -> Result<()> {
             eprintln!("\n[bonus] Cargo deny...");
             run_optional("cargo-deny", &["check"])?;
 
+            eprintln!("\n[bonus] Cargo machete...");
+            run_optional("cargo-machete", &["--with-metadata"])?;
+
             eprintln!("\n=== All CI checks passed ===");
         }
         Task::Release {

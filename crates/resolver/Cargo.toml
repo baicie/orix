@@ -16,7 +16,6 @@ orix-domain = { workspace = true }
 orix-registry = { workspace = true }
 orix-manifest = { workspace = true }
 orix-workspace = { workspace = true }
-tracing = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 
 [lints]

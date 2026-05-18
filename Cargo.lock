@@ -1409,7 +1409,6 @@ dependencies = [
  "clap",
  "crossterm",
  "flate2",
- "hex",
  "orix-core",
  "predicates",
  "sha2 0.11.0",
@@ -1555,7 +1554,6 @@ dependencies = [
  "orix-registry",
  "orix-workspace",
  "tokio",
- "tracing",
  "url",
 ]
 
