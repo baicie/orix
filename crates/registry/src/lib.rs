@@ -146,7 +146,8 @@ impl RegistryClient {
         let packument = rt.block_on(self.fetch_packument(name))?;
 
         // Also cache the sync result.
-        let _ = self.cache.insert_sync(name.as_str().to_string(), packument.clone(), Duration::MAX);
+        self.cache
+            .insert_sync(name.as_str().to_string(), packument.clone(), Duration::MAX);
 
         Ok(packument)
     }

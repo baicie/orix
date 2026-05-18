@@ -127,7 +127,11 @@ impl PlainReporter {
                 writeln!(self.writer, "[scripts] starting lifecycle: {event}")?;
             }
 
-            InstallEvent::ScriptFinished { name, duration_ms, exit_code } => {
+            InstallEvent::ScriptFinished {
+                name,
+                duration_ms,
+                exit_code,
+            } => {
                 let code_str = exit_code.map_or("?".to_string(), |c| c.to_string());
                 writeln!(
                     self.writer,

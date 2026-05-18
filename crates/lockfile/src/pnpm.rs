@@ -184,15 +184,19 @@ pub struct PnpmSnapshot {
 /// Errors that can occur when importing a pnpm lockfile.
 #[derive(Debug, thiserror::Error)]
 pub enum PnpmImportError {
+    /// Unsupported pnpm lockfile version.
     #[error("unsupported pnpm lockfile version: {0}")]
     UnsupportedVersion(String),
 
+    /// Failed to parse pnpm lockfile content.
     #[error("failed to parse pnpm lockfile: {0}")]
     ParseError(String),
 
+    /// The pnpm lockfile file is empty.
     #[error("pnpm lockfile is empty")]
     Empty,
 
+    /// The pnpm lockfile is missing the importers section.
     #[error("missing importers section")]
     MissingImporters,
 }
@@ -251,8 +255,16 @@ impl PnpmLockfile {
                 dependencies: pkg.dependencies,
                 optional_dependencies: pkg.optional_dependencies,
                 engines: pkg.engines,
-                os: if pkg.os.is_empty() { None } else { Some(pkg.os) },
-                cpu: if pkg.cpu.is_empty() { None } else { Some(pkg.cpu) },
+                os: if pkg.os.is_empty() {
+                    None
+                } else {
+                    Some(pkg.os)
+                },
+                cpu: if pkg.cpu.is_empty() {
+                    None
+                } else {
+                    Some(pkg.cpu)
+                },
             };
             orix_packages.insert(orix_key, orix_pkg);
         }
@@ -411,10 +423,7 @@ mod tests {
     #[test]
     fn test_normalize_package_key_simple() {
         assert_eq!(normalize_package_key("lodash@4.17.21"), "/lodash@4.17.21");
-        assert_eq!(
-            normalize_package_key("/react@18.2.0"),
-            "/react@18.2.0"
-        );
+        assert_eq!(normalize_package_key("/react@18.2.0"), "/react@18.2.0");
     }
 
     #[test]
@@ -444,7 +453,10 @@ mod tests {
 
     #[test]
     fn test_extract_name_from_key() {
-        assert_eq!(extract_name_from_key("/lodash@4.17.21"), Some("lodash".to_string()));
+        assert_eq!(
+            extract_name_from_key("/lodash@4.17.21"),
+            Some("lodash".to_string())
+        );
         assert_eq!(
             extract_name_from_key("/@babel/core@7.24.0"),
             Some("@babel/core".to_string())
@@ -493,7 +505,10 @@ packages:
         assert!(orix.packages.contains_key("/react@18.2.0"));
 
         let importer = orix.importers.get(".").unwrap();
-        assert_eq!(importer.specifiers.get("react"), Some(&"^18.0.0".to_string()));
+        assert_eq!(
+            importer.specifiers.get("react"),
+            Some(&"^18.0.0".to_string())
+        );
         assert_eq!(
             importer.dependencies.get("react"),
             Some(&crate::ResolvedDep {

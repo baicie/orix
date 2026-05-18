@@ -1,9 +1,7 @@
 //! Install pipeline orchestration.
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -129,47 +127,69 @@ async fn run_project_lifecycle(
         None,
     );
 
-    let result = runner.run_lifecycle(event, &orix_domain::PackageId::new(
-        orix_domain::PackageName::from(""),
-        orix_domain::Version::parse("0.0.0").unwrap(),
-    )).await;
+    let result = runner
+        .run_lifecycle(
+            event,
+            &orix_domain::PackageId::new(
+                orix_domain::PackageName::from(""),
+                #[allow(clippy::expect_used, clippy::unwrap_used)]
+                orix_domain::Version::parse("0.0.0")
+                    .expect("hardcoded semver 0.0.0 should always parse"),
+            ),
+        )
+        .await;
 
     match result {
         Ok(()) => {
-            send_event(progress_tx, InstallEvent::ScriptFinished {
-                name: event.script_name().to_string(),
-                duration_ms: 0,
-                exit_code: Some(0),
-            });
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptFinished {
+                    name: event.script_name().to_string(),
+                    duration_ms: 0,
+                    exit_code: Some(0),
+                },
+            );
         }
         Err(crate::script::ScriptError::Disabled) => {
-            send_event(progress_tx, InstallEvent::ScriptsPhaseSkipped {
-                reason: "scripts disabled by --ignore-scripts".to_string(),
-            });
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptsPhaseSkipped {
+                    reason: "scripts disabled by --ignore-scripts".to_string(),
+                },
+            );
         }
         Err(crate::script::ScriptError::MissingScript(..)) => {
             // Script not defined — skip silently.
         }
         Err(crate::script::ScriptError::Failed { name, code }) => {
-            send_event(progress_tx, InstallEvent::ScriptFinished {
-                name,
-                duration_ms: 0,
-                exit_code: code,
-            });
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptFinished {
+                    name,
+                    duration_ms: 0,
+                    exit_code: code,
+                },
+            );
         }
         Err(crate::script::ScriptError::Terminated { name }) => {
-            send_event(progress_tx, InstallEvent::ScriptFinished {
-                name,
-                duration_ms: 0,
-                exit_code: None,
-            });
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptFinished {
+                    name,
+                    duration_ms: 0,
+                    exit_code: None,
+                },
+            );
         }
         Err(crate::script::ScriptError::Spawn { name, .. }) => {
-            send_event(progress_tx, InstallEvent::ScriptFinished {
-                name,
-                duration_ms: 0,
-                exit_code: Some(-1),
-            });
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptFinished {
+                    name,
+                    duration_ms: 0,
+                    exit_code: Some(-1),
+                },
+            );
         }
     }
 }
@@ -310,9 +330,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 let store = Store::open(config.store_dir.clone())
                     .with_context(|| "failed to open store")?;
                 let tarball_cache = TarballCache::new(config.cache_dir.clone());
-                let fetcher = Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
-                    .with_offline(opts.offline)
-                    .with_force(false);
+                let fetcher =
+                    Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
+                        .with_offline(opts.offline)
+                        .with_force(false);
                 let concurrency = if opts.concurrency == 0 {
                     config.concurrency
                 } else {
@@ -366,6 +387,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     },
                 );
                 let linker = Linker::new(store.clone(), config.node_modules_dir());
+                use std::collections::HashSet;
                 let direct_deps: HashSet<String> = manifest
                     .dependencies
                     .keys()
@@ -401,6 +423,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                         let nm_dir = ws_pkg.abs_path.join("node_modules");
                         let pkg_linker = Linker::new(store.clone(), nm_dir.clone());
 
+                        use std::collections::HashSet;
                         let pkg_deps: HashSet<String> = ws_pkg
                             .manifest
                             .dependencies
@@ -726,6 +749,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             phase: InstallPhase::Link,
         },
     );
+    use std::collections::HashSet;
     let direct_deps: HashSet<String> = manifest
         .dependencies
         .keys()
@@ -753,6 +777,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 )
             })?;
 
+            use std::collections::HashSet;
             let pkg_deps: HashSet<String> = ws_pkg
                 .manifest
                 .dependencies
@@ -1014,6 +1039,7 @@ pub fn store_prune_with_overrides(
     }
 
     let lockfile = Lockfile::read(&lockfile_path).with_context(|| "failed to read lockfile")?;
+    use std::collections::HashSet;
     let referenced: HashSet<_> = lockfile.package_ids()?.into_iter().collect();
     let store = Store::open(config.store_dir).with_context(|| "failed to open store")?;
     store.prune(&referenced, dry_run, true)
@@ -1260,14 +1286,13 @@ pub fn import_pnpm_lockfile(source_path: &Path, project_root: &Path) -> Result<I
 /// Export orix-lock.yaml to pnpm-lock.yaml format.
 pub fn export_pnpm_lockfile(project_root: &Path, output_path: &Path) -> Result<ExportReport> {
     let lockfile_path = project_root.join("orix-lock.yaml");
-    let orix_lockfile = Lockfile::read(&lockfile_path)
-        .with_context(|| "failed to read orix-lock.yaml")?;
+    let orix_lockfile =
+        Lockfile::read(&lockfile_path).with_context(|| "failed to read orix-lock.yaml")?;
 
     let packages_exported = orix_lockfile.packages.len();
 
     // Re-serialize through orix YAML (same format, just outputs to a different path).
-    let yaml = serde_yaml::to_string(&orix_lockfile)
-        .context("failed to serialize lockfile")?;
+    let yaml = serde_yaml::to_string(&orix_lockfile).context("failed to serialize lockfile")?;
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1292,8 +1317,6 @@ pub async fn deploy(
     output_dir: &Path,
     opts: &DeployOpts,
 ) -> Result<DeployReport> {
-    use std::collections::HashSet;
-
     use orix_workspace::Workspace;
 
     let _span = info_span!("deploy", filter = %filter, output = %output_dir.display());
@@ -1313,24 +1336,17 @@ pub async fn deploy(
                 .as_deref()
                 .map(|n| n == filter)
                 .unwrap_or(false);
-            let path_match = glob::glob(
-                &project_root
-                    .join(&pkg.relative_path)
-                    .display()
-                    .to_string(),
-            )
-            .ok()
-            .and_then(|g| g.into_iter().next())
-            .is_some();
+            let path_match =
+                glob::glob(&project_root.join(&pkg.relative_path).display().to_string())
+                    .ok()
+                    .and_then(|g| g.into_iter().next())
+                    .is_some();
             name_match || path_match
         })
         .collect();
 
     if targets.is_empty() {
-        anyhow::bail!(
-            "no package found matching filter '{}' in workspace",
-            filter
-        );
+        anyhow::bail!("no package found matching filter '{}' in workspace", filter);
     }
     if targets.len() > 1 {
         anyhow::bail!(
@@ -1345,8 +1361,7 @@ pub async fn deploy(
     // 3. Read lockfile.
     let lockfile_path = project_root.join("orix-lock.yaml");
     let lockfile = if lockfile_path.exists() {
-        Lockfile::read(&lockfile_path)
-            .with_context(|| "failed to read lockfile")?
+        Lockfile::read(&lockfile_path).with_context(|| "failed to read lockfile")?
     } else {
         Lockfile::empty()
     };
@@ -1355,17 +1370,12 @@ pub async fn deploy(
     let importer_key = target.relative_path.display().to_string();
     let mut prod_deps: Vec<String> = target_manifest
         .dependencies
-        .iter()
-        .map(|(k, _)| k.clone())
+        .keys()
+        .cloned()
         .collect();
 
     if !opts.prod {
-        prod_deps.extend(
-            target_manifest
-                .dev_dependencies
-                .iter()
-                .map(|(k, _)| k.clone()),
-        );
+        prod_deps.extend(target_manifest.dev_dependencies.keys().cloned());
     }
 
     // Collect all packages in the closure (transitive deps).
@@ -1385,8 +1395,12 @@ pub async fn deploy(
     let mut files_copied = 0;
 
     // 5. Create output directory.
-    std::fs::create_dir_all(output_dir)
-        .with_context(|| format!("failed to create output directory: {}", output_dir.display()))?;
+    std::fs::create_dir_all(output_dir).with_context(|| {
+        format!(
+            "failed to create output directory: {}",
+            output_dir.display()
+        )
+    })?;
 
     // 6. Materialize package files.
     let target_src = target.abs_path.as_path();
@@ -1399,8 +1413,13 @@ pub async fn deploy(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::copy(file_path, &dest)
-            .with_context(|| format!("failed to copy {} to {}", file_path.display(), dest.display()))?;
+        std::fs::copy(file_path, &dest).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                file_path.display(),
+                dest.display()
+            )
+        })?;
         files_copied += 1;
     }
     packages_deployed += 1;
@@ -1426,8 +1445,8 @@ pub async fn deploy(
     // 8. Copy subset of lockfile.
     let deploy_lockfile_path = output_dir.join("orix-lock.yaml");
     let deploy_lockfile = lockfile.clone();
-    let yaml = serde_yaml::to_string(&deploy_lockfile)
-        .context("failed to serialize deploy lockfile")?;
+    let yaml =
+        serde_yaml::to_string(&deploy_lockfile).context("failed to serialize deploy lockfile")?;
     std::fs::write(&deploy_lockfile_path, yaml)?;
 
     // 9. Copy package.json.
@@ -1450,11 +1469,7 @@ pub async fn deploy(
         }
     }
 
-    info!(
-        packages_deployed,
-        files_copied,
-        "deploy complete"
-    );
+    info!(packages_deployed, files_copied, "deploy complete");
 
     Ok(DeployReport {
         packages_deployed,
@@ -1500,19 +1515,15 @@ fn collect_package_files(pkg_dir: &Path, files_field: &[String]) -> Vec<PathBuf>
         ".nyc_output",
     ];
 
-    fn walk_dir(
-        dir: &Path,
-        output: &mut Vec<PathBuf>,
-        exclude: &[&str],
-    ) -> std::io::Result<()> {
+    fn walk_dir(dir: &Path, output: &mut Vec<PathBuf>, exclude: &[&str]) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             let is_excluded = exclude.iter().any(|pat| {
-                if pat.starts_with('*') {
-                    name.ends_with(&pat[1..])
+                if let Some(stripped) = pat.strip_prefix('*') {
+                    name.ends_with(stripped)
                 } else {
                     name == *pat
                 }

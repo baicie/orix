@@ -163,10 +163,7 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
                 EMOJI_ERR
             );
         }
-        return format!(
-            "{} Script failed.\n  {}",
-            EMOJI_ERR, top
-        );
+        return format!("{} Script failed.\n  {}", EMOJI_ERR, top);
     }
     if top.contains("disabled by --ignore-scripts") {
         return format!(

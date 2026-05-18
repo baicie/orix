@@ -21,18 +21,26 @@ use orix_domain::PackageId;
 use orix_manifest::Manifest;
 use orix_workspace::Workspace;
 
-
 /// Lifecycle event names (npm convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleEvent {
+    /// Runs before package files are added to the staging area.
     Preinstall,
+    /// Runs after the package is installed.
     Install,
+    /// Runs after the package is installed and all scripts have completed.
     Postinstall,
+    /// Runs after `npm install` and before `npm publish`.
     Prepare,
+    /// Runs before tarball is created.
     PrepublishOnly,
+    /// Runs before tarball is packed.
     Prepack,
+    /// Runs after tarball is created.
     Postpack,
+    /// Runs after package is published.
     Publish,
+    /// Runs after package is published.
     Postpublish,
 }
 
@@ -57,9 +65,19 @@ impl LifecycleEvent {
 #[derive(Debug, Clone)]
 pub enum ScriptKind {
     /// User-initiated run: `orix run <name> [args...]`
-    UserRun { name: String, args: Vec<String> },
+    UserRun {
+        /// Name of the script to run.
+        name: String,
+        /// Additional arguments passed after `--`.
+        args: Vec<String>,
+    },
     /// Automatic lifecycle event.
-    Lifecycle { event: LifecycleEvent, package: PackageId },
+    Lifecycle {
+        /// The lifecycle event that triggered execution.
+        event: LifecycleEvent,
+        /// Package in which the script is defined.
+        package: PackageId,
+    },
 }
 
 /// Output from a single script execution.
@@ -76,20 +94,38 @@ pub struct ScriptOutput {
 /// Script execution error.
 #[derive(thiserror::Error, Debug)]
 pub enum ScriptError {
+    /// The requested script is not defined in the package's package.json.
     #[error("script `{0}` not found in {1}")]
     MissingScript(String, PathBuf),
 
+    /// The script exited with a non-zero status code.
     #[error("script `{name}` failed with exit code {code:?}")]
-    Failed { name: String, code: Option<i32> },
+    Failed {
+        /// Name of the script that failed.
+        name: String,
+        /// Exit code returned by the process.
+        code: Option<i32>,
+    },
 
+    /// The script process was killed by a signal.
     #[error("script `{name}` was terminated by signal")]
-    Terminated { name: String },
+    Terminated {
+        /// Name of the script that was terminated.
+        name: String,
+    },
 
+    /// Script execution was skipped because of `--ignore-scripts`.
     #[error("script execution is disabled by --ignore-scripts")]
     Disabled,
 
+    /// Failed to spawn the subprocess.
     #[error("failed to spawn script `{name}`: {source}")]
-    Spawn { name: String, source: std::io::Error },
+    Spawn {
+        /// Name of the script that could not be spawned.
+        name: String,
+        /// The underlying I/O error.
+        source: std::io::Error,
+    },
 }
 
 /// Create a successful ExitStatus (exit code 0).
@@ -101,6 +137,7 @@ fn success_status() -> ExitStatus {
 
 /// Create a successful ExitStatus on non-Unix platforms.
 #[cfg(not(unix))]
+#[allow(clippy::unwrap_used)]
 fn success_status() -> ExitStatus {
     std::process::Command::new("cmd")
         .args(["/C", "exit /B 0"])
@@ -145,9 +182,7 @@ impl ScriptRunner {
             return false;
         }
         self.config.allow_scripts.iter().any(|p| {
-            pkg_name == p
-                || (p.ends_with("/*")
-                    && pkg_name.starts_with(&p[..p.len() - 1]))
+            pkg_name == p || (p.ends_with("/*") && pkg_name.starts_with(&p[..p.len() - 1]))
         })
     }
 
@@ -265,12 +300,12 @@ impl ScriptRunner {
         };
 
         let start = Instant::now();
-        let child = self
-            .spawn_shell(&full_command, &env, &cwd)
-            .map_err(|e| ScriptError::Spawn {
-                name: name.to_string(),
-                source: e,
-            })?;
+        let child =
+            self.spawn_shell(&full_command, &env, &cwd)
+                .map_err(|e| ScriptError::Spawn {
+                    name: name.to_string(),
+                    source: e,
+                })?;
 
         let output = child
             .wait_with_output()
@@ -437,23 +472,14 @@ impl ScriptRunner {
         args: Vec<String>,
         if_present: bool,
     ) -> Result<ScriptOutput, ScriptError> {
-        let ws = self
-            .workspace
-            .as_ref()
-            .ok_or_else(|| ScriptError::Spawn {
-                name: script.to_string(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "no workspace available",
-                ),
-            })?;
+        let ws = self.workspace.as_ref().ok_or_else(|| ScriptError::Spawn {
+            name: script.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no workspace available"),
+        })?;
 
-        let pkg = ws
-            .find_package_by_name(pkg_name)
-            .ok_or_else(|| ScriptError::MissingScript(
-                pkg_name.to_string(),
-                self.project_root.clone(),
-            ))?;
+        let pkg = ws.find_package_by_name(pkg_name).ok_or_else(|| {
+            ScriptError::MissingScript(pkg_name.to_string(), self.project_root.clone())
+        })?;
 
         let runner = ScriptRunner::new(
             self.config.clone(),
@@ -465,14 +491,11 @@ impl ScriptRunner {
         let outputs = runner.run_script(script, args, if_present).await?;
 
         // Return the last output (main script), or a synthetic success if none ran.
-        Ok(outputs
-            .into_iter()
-            .last()
-            .unwrap_or_else(|| ScriptOutput {
-                name: script.to_string(),
-                status: success_status(),
-                duration: Duration::ZERO,
-            }))
+        Ok(outputs.into_iter().last().unwrap_or_else(|| ScriptOutput {
+            name: script.to_string(),
+            status: success_status(),
+            duration: Duration::ZERO,
+        }))
     }
 
     /// Run a script recursively across all workspace packages in topological order.
@@ -485,16 +508,10 @@ impl ScriptRunner {
         args: Vec<String>,
         _concurrency: usize,
     ) -> Result<Vec<(String, Result<ScriptOutput, ScriptError>)>, ScriptError> {
-        let ws = self
-            .workspace
-            .as_ref()
-            .ok_or_else(|| ScriptError::Spawn {
-                name: script.to_string(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "no workspace available",
-                ),
-            })?;
+        let ws = self.workspace.as_ref().ok_or_else(|| ScriptError::Spawn {
+            name: script.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no workspace available"),
+        })?;
 
         // Topological sort of workspace packages based on their dependencies.
         let sorted = self.topological_sort(ws)?;
@@ -580,7 +597,11 @@ impl ScriptRunner {
 
         let mut sorted = Vec::new();
         while let Some(name) = queue.pop() {
-            if let Some(pkg) = ws.packages.iter().find(|p| p.manifest.name.as_ref() == Some(&name)) {
+            if let Some(pkg) = ws
+                .packages
+                .iter()
+                .find(|p| p.manifest.name.as_ref() == Some(&name))
+            {
                 sorted.push(pkg.clone());
             }
 

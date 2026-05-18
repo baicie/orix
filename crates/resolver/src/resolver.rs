@@ -451,21 +451,18 @@ impl Resolver {
 
             // Expand catalog: protocol references using workspace catalogs.
             let constraint = if let Some(ws) = workspace {
-                if let orix_domain::ConstraintKind::Catalog(cat_constraint) = &constraint.kind {
-                    if let Some(resolved_version) =
-                        ws.resolve_catalog(raw, name.as_str())
-                    {
+                if let orix_domain::ConstraintKind::Catalog(_cat_constraint) = &constraint.kind {
+                    if let Some(resolved_version) = ws.resolve_catalog(raw, name.as_str()) {
                         // Replace catalog reference with the actual version constraint.
                         VersionConstraint::parse(&resolved_version).unwrap_or_else(|_| {
                             // Fallback: treat resolved version as exact version.
                             VersionConstraint {
                                 raw: resolved_version.clone(),
                                 kind: orix_domain::ConstraintKind::Exact(
-                                    Version::parse(&resolved_version)
-                                        .unwrap_or_else(|_| {
-                                            #[allow(clippy::unwrap_used)]
-                                            Version::parse("0.0.0").unwrap()
-                                        }),
+                                    Version::parse(&resolved_version).unwrap_or_else(|_| {
+                                        #[allow(clippy::unwrap_used)]
+                                        Version::parse("0.0.0").unwrap()
+                                    }),
                                 ),
                             }
                         })

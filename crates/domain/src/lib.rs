@@ -244,11 +244,10 @@ impl VersionConstraint {
 
         // Handle patch: protocol.
         if let Some(rest) = raw.strip_prefix("patch:") {
-            return Self::parse_patch_spec(rest)
-                .map(|spec| Self {
-                    raw,
-                    kind: ConstraintKind::Patch(spec),
-                });
+            return Self::parse_patch_spec(rest).map(|spec| Self {
+                raw,
+                kind: ConstraintKind::Patch(spec),
+            });
         }
 
         // Handle catalog: protocol.
@@ -300,13 +299,19 @@ impl VersionConstraint {
     fn parse_patch_spec(rest: &str) -> anyhow::Result<PatchSpec> {
         // Format: <name>@<version>#<patch_path>
         let hash_pos = rest.rfind('#').ok_or_else(|| {
-            anyhow::anyhow!("invalid patch: protocol format: expected 'name@version#path', got '{}'", rest)
+            anyhow::anyhow!(
+                "invalid patch: protocol format: expected 'name@version#path', got '{}'",
+                rest
+            )
         })?;
         let name_and_version = &rest[..hash_pos];
         let patch_path = rest[hash_pos + 1..].to_string();
 
         let at_pos = name_and_version.rfind('@').ok_or_else(|| {
-            anyhow::anyhow!("invalid patch: protocol format: expected 'name@version#path', got '{}'", rest)
+            anyhow::anyhow!(
+                "invalid patch: protocol format: expected 'name@version#path', got '{}'",
+                rest
+            )
         })?;
         let name_str = &name_and_version[..at_pos];
         let version_str = &name_and_version[at_pos + 1..];
@@ -655,8 +660,8 @@ impl PeerContext {
     pub fn key(&self) -> String {
         let mut parts: Vec<String> = self
             .resolved
-            .iter()
-            .map(|(_, id)| format!("({})", id))
+            .values()
+            .map(|id| format!("({})", id))
             .collect();
         parts.sort();
         parts.join("")
@@ -724,21 +729,31 @@ pub struct PeerRequirement {
 pub enum ResolverDiagnostic {
     /// A required peer dependency was not found in the environment.
     MissingPeer {
+        /// The package that declared the peer dependency.
         requester: PackageId,
+        /// Name of the missing peer package.
         peer_name: PackageName,
+        /// Version constraint that could not be satisfied.
         range: VersionConstraint,
     },
     /// An optional peer dependency was not found (informational only).
     OptionalPeerMissing {
+        /// The package that declared the peer dependency.
         requester: PackageId,
+        /// Name of the missing optional peer package.
         peer_name: PackageName,
+        /// Version constraint that could not be satisfied.
         range: VersionConstraint,
     },
     /// A peer dependency version conflict detected.
     PeerVersionConflict {
+        /// The package that declared the peer dependency.
         requester: PackageId,
+        /// Name of the conflicting peer package.
         peer_name: PackageName,
+        /// Version range that was requested.
         requested_range: VersionConstraint,
+        /// The version that was actually found.
         found_version: Version,
     },
 }
@@ -761,7 +776,11 @@ impl fmt::Display for ResolverDiagnostic {
                 range,
             } => {
                 writeln!(f, "info: optional peer not found")?;
-                write!(f, "  {} prefers {}@{} (optional)", requester, peer_name, range.raw)
+                write!(
+                    f,
+                    "  {} prefers {}@{} (optional)",
+                    requester, peer_name, range.raw
+                )
             }
             ResolverDiagnostic::PeerVersionConflict {
                 requester,
@@ -997,8 +1016,20 @@ mod tests {
     #[test]
     fn peer_context_key_generates_sorted_suffix() {
         let mut ctx = PeerContext::default();
-        ctx.insert(PackageName::from("lodash"), PackageId::new(PackageName::from("lodash"), Version::parse("4.17.21").unwrap()));
-        ctx.insert(PackageName::from("react"), PackageId::new(PackageName::from("react"), Version::parse("18.2.0").unwrap()));
+        ctx.insert(
+            PackageName::from("lodash"),
+            PackageId::new(
+                PackageName::from("lodash"),
+                Version::parse("4.17.21").unwrap(),
+            ),
+        );
+        ctx.insert(
+            PackageName::from("react"),
+            PackageId::new(
+                PackageName::from("react"),
+                Version::parse("18.2.0").unwrap(),
+            ),
+        );
         let key = ctx.key();
         assert!(key.contains("(lodash@4.17.21)"));
         assert!(key.contains("(react@18.2.0)"));
@@ -1014,9 +1045,18 @@ mod tests {
     #[test]
     fn package_instance_id_key_includes_peer_suffix() {
         let mut ctx = PeerContext::default();
-        ctx.insert(PackageName::from("react"), PackageId::new(PackageName::from("react"), Version::parse("18.2.0").unwrap()));
+        ctx.insert(
+            PackageName::from("react"),
+            PackageId::new(
+                PackageName::from("react"),
+                Version::parse("18.2.0").unwrap(),
+            ),
+        );
         let instance = PackageInstanceId::new(
-            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            PackageId::new(
+                PackageName::from("react-dom"),
+                Version::parse("18.2.0").unwrap(),
+            ),
             ctx,
         );
         let key = instance.key();
@@ -1028,7 +1068,10 @@ mod tests {
     fn package_instance_id_key_without_peers_matches_package_key() {
         let ctx = PeerContext::default();
         let instance = PackageInstanceId::new(
-            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            PackageId::new(
+                PackageName::from("react-dom"),
+                Version::parse("18.2.0").unwrap(),
+            ),
             ctx,
         );
         assert_eq!(instance.key(), instance.without_peers().key());
@@ -1037,7 +1080,10 @@ mod tests {
     #[test]
     fn resolver_diagnostic_display_formats_missing_peer() {
         let diag = ResolverDiagnostic::MissingPeer {
-            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            requester: PackageId::new(
+                PackageName::from("react-dom"),
+                Version::parse("18.2.0").unwrap(),
+            ),
             peer_name: PackageName::from("react"),
             range: VersionConstraint::parse("^18.0.0").unwrap(),
         };
@@ -1050,7 +1096,10 @@ mod tests {
     #[test]
     fn resolver_diagnostic_display_formats_peer_conflict() {
         let diag = ResolverDiagnostic::PeerVersionConflict {
-            requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0").unwrap()),
+            requester: PackageId::new(
+                PackageName::from("react-dom"),
+                Version::parse("18.2.0").unwrap(),
+            ),
             peer_name: PackageName::from("react"),
             requested_range: VersionConstraint::parse("^18.0.0").unwrap(),
             found_version: Version::parse("17.0.2").unwrap(),

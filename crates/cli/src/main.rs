@@ -10,8 +10,8 @@ use tracing_subscriber::{fmt, EnvFilter};
 use orix_core::{
     add, cache_clean_with_overrides, cache_path_with_overrides, deploy, export_pnpm_lockfile,
     import_pnpm_lockfile, install, pipeline, remove, store_path_with_overrides,
-    store_prune_with_overrides, store_verify_with_overrides, ConfigOverrides, DeployOpts, InstallOpts,
-    Manifest, ScriptRunner, Workspace,
+    store_prune_with_overrides, store_verify_with_overrides, ConfigOverrides, DeployOpts,
+    InstallOpts, Manifest, ScriptRunner, Workspace,
 };
 
 mod errors;
@@ -385,7 +385,12 @@ async fn main() -> Result<()> {
             };
             match run_import(&dir, &input_path) {
                 Ok(report) => {
-                    println!(" {} Imported {} packages from {}", CHECKMARK, report.packages_imported, input_path.display());
+                    println!(
+                        " {} Imported {} packages from {}",
+                        CHECKMARK,
+                        report.packages_imported,
+                        input_path.display()
+                    );
                     if report.warnings > 0 {
                         println!(" {} {} warnings (see above)", INFO, report.warnings);
                     }
@@ -405,7 +410,12 @@ async fn main() -> Result<()> {
             };
             match run_export(&dir, &output_path) {
                 Ok(report) => {
-                    println!(" {} Exported {} packages to {}", CHECKMARK, report.packages_exported, output_path.display());
+                    println!(
+                        " {} Exported {} packages to {}",
+                        CHECKMARK,
+                        report.packages_exported,
+                        output_path.display()
+                    );
                 }
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -426,7 +436,10 @@ async fn main() -> Result<()> {
             };
             match run_deploy(&dir, &args.filter, &output_path, &opts) {
                 Ok(report) => {
-                    println!(" {} Deployed {} packages ({} files)", CHECKMARK, report.packages_deployed, report.files_copied);
+                    println!(
+                        " {} Deployed {} packages ({} files)",
+                        CHECKMARK, report.packages_deployed, report.files_copied
+                    );
                 }
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -595,12 +608,7 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
     let workspace = Workspace::discover(project_root.to_path_buf()).ok();
 
     if args.recursive {
-        let runner = ScriptRunner::new(
-            config,
-            manifest,
-            project_root.to_path_buf(),
-            workspace,
-        );
+        let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let results = runner
             .run_recursive(&args.script, args.args.clone(), args.concurrency)
             .await?;
@@ -633,12 +641,7 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
             anyhow::bail!("one or more scripts failed");
         }
     } else if let Some(ref ws_pkg) = args.workspace {
-        let runner = ScriptRunner::new(
-            config,
-            manifest,
-            project_root.to_path_buf(),
-            workspace,
-        );
+        let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let output = runner
             .run_in_workspace(ws_pkg, &args.script, args.args.clone(), args.if_present)
             .await?;
@@ -646,12 +649,7 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
             std::process::exit(output.status.code().unwrap_or(-1));
         }
     } else {
-        let runner = ScriptRunner::new(
-            config,
-            manifest,
-            project_root.to_path_buf(),
-            workspace,
-        );
+        let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let outputs = runner
             .run_script(&args.script, args.args.clone(), args.if_present)
             .await?;
@@ -700,11 +698,17 @@ fn print_install_header() {
     println!();
 }
 
-fn run_import(project_root: &std::path::Path, source_path: &std::path::Path) -> anyhow::Result<orix_core::ImportReport> {
+fn run_import(
+    project_root: &std::path::Path,
+    source_path: &std::path::Path,
+) -> anyhow::Result<orix_core::ImportReport> {
     import_pnpm_lockfile(source_path, project_root)
 }
 
-fn run_export(project_root: &std::path::Path, output_path: &std::path::Path) -> anyhow::Result<orix_core::ExportReport> {
+fn run_export(
+    project_root: &std::path::Path,
+    output_path: &std::path::Path,
+) -> anyhow::Result<orix_core::ExportReport> {
     export_pnpm_lockfile(project_root, output_path)
 }
 

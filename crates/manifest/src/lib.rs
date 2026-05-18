@@ -157,7 +157,11 @@ impl Manifest {
     /// Only includes scripts that are actually defined.
     pub fn lifecycle_chain(&self, name: &str) -> Vec<orix_domain::ScriptRef<'_>> {
         let mut scripts = Vec::with_capacity(3);
-        for candidate in &[format!("pre{name}"), name.to_string(), format!("post{name}")] {
+        for candidate in &[
+            format!("pre{name}"),
+            name.to_string(),
+            format!("post{name}"),
+        ] {
             if let Some(command) = self.scripts.get(candidate) {
                 scripts.push(orix_domain::ScriptRef {
                     name: candidate.clone(),

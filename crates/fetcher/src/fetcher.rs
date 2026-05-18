@@ -11,7 +11,7 @@ use tracing::{debug, info_span, warn};
 use orix_domain::{check_platform_compatibility, DependencyGraph};
 use orix_store::Store;
 
-use crate::{apply_patch, extract_tarball, TarballCache};
+use crate::{extract_tarball, TarballCache};
 
 /// Fetches package tarballs and imports them into the store.
 pub struct Fetcher {

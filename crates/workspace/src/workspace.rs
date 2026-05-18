@@ -8,9 +8,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use orix_manifest::Manifest;
 use crate::WorkspaceSpec;
+use orix_manifest::Manifest;
 use std::collections::HashMap;
+
+type WorkspaceDiscoveryResult =
+    Result<Option<(Vec<WorkspacePackage>, Catalog, HashMap<String, Catalog>)>>;
 
 /// A catalog reference parsed from package.json.
 /// Examples: "catalog:", "catalog:react19"
@@ -139,9 +142,7 @@ impl Workspace {
     }
 
     /// Try discovering workspace from `pnpm-workspace.yaml`.
-    fn discover_from_pnpm_yaml(
-        root: &Path,
-    ) -> Result<Option<(Vec<WorkspacePackage>, Catalog, HashMap<String, Catalog>)>> {
+    fn discover_from_pnpm_yaml(root: &Path) -> WorkspaceDiscoveryResult {
         let path = root.join("pnpm-workspace.yaml");
         if !path.exists() {
             return Ok(None);
@@ -157,9 +158,7 @@ impl Workspace {
     }
 
     /// Try discovering workspace from `orix-workspace.yaml`.
-    fn discover_from_orix_yaml(
-        root: &Path,
-    ) -> Result<Option<(Vec<WorkspacePackage>, Catalog, HashMap<String, Catalog>)>> {
+    fn discover_from_orix_yaml(root: &Path) -> WorkspaceDiscoveryResult {
         let path = root.join("orix-workspace.yaml");
         if !path.exists() {
             return Ok(None);
@@ -443,9 +442,6 @@ mod tests {
 
     #[test]
     fn discover_prefers_pnpm_yaml_over_orix_yaml() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().to_path_buf();
-
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 

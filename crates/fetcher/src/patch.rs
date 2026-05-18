@@ -34,8 +34,10 @@ pub fn apply_patch(
         .with_context(|| format!("failed to read patch file: {}", patch_file.display()))?;
 
     // Parse all patches from the file.
-    let patches: Vec<patch::Patch<'_>> = patch::Patch::from_multiple(&patch_content)
-        .map_err(|e| anyhow::anyhow!("failed to parse patch file {}: {}", patch_file.display(), e))?;
+    let patches: Vec<patch::Patch<'_>> =
+        patch::Patch::from_multiple(&patch_content).map_err(|e| {
+            anyhow::anyhow!("failed to parse patch file {}: {}", patch_file.display(), e)
+        })?;
 
     if patches.is_empty() {
         anyhow::bail!(
@@ -91,11 +93,10 @@ fn apply_single_file_patch(patch: &patch::Patch<'_>, temp_dir: &Path) -> Result<
                 }
                 patch::Line::Remove(s) => {
                     // Skip the removed line from old content.
-                    if (pos as usize) < old_lines.len() && old_lines[pos as usize] == *s {
-                        pos += 1;
-                    } else {
+                    if (pos as usize) < old_lines.len() && old_lines[pos as usize] != *s {
                         pos += 1;
                     }
+                    pos += 1;
                 }
                 patch::Line::Context(s) => {
                     // Verify context matches, then copy.
