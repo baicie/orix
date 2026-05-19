@@ -1,6 +1,6 @@
 {
   "name": "@orix/orix",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "High-performance package manager written in Rust, compatible with pnpm",
   "license": "MIT",
   "type": "commonjs",
@@ -16,12 +16,12 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@orix/orix-darwin-arm64": "0.1.0",
-    "@orix/orix-darwin-x64": "0.1.0",
-    "@orix/orix-linux-x64-gnu": "0.1.0",
-    "@orix/orix-linux-arm64-gnu": "0.1.0",
-    "@orix/orix-linux-x64-musl": "0.1.0",
-    "@orix/orix-win32-x64-msvc": "0.1.0"
+    "@orix/orix-darwin-arm64": "0.1.3",
+    "@orix/orix-darwin-x64": "0.1.3",
+    "@orix/orix-linux-x64-gnu": "0.1.3",
+    "@orix/orix-linux-arm64-gnu": "0.1.3",
+    "@orix/orix-linux-x64-musl": "0.1.3",
+    "@orix/orix-win32-x64-msvc": "0.1.3"
   },
   "publishConfig": {
     "access": "public"

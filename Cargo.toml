@@ -20,7 +20,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
@@ -87,7 +87,7 @@ crossterm = "0.29"
 unicode-width = "0.2"
 
 # ── orix crate aliases (path must match actual package name) ──────────────────
-orix-cli = { path = "crates/cli", version = "0.1.0" }
+orix-cli = { path = "crates/cli", version = "0.1.3" }
 orix-core = { path = "crates/core", version = "0.1.0" }
 orix-config = { path = "crates/config", version = "0.1.0" }
 orix-utils = { path = "crates/utils", version = "0.1.0" }
