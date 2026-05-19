@@ -1,4 +1,4 @@
-# @orix/orix-linux-x64-gnu
+# <img src="https://raw.githubusercontent.com/baicie/orix/main/packaging/appimage/orix.png" width="32" height="32" style="vertical-align: middle;" /> @orix/orix-linux-x64-gnu
 
 Native binary for [@orix/orix](https://github.com/baicie/orix) on Linux x64 glibc.
 
@@ -6,9 +6,9 @@ This package is automatically selected by the main `@orix/orix` package based on
 
 ## Platform
 
-- OS: linux
-- CPU: x64
-- libc: glibc
+- **OS:** linux
+- **CPU:** x64
+- **libc:** glibc
 
 ## Installation
 
@@ -24,4 +24,4 @@ pnpm add -g @orix/orix
 
 High-performance package manager written in Rust, compatible with pnpm.
 
-See the main repository for details: https://github.com/baicie/orix
+See the main repository for details: [https://github.com/baicie/orix](https://github.com/baicie/orix)

@@ -1,4 +1,4 @@
-# @orix/orix-darwin-x64
+# <img src="https://raw.githubusercontent.com/baicie/orix/main/packaging/appimage/orix.png" width="32" height="32" style="vertical-align: middle;" /> @orix/orix-darwin-x64
 
 Native binary for [@orix/orix](https://github.com/baicie/orix) on macOS x64.
 
@@ -6,8 +6,8 @@ This package is automatically selected by the main `@orix/orix` package based on
 
 ## Platform
 
-- OS: darwin
-- CPU: x64
+- **OS:** darwin
+- **CPU:** x64
 
 ## Installation
 
@@ -23,4 +23,4 @@ pnpm add -g @orix/orix
 
 High-performance package manager written in Rust, compatible with pnpm.
 
-See the main repository for details: https://github.com/baicie/orix
+See the main repository for details: [https://github.com/baicie/orix](https://github.com/baicie/orix)
