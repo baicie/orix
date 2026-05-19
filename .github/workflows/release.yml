@@ -21,9 +21,42 @@ jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
 
+  version-sync:
+    name: Version Sync
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync versions
+        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
+
+      - name: Commit version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Cargo.toml npm/*/package.json
+          git diff --cached --quiet && echo "No changes" || git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref_name }}
+
   build-linux:
     name: Build / ${{ matrix.target }}
-    needs: ci
+    needs: [ci, version-sync]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -77,7 +110,7 @@ jobs:
 
   build-windows:
     name: Build / x86_64-pc-windows-msvc
-    needs: ci
+    needs: [ci, version-sync]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -108,7 +141,7 @@ jobs:
 
   build-macos:
     name: Build / ${{ matrix.target }}
-    needs: ci
+    needs: [ci, version-sync]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -475,16 +508,6 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           scope: "@orix"
-
-      - name: Extract version
-        id: version
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Sync versions
-        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v5

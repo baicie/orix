@@ -34,4 +34,15 @@ for (const dir of packages) {
   fs.writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`);
 }
 
-console.log(`Synced npm package versions to ${version}`);
+// Sync Cargo.toml workspace version and crate aliases
+const cargoToml = path.join(root, "Cargo.toml");
+const cargo = fs.readFileSync(cargoToml, "utf8");
+const updatedCargo = cargo
+  .replace(/^version = "[\d.]+"$/m, `version = "${version}"`)
+  .replace(
+    /^(orix-(?:cli|core|config|utils|domain|manifest|resolver|registry|fetcher|store|lockfile|linker|workspace) = \{ path = "[^"]+", version = )"[\d.]+"( })$/m,
+    `$1"${version}"$2`
+  );
+fs.writeFileSync(cargoToml, updatedCargo);
+
+console.log(`Synced versions to ${version}`);
