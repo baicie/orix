@@ -90,6 +90,17 @@ const result = spawnSync(binPath, process.argv.slice(2), {
 });
 
 if (result.error) {
+  if (result.error.code === "EACCES") {
+    console.error(`error: binary is not executable: ${binPath}`);
+    console.error(`The native binary lacks execute permissions.`);
+    console.error(
+      `This usually means the npm package was published with a corrupted binary.`,
+    );
+    console.error(``);
+    console.error(`Try reinstalling the package:`);
+    console.error(`  npm uninstall -g @orix/orix && npm install -g @orix/orix`);
+    process.exit(126);
+  }
   throw result.error;
 }
 

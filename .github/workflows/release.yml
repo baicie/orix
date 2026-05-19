@@ -571,11 +571,27 @@ jobs:
           done
 
           cp artifacts/npm-darwin-arm64/bin/orix dist/darwin-arm64/bin/orix || true
+          chmod 755 dist/darwin-arm64/bin/orix || true
           cp artifacts/npm-darwin-x64/bin/orix dist/darwin-x64/bin/orix || true
+          chmod 755 dist/darwin-x64/bin/orix || true
           cp artifacts/npm-linux-x64-gnu/bin/orix dist/linux-x64-gnu/bin/orix || true
+          chmod 755 dist/linux-x64-gnu/bin/orix || true
           cp artifacts/npm-linux-arm64-gnu/bin/orix dist/linux-arm64-gnu/bin/orix || true
+          chmod 755 dist/linux-arm64-gnu/bin/orix || true
           cp artifacts/npm-linux-x64-musl/bin/orix dist/linux-x64-musl/bin/orix || true
+          chmod 755 dist/linux-x64-musl/bin/orix || true
           cp artifacts/npm-win32-x64-msvc/bin/orix.exe dist/win32-x64-msvc/bin/orix.exe || true
+
+      - name: Verify binary permissions
+        shell: bash
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu linux-x64-musl; do
+            binary="dist/$platform/bin/orix"
+            if [ -f "$binary" ]; then
+              ls -l "$binary"
+              test -x "$binary" || { echo "ERROR: $binary is not executable"; exit 1; }
+            fi
+          done
 
       - name: Publish main package
         env:
