@@ -24,5 +24,7 @@ release
 .env.*
 !.env.example
 bin
+!npm/main/bin
+!npm/main/bin/**
 packaging/wix/Product_compiled.wxs
 packaging/wix/Product_compiled.wixobj
