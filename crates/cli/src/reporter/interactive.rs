@@ -27,6 +27,8 @@ pub struct InteractiveReporter {
     /// Used to bypass frame comparison on the very first terminal render so the
     /// Done/Failed frame is never silently dropped by throttling.
     rendered_terminal_state: bool,
+    /// Whether finish() has been called to restore the cursor.
+    finished: bool,
 }
 
 impl InteractiveReporter {
@@ -52,6 +54,7 @@ impl InteractiveReporter {
             min_render_interval: Duration::from_millis(33),
             theme,
             rendered_terminal_state: false,
+            finished: false,
         }
     }
 
@@ -127,10 +130,24 @@ impl InteractiveReporter {
 
     /// Restore the cursor and clean up the terminal.
     fn finish_internal(&mut self) -> io::Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
         if let Some(terminal) = self.terminal.take() {
             terminal.finish(&self.last_frame.frame)?;
         }
         Ok(())
+    }
+}
+
+impl Drop for InteractiveReporter {
+    fn drop(&mut self) {
+        // Restore cursor if finish() was never called (e.g. channel closed without a
+        // Failed event). Ignore errors — we're already in Drop, best-effort is fine.
+        if !self.finished {
+            let _ = self.finish_internal();
+        }
     }
 }
 

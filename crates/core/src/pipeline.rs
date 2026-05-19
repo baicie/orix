@@ -7,7 +7,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::{debug, info, info_span};
+use tracing::{debug, info, info_span, trace};
 
 use orix_config::{Config, ConfigOverrides};
 use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
@@ -108,9 +108,27 @@ pub struct LockfileDiffReport {
 }
 
 fn send_event(tx: &Option<mpsc::Sender<InstallEvent>>, event: InstallEvent) {
+    tracing::trace!(event = ?event, "emit install event");
+
     if let Some(sender) = tx {
-        let _ = sender.try_send(event);
+        if let Err(err) = sender.try_send(event) {
+            tracing::debug!(error = ?err, "failed to send install progress event");
+        }
     }
+}
+
+/// Send a link failure event and return it as an `anyhow::Error`.
+fn link_error(tx: &Option<mpsc::Sender<InstallEvent>>, msg: String) -> anyhow::Error {
+    tracing::error!(error = %msg, "link failed");
+    send_event(
+        tx,
+        InstallEvent::Failed {
+            phase: Some(InstallPhase::Link),
+            message: msg,
+            hint: Some("Check file permissions and disk space.".to_string()),
+        },
+    );
+    anyhow::anyhow!("link failed")
 }
 
 /// Run a single lifecycle event for the project root, sending progress events.
@@ -204,8 +222,28 @@ async fn run_project_lifecycle(
 
 /// Top-level install orchestration.
 pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallReport> {
-    let _span = info_span!("install", root = %project_root.display());
+    let _span = info_span!("install", root = %project_root.display()).entered();
     let start = Instant::now();
+
+    debug!(
+        frozen_lockfile = opts.frozen_lockfile,
+        offline = opts.offline,
+        force = opts.force,
+        ignore_scripts = opts.ignore_scripts,
+        concurrency = opts.concurrency,
+        registry_override = opts.registry.as_deref().unwrap_or("<config>"),
+        store_override = %opts
+            .store_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<config>".to_string()),
+        cache_override = %opts
+            .cache_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<config>".to_string()),
+        "install options"
+    );
 
     let config = Config::load_with_overrides(
         project_root,
@@ -219,6 +257,16 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     )
     .with_context(|| "failed to load configuration")?;
 
+    trace!(
+        registry = %config.registry,
+        store_dir = %config.store_dir.display(),
+        cache_dir = %config.cache_dir.display(),
+        node_modules_dir = %config.node_modules_dir().display(),
+        lockfile_path = %config.lockfile_path().display(),
+        authenticated = config.auth_token.is_some(),
+        "configuration resolved"
+    );
+
     if opts.frozen_lockfile && !config.lockfile_path().exists() {
         anyhow::bail!(
             "No lockfile found at {}. Run orix install without --frozen-lockfile first.",
@@ -229,6 +277,13 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let direct_dependency_count = manifest.dependencies.len() + manifest.dev_dependencies.len();
+
+    trace!(
+        dependencies = manifest.dependencies.len(),
+        dev_dependencies = manifest.dev_dependencies.len(),
+        optional_dependencies = manifest.optional_dependencies.len(),
+        "manifest loaded"
+    );
 
     // Phase 1: Run preinstall lifecycle (before resolution)
     run_project_lifecycle(
@@ -426,16 +481,19 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     linker
                         .unlink()
                         .with_context(|| "failed to clean old node_modules")?;
-                    let report = linker
-                        .link_graph(
-                            &graph,
-                            &direct_deps,
-                            workspace.as_ref(),
-                            &graph.graph_hash(),
-                        )
-                        .with_context(|| "failed to link packages")?;
-                    debug!(target: "orix", "link (unlink+link_graph): {:?}", t2.elapsed());
-                    report
+                    let report = linker.link_graph(
+                        &graph,
+                        &direct_deps,
+                        workspace.as_ref(),
+                        &graph.graph_hash(),
+                    );
+                    match report {
+                        Ok(r) => {
+                            debug!(target: "orix", "link (unlink+link_graph): {:?}", t2.elapsed());
+                            r
+                        }
+                        Err(e) => return Err(link_error(&opts.progress_tx, e.to_string())),
+                    }
                 };
 
                 if let Some(ref ws) = workspace {
@@ -464,25 +522,32 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                                 "workspace pkg layout valid, skipping"
                             );
                         } else {
-                            pkg_linker.unlink().with_context(|| {
-                                format!(
-                                    "failed to clean old node_modules for {}",
-                                    ws_pkg.manifest.name.as_deref().unwrap_or("?")
-                                )
-                            })?;
-                            pkg_linker
-                                .link_graph(
-                                    &graph,
-                                    &pkg_deps,
-                                    workspace.as_ref(),
-                                    &graph.graph_hash(),
-                                )
-                                .with_context(|| {
+                            if let Err(e) = pkg_linker.unlink() {
+                                return Err(link_error(
+                                    &opts.progress_tx,
                                     format!(
-                                        "failed to link packages for {}",
-                                        ws_pkg.manifest.name.as_deref().unwrap_or("?")
-                                    )
-                                })?;
+                                        "failed to clean old node_modules for {}: {}",
+                                        ws_pkg.manifest.name.as_deref().unwrap_or("?"),
+                                        e
+                                    ),
+                                ));
+                            }
+                            let report = pkg_linker.link_graph(
+                                &graph,
+                                &pkg_deps,
+                                workspace.as_ref(),
+                                &graph.graph_hash(),
+                            );
+                            if let Err(e) = report {
+                                return Err(link_error(
+                                    &opts.progress_tx,
+                                    format!(
+                                        "failed to link packages for {}: {}",
+                                        ws_pkg.manifest.name.as_deref().unwrap_or("?"),
+                                        e
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
@@ -600,15 +665,15 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         );
 
         let (resolve_progress_tx, mut resolve_progress_rx) =
-            mpsc::channel::<orix_resolver::ResolveProgressEvent>(128);
+            mpsc::channel::<orix_resolver::ResolveProgressEvent>(4096);
         let install_progress_tx = opts.progress_tx.clone();
         let resolve_progress_forwarder = tokio::spawn(async move {
             while let Some(event) = resolve_progress_rx.recv().await {
                 send_event(
                     &install_progress_tx,
                     InstallEvent::ResolveProgress {
-                        done: event.resolved,
-                        total: event.discovered,
+                        done: event.discovered,
+                        total: event.resolved,
                         package: Some(event.id.to_string()),
                     },
                 );
@@ -674,6 +739,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     let resolve_ms: Option<u64> = resolve_instant.map(|i| i.elapsed().as_millis() as u64);
 
+    trace!(
+        packages = graph.len(),
+        resolve_ms = resolve_ms,
+        "dependency graph resolved"
+    );
+
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
     let tarball_cache = TarballCache::new(config.cache_dir.clone());
     let fetcher = Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
@@ -703,12 +774,23 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         },
     );
 
-    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
+    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(8192);
     let install_progress_tx = opts.progress_tx.clone();
+    let fetch_total = total_to_fetch;
     let fetch_progress_forwarder = tokio::spawn(async move {
+        let mut fetched_count: usize = 0;
         while let Some(event) = fetch_progress_rx.recv().await {
             match event {
                 FetchEvent::PackageFetched(package) => {
+                    fetched_count += 1;
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::FetchProgress {
+                            done: fetched_count,
+                            total: fetch_total,
+                            package: None,
+                        },
+                    );
                     send_event(
                         &install_progress_tx,
                         InstallEvent::PackageFetched {
@@ -795,31 +877,39 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .collect();
 
     let linker = Linker::new(store.clone(), config.node_modules_dir());
-    linker
-        .unlink()
-        .with_context(|| "failed to clean old node_modules")?;
+    if let Err(e) = linker.unlink() {
+        return Err(link_error(
+            &opts.progress_tx,
+            format!("failed to clean old node_modules: {e}"),
+        ));
+    }
 
-    let link_report = linker
-        .link_graph(
-            &graph,
-            &direct_deps,
-            workspace.as_ref(),
-            &graph.graph_hash(),
-        )
-        .with_context(|| "failed to link packages")?;
+    let link_report = linker.link_graph(
+        &graph,
+        &direct_deps,
+        workspace.as_ref(),
+        &graph.graph_hash(),
+    );
+    let link_report = match link_report {
+        Ok(r) => r,
+        Err(e) => return Err(link_error(&opts.progress_tx, e.to_string())),
+    };
 
     if let Some(ref ws) = workspace {
         for ws_pkg in &ws.packages {
             let nm_dir = ws_pkg.abs_path.join("node_modules");
             let pkg_linker = Linker::new(store.clone(), nm_dir.clone());
-            pkg_linker.unlink().with_context(|| {
-                format!(
-                    "failed to clean old node_modules for {}",
-                    ws_pkg.manifest.name.as_deref().unwrap_or("?")
-                )
-            })?;
+            if let Err(e) = pkg_linker.unlink() {
+                return Err(link_error(
+                    &opts.progress_tx,
+                    format!(
+                        "failed to clean old node_modules for {}: {}",
+                        ws_pkg.manifest.name.as_deref().unwrap_or("?"),
+                        e
+                    ),
+                ));
+            }
 
-            use std::collections::HashSet;
             let pkg_deps: HashSet<String> = ws_pkg
                 .manifest
                 .dependencies
@@ -829,18 +919,31 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 .cloned()
                 .collect();
 
-            pkg_linker
-                .link_graph(&graph, &pkg_deps, workspace.as_ref(), &graph.graph_hash())
-                .with_context(|| {
+            if let Err(e) =
+                pkg_linker.link_graph(&graph, &pkg_deps, workspace.as_ref(), &graph.graph_hash())
+            {
+                return Err(link_error(
+                    &opts.progress_tx,
                     format!(
-                        "failed to link packages for {}",
-                        ws_pkg.manifest.name.as_deref().unwrap_or("?")
-                    )
-                })?;
+                        "failed to link packages for {}: {}",
+                        ws_pkg.manifest.name.as_deref().unwrap_or("?"),
+                        e
+                    ),
+                ));
+            }
         }
     }
 
     let link_ms: Option<u64> = Some(link_instant.elapsed().as_millis() as u64);
+
+    trace!(
+        hardlinked_files = link_report.hardlinked_files,
+        copied_files = link_report.copied_files,
+        symlinks_created = link_report.symlinks_created,
+        bytes_saved = link_report.bytes_saved,
+        link_ms = link_ms,
+        "linked dependencies"
+    );
 
     send_event(
         &opts.progress_tx,
@@ -1004,12 +1107,23 @@ async fn fetch_only_missing(
 
     debug!(target: "orix", "found {} packages in store, fetching {} missing", graph.len() - missing.len(), missing.len());
 
-    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(128);
+    let total_to_fetch = missing.len();
     let install_progress_tx = progress_tx.clone();
+    let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(8192);
     let fetch_progress_forwarder = tokio::spawn(async move {
+        let mut fetched_count: usize = 0;
         while let Some(event) = fetch_progress_rx.recv().await {
             match event {
                 FetchEvent::PackageFetched(package) => {
+                    fetched_count += 1;
+                    send_event(
+                        &install_progress_tx,
+                        InstallEvent::FetchProgress {
+                            done: fetched_count,
+                            total: total_to_fetch,
+                            package: None,
+                        },
+                    );
                     send_event(
                         &install_progress_tx,
                         InstallEvent::PackageFetched {
@@ -1032,8 +1146,6 @@ async fn fetch_only_missing(
             }
         }
     });
-
-    let total_to_fetch = missing.len();
     let fetch_report = fetcher
         .fetch_all(&missing, concurrency, Some(fetch_progress_tx))
         .await

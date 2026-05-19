@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use tokio::sync::mpsc;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing;
 
 use orix_core::{
     add, cache_clean_with_overrides, cache_path_with_overrides, deploy, export_pnpm_lockfile,
@@ -15,6 +15,7 @@ use orix_core::{
 };
 
 mod errors;
+mod logging;
 mod reporter;
 
 use reporter::ColorMode;
@@ -29,8 +30,17 @@ struct Cli {
     #[arg(long, global = true, env = "ORIX_REGISTRY")]
     registry: Option<String>,
 
-    #[arg(long, global = true, default_value = "warn", env = "ORIX_LOG")]
-    log: String,
+    #[arg(long, global = true, env = "ORIX_LOG", value_name = "FILTER")]
+    log: Option<String>,
+
+    #[arg(long, global = true, env = "ORIX_DEBUG", action = ArgAction::SetTrue)]
+    debug: bool,
+
+    #[arg(long, global = true, env = "ORIX_LOG_FILE", value_name = "FILE")]
+    log_file: Option<PathBuf>,
+
+    #[arg(long, global = true, env = "ORIX_NO_PROGRESS", action = ArgAction::SetTrue)]
+    no_progress: bool,
 
     #[arg(long, short = 'C', default_value = ".", env = "ORIX_DIR")]
     dir: PathBuf,
@@ -218,15 +228,24 @@ impl From<ColorChoice> for ColorMode {
     }
 }
 
-fn init_tracing(level: &str) {
-    let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("warn"));
-    fmt().with_env_filter(filter).init();
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_tracing(&cli.log);
+
+    let log_handle = logging::init_logging(logging::LogConfig {
+        filter: cli.log.clone(),
+        debug: cli.debug,
+        log_file: cli.log_file.clone(),
+        color_mode: cli.color.clone().into(),
+    })?;
+
+    if cli.debug {
+        if let Some(path) = log_handle.log_file() {
+            eprintln!("debug log: {}", path.display());
+        }
+    }
+
+    let no_progress = cli.no_progress || log_handle.console_enabled();
 
     #[allow(clippy::cmp_owned)]
     let dir = if cli.dir == PathBuf::from(".") {
@@ -277,7 +296,9 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
 
-                if let Err(e) = run_install(&dir, &install_opts, cli.color.clone().into()).await {
+                if let Err(e) =
+                    run_install(&dir, &install_opts, cli.color.clone().into(), no_progress).await
+                {
                     eprintln!("{}", errors::format_error(&e, &dir));
                     std::process::exit(1);
                 }
@@ -309,6 +330,7 @@ async fn main() -> Result<()> {
                     dep_type,
                     &install_opts,
                     cli.color.clone().into(),
+                    no_progress,
                 )
                 .await
                 {
@@ -345,6 +367,7 @@ async fn main() -> Result<()> {
                 dep_type,
                 &opts,
                 cli.color.clone().into(),
+                no_progress,
             )
             .await
             {
@@ -578,10 +601,14 @@ async fn run_install(
     project_root: &std::path::Path,
     opts: &InstallOpts,
     color_mode: ColorMode,
+    no_progress: bool,
 ) -> Result<()> {
-    let run = run_with_progress(opts.clone(), color_mode, |install_opts| async move {
-        install(project_root, &install_opts).await
-    })
+    let run = run_with_progress(
+        opts.clone(),
+        color_mode,
+        no_progress,
+        |install_opts| async move { install(project_root, &install_opts).await },
+    )
     .await?;
     if !run.rendered_summary {
         print_summary(&run.report);
@@ -595,10 +622,14 @@ async fn run_add(
     dep_type: pipeline::DepType,
     opts: &InstallOpts,
     color_mode: ColorMode,
+    no_progress: bool,
 ) -> Result<InstallRun> {
-    run_with_progress(opts.clone(), color_mode, |install_opts| async move {
-        add(project_root, packages, dep_type, &install_opts).await
-    })
+    run_with_progress(
+        opts.clone(),
+        color_mode,
+        no_progress,
+        |install_opts| async move { add(project_root, packages, dep_type, &install_opts).await },
+    )
     .await
 }
 
@@ -610,27 +641,35 @@ struct InstallRun {
 async fn run_with_progress<F, Fut>(
     mut opts: InstallOpts,
     color_mode: ColorMode,
+    no_progress: bool,
     operation: F,
 ) -> Result<InstallRun>
 where
     F: FnOnce(InstallOpts) -> Fut,
     Fut: std::future::Future<Output = Result<orix_core::InstallReport>>,
 {
-    let (tx, mut rx) = mpsc::channel(128);
+    let (tx, mut rx) = mpsc::channel(8192);
     opts.progress_tx = Some(tx.clone());
 
     let reporter = tokio::spawn(async move {
-        let mut reporter = reporter::Reporter::auto(false, color_mode);
+        let mut reporter = reporter::Reporter::auto(no_progress, color_mode);
+
         while let Some(event) = rx.recv().await {
             if let Err(e) = reporter.on_event(event) {
-                eprintln!("reporter error: {}", e);
+                tracing::warn!(error = %e, "reporter failed to render event");
             }
         }
     });
 
     let result = operation(opts).await;
+
+    if let Err(error) = &result {
+        tracing::error!(error = ?error, "install operation failed");
+    }
+
     drop(tx);
     let _ = reporter.await;
+
     result.map(|report| InstallRun {
         report,
         rendered_summary: true,

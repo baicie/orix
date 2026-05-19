@@ -327,15 +327,19 @@ impl Linker {
             }
 
             // Global bin link: node_modules/.bin/<cmd> -> ../.orix/<pkg>/bin/<cmd>
-            let global_bin_link = global_bin_dir.join(&cmd_name);
-            if !global_bin_link.exists() {
-                let relative_target = PathBuf::from("..")
-                    .join(VIRTUAL_STORE_DIR)
-                    .join(pkg_key)
-                    .join("bin")
-                    .join(&cmd_name);
-                Self::create_symlink(&relative_target, &global_bin_link)?;
-                report.symlinks_created += 1;
+            // Only create if the source actually exists (bin_source exists means the file
+            // was either hardlinked or copied into the package directory).
+            if bin_source.exists() {
+                let global_bin_link = global_bin_dir.join(&cmd_name);
+                if !global_bin_link.exists() {
+                    let relative_target = PathBuf::from("..")
+                        .join(VIRTUAL_STORE_DIR)
+                        .join(pkg_key)
+                        .join("bin")
+                        .join(&cmd_name);
+                    Self::create_symlink(&relative_target, &global_bin_link)?;
+                    report.symlinks_created += 1;
+                }
             }
         }
 

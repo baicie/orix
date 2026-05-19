@@ -48,6 +48,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "process
 # ── Logging ───────────────────────────────────────────────────────────────────
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
 
 # ── Networking ─────────────────────────────────────────────────────────────────
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

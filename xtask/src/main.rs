@@ -271,8 +271,53 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Locate the `npm` executable on the system.
+///
+/// On Windows, returns `"npm"` to be invoked via `cmd /c`, which handles
+/// extension resolution (npm → npm.cmd) automatically. On Unix, returns the
+/// full path found via `which`, falling back to common paths.
+fn find_npm() -> Result<String> {
+    if cfg!(windows) {
+        // Windows: npm is a .cmd wrapper. `cmd /c npm` handles everything.
+        // Check a common install path exists so we can give a helpful error.
+        let common = r"C:\Program Files\nodejs";
+        if !Path::new(common).exists() {
+            if let Ok(output) = Command::new("where.exe").arg("npm").output() {
+                if !output.status.success() {
+                    bail!("npm not found. Install Node.js from https://nodejs.org/");
+                }
+            }
+        }
+        return Ok("npm".to_string());
+    } else {
+        if let Ok(output) = Command::new("which").arg("npm").output() {
+            if output.status.success() {
+                if let Ok(out) = String::from_utf8(output.stdout) {
+                    let path = out.trim();
+                    if Path::new(path).exists() {
+                        return Ok(path.to_string());
+                    }
+                }
+            }
+        }
+        let candidates = [
+            "/usr/local/bin/npm",
+            "/usr/bin/npm",
+            "/opt/homebrew/bin/npm",
+        ];
+        for &path in &candidates {
+            if Path::new(path).exists() {
+                return Ok(path.to_string());
+            }
+        }
+        bail!("npm not found. Install Node.js from https://nodejs.org/");
+    }
+}
+
 /// Build, pack, and link the npm packages needed by this host platform.
 fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
+    let npm = find_npm()?;
+    let npm_str = npm.as_str();
     let platform = current_npm_platform()?;
     let main_dir = Path::new("npm/main");
     let platform_dir = Path::new("npm").join(platform.package_dir);
@@ -327,20 +372,20 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
     let pack_dir_arg = pack_dir.to_string_lossy().into_owned();
     run_in_dir(
         &platform_dir,
-        "npm",
+        npm_str.as_ref(),
         ["pack", "--pack-destination", pack_dir_arg.as_str()],
     )?;
     run_in_dir(
         main_dir,
-        "npm",
+        npm_str.as_ref(),
         ["pack", "--pack-destination", pack_dir_arg.as_str()],
     )?;
 
     eprintln!("[4/4] Linking npm packages locally...");
-    run_in_dir(&platform_dir, "npm", ["link"])?;
+    run_in_dir(&platform_dir, npm_str.as_ref(), ["link"])?;
     run_in_dir(
         main_dir,
-        "npm",
+        npm_str.as_ref(),
         [
             "link",
             platform_package.as_str(),
@@ -348,7 +393,7 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
             "--package-lock=false",
         ],
     )?;
-    run_in_dir(main_dir, "npm", ["link"])?;
+    run_in_dir(main_dir, npm_str.as_ref(), ["link"])?;
 
     eprintln!("\n=== npm local test ready ===");
     eprintln!("  Packed tarballs: {}", pack_dir.display());
@@ -1124,14 +1169,37 @@ where
         .map(|a| a.as_ref().to_string_lossy().into_owned())
         .collect();
     let args_str = args.join(" ");
-    let status = Command::new(cmd)
-        .args(&args)
-        .current_dir(dir)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .with_context(|| format!("failed to run {cmd} {args_str} in {}", dir.display()))?;
+
+    #[cfg(windows)]
+    let status = {
+        // On Windows, npm/npx are .cmd wrappers. Use `cmd /c` so cmd.exe
+        // resolves the extension and PATH lookup for us.
+        let full_cmd = if args_str.is_empty() {
+            cmd.to_string()
+        } else {
+            format!("{cmd} {args_str}")
+        };
+        Command::new("cmd")
+            .args(["/c", &full_cmd])
+            .current_dir(dir)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("failed to run {cmd} {args_str} in {}", dir.display()))?
+    };
+
+    #[cfg(not(windows))]
+    let status = {
+        Command::new(cmd)
+            .args(&args)
+            .current_dir(dir)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("failed to run {cmd} {args_str} in {}", dir.display()))?
+    };
 
     if !status.success() {
         bail!("command failed in {}: {cmd} {args_str}", dir.display());

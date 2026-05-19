@@ -17,7 +17,10 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+dirs = { workspace = true }
 orix-core = { workspace = true }
 crossterm = { workspace = true }
 unicode-width = { workspace = true }

@@ -277,12 +277,17 @@ fn spawn_resolve_task(
             .with_context(|| format!("version {} not found in packument", version))?;
 
         let pkg_id = PackageId::new(name.clone(), version.clone());
-        let tarball = metadata.dist.tarball.clone();
-        let integrity = metadata
-            .dist
+        let dist = metadata.dist.as_ref().with_context(|| {
+            format!(
+                "package {}@{} has no dist info — may be unpublished or unavailable",
+                name, version
+            )
+        })?;
+        let tarball = dist.tarball.clone();
+        let integrity = dist
             .integrity
             .clone()
-            .or(metadata.dist.shasum.clone())
+            .or(dist.shasum.clone())
             .unwrap_or_default();
 
         let deps: Vec<(PackageName, String)> = metadata
@@ -629,15 +634,29 @@ mod tests {
                     dev_dependencies: HashMap::new(),
                     optional_dependencies: HashMap::new(),
                     peer_dependencies: HashMap::new(),
+                    peer_dependencies_meta: HashMap::new(),
                     engines: None,
                     os: Vec::new(),
                     cpu: Vec::new(),
-                    dist: Dist {
+                    dist: Some(Dist {
                         tarball: format!("https://registry.npmjs.org/demo/-/demo-{}.tgz", version),
                         integrity: Some(integ.to_string()),
                         shasum: None,
-                    },
+                    }),
                     optional: false,
+                    deprecated: None,
+                    bin: HashMap::new(),
+                    directories: Default::default(),
+                    has_shrinkwrap: false,
+                    has_install_script: false,
+                    bundle_dependencies: Vec::new(),
+                    scripts: HashMap::new(),
+                    funding: None,
+                    repository: None,
+                    homepage: None,
+                    description: None,
+                    license: None,
+                    keywords: Vec::new(),
                 },
             )
         })
