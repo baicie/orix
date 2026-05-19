@@ -31,12 +31,12 @@ impl<W: Write> LiveTerminal<W> {
     /// Render a frame, clearing the previous one in-place.
     pub fn render(&mut self, frame: &str) -> io::Result<()> {
         self.hide_cursor_once()?;
-        self.clear_previous()?;
+        let columns = terminal_width();
+        self.clear_previous(columns)?;
 
         write!(self.writer, "{frame}")?;
         self.writer.flush()?;
 
-        let columns = terminal_width();
         self.last_rows = visual_row_count(frame, columns);
 
         Ok(())
@@ -59,15 +59,15 @@ impl<W: Write> LiveTerminal<W> {
         Ok(())
     }
 
-    fn clear_previous(&mut self) -> io::Result<()> {
-        if self.last_rows == 0 {
+    fn clear_previous(&mut self, columns: usize) -> io::Result<()> {
+        if self.last_rows == 0 || columns == 0 {
             return Ok(());
         }
 
         queue!(self.writer, MoveUp(self.last_rows as u16), MoveToColumn(0))?;
 
         for row in 0..self.last_rows {
-            queue!(self.writer, Clear(ClearType::CurrentLine), MoveToColumn(0))?;
+            queue!(self.writer, Clear(ClearType::CurrentLine))?;
 
             if row + 1 < self.last_rows {
                 queue!(self.writer, MoveDown(1), MoveToColumn(0))?;
@@ -154,5 +154,29 @@ mod tests {
     #[test]
     fn test_visual_row_count_zero_width() {
         assert_eq!(visual_row_count("hello", 0), 1);
+    }
+
+    #[test]
+    fn test_render_clears_previous_frame_from_top() -> io::Result<()> {
+        let mut terminal = LiveTerminal::new(Vec::new());
+
+        terminal.render("orix install\nPackages: +4 direct, +50 total\n")?;
+        terminal.render("orix install\nDone\n")?;
+
+        let output = String::from_utf8(terminal.writer.clone())
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let clear_start = format!(
+            "{}{}{}",
+            MoveUp(2),
+            MoveToColumn(0),
+            Clear(ClearType::CurrentLine)
+        );
+
+        assert!(
+            output.contains(&clear_start),
+            "second render should move back to the previous frame before clearing; output={output:?}"
+        );
+
+        Ok(())
     }
 }

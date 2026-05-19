@@ -2,10 +2,11 @@
 
 #![deny(clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, Version,
@@ -16,15 +17,18 @@ use orix_registry::{Packument, RegistryClient};
 use orix_workspace::{Workspace, WorkspaceSpec};
 use url::Url;
 
-/// An optional dependency that was skipped due to platform mismatch.
+/// Default concurrency for packument resolution.
+const DEFAULT_RESOLVE_CONCURRENCY: usize = 10;
+
+/// Progress event emitted during dependency resolution.
 #[derive(Debug, Clone)]
 pub struct ResolveProgressEvent {
     /// Resolved package id.
     pub id: PackageId,
-    /// Index of this package in the resolution order (1-based).
-    pub index: usize,
-    /// Total number of packages seen so far (running estimate of upper bound).
-    pub total: usize,
+    /// Total number of packages discovered so far (running estimate).
+    pub discovered: usize,
+    /// Number of packages resolved so far.
+    pub resolved: usize,
 }
 
 /// An optional dependency that was skipped due to platform mismatch.
@@ -66,14 +70,9 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
             .and_then(|v| Version::parse(v).ok())
             .with_context(|| format!("tag '{}' not found in packument", tag)),
 
-        orix_domain::ConstraintKind::Patch(spec) => {
-            // The patch spec includes the exact version already.
-            Ok(spec.package_version.clone())
-        }
+        orix_domain::ConstraintKind::Patch(spec) => Ok(spec.package_version.clone()),
 
         orix_domain::ConstraintKind::Catalog(_) => {
-            // Catalog expansion should happen before version selection.
-            // If we reach here, the catalog was not expanded.
             anyhow::bail!(
                 "catalog reference '{}' was not expanded — workspace catalog not available",
                 constraint.raw
@@ -82,96 +81,140 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
     }
 }
 
-/// Resolve a single peer dependency against the current resolution context.
-///
-/// Returns `None` if the peer cannot be resolved — the caller decides whether
-/// to emit a diagnostic based on whether the peer is optional.
-fn resolve_peer_dep(
-    peer_name: &PackageName,
-    peer_range: &str,
-    memo: &BTreeMap<(PackageName, String), PackageId>,
-    registry: &mut RegistryClient,
-) -> Option<PackageId> {
-    let constraint = VersionConstraint::parse(peer_range).ok()?;
-    let key = (peer_name.clone(), constraint.raw.clone());
-
-    // Check if already resolved in this batch.
-    if let Some(id) = memo.get(&key) {
-        return Some(id.clone());
-    }
-
-    // Synchronous registry lookup for peer resolution.
-    // This adds a network hop per unique unresolved peer, which is acceptable
-    // since peers are typically already in the memo or are well-known packages.
-    let packument = registry.fetch_packument_sync(peer_name).ok()?;
-    let version = select_version_impl(&packument, &constraint).ok()?;
-    let metadata = packument.versions.get(&version.to_string())?;
-    let tarball = metadata.dist.tarball.clone();
-    let integrity = metadata
-        .dist
-        .integrity
-        .clone()
-        .or(metadata.dist.shasum.clone())
-        .unwrap_or_default();
-    let deps: Vec<(PackageName, String)> = metadata
-        .dependencies
-        .iter()
-        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-        .collect();
-    let dev_deps: Vec<(PackageName, String)> = metadata
-        .dev_dependencies
-        .iter()
-        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-        .collect();
-    let opt_deps: Vec<(PackageName, String)> = metadata
-        .optional_dependencies
-        .iter()
-        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-        .collect();
-    let peer_deps: Vec<(PackageName, String)> = metadata
-        .peer_dependencies
-        .iter()
-        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-        .collect();
-    let depnodes: Vec<String> = deps
-        .iter()
-        .chain(opt_deps.iter())
-        .map(|(n, _)| n.to_string())
-        .chain(peer_deps.iter().map(|(n, _)| n.to_string()))
-        .collect();
-    let resolved = ResolvedPackage {
-        id: PackageId::new(peer_name.clone(), version.clone()),
-        integrity,
-        tarball,
-        dependencies: deps,
-        dev_dependencies: dev_deps,
-        optional_dependencies: opt_deps,
-        peer_dependencies: peer_deps,
-        engines: metadata.engines.as_ref().and_then(|e| e.node.clone()),
-        os: metadata.os.clone(),
-        cpu: metadata.cpu.clone(),
-        depnodes,
-        patch: None,
-    };
-    Some(resolved.id.clone())
+/// Result of resolving a single task.
+struct ResolveTaskResult {
+    pkg_id: PackageId,
+    deps: Vec<(PackageName, String)>,
+    opt_deps: Vec<(PackageName, String)>,
+    peer_deps: Vec<(PackageName, String)>,
+    tarball: String,
+    integrity: String,
+    engines: Option<String>,
+    os: Vec<String>,
+    cpu: Vec<String>,
+    patch: Option<orix_domain::PatchSpec>,
 }
 
-/// Core resolution loop. Takes independent mutable references to avoid borrow conflicts.
-async fn resolve_batch_impl(
-    graph: &mut DependencyGraph,
-    memo: &mut BTreeMap<(PackageName, String), PackageId>,
-    registry: &mut RegistryClient,
-    mut progress_tx: Option<&mut mpsc::Sender<ResolveProgressEvent>>,
-    to_resolve: Vec<(PackageName, VersionConstraint)>,
+/// Concurrently resolve a batch of packages using a bounded work queue.
+///
+/// Uses `tokio::task::JoinSet` to manage concurrent tasks without `drain_filter`.
+async fn resolve_batch_concurrent(
+    registry: RegistryClient,
+    state: &mut ResolverState,
+    concurrency: usize,
+    progress_tx: Option<&mpsc::Sender<ResolveProgressEvent>>,
+    initial_tasks: Vec<(PackageName, VersionConstraint)>,
 ) -> Result<()> {
-    let mut pending: Vec<(PackageName, VersionConstraint)> = to_resolve;
-    let mut resolved_count: usize = 0;
+    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let mut pending: VecDeque<(PackageName, VersionConstraint)> = VecDeque::from(initial_tasks);
 
-    while let Some((name, constraint)) = pending.pop() {
+    state.discovered = pending.len();
+
+    let mut tasks: tokio::task::JoinSet<Result<ResolveTaskResult>> = tokio::task::JoinSet::new();
+
+    // Spawn initial batch up to concurrency limit.
+    while tasks.len() < concurrency {
+        let Some((name, constraint)) = pending.pop_front() else {
+            break;
+        };
+
         let key = (name.clone(), constraint.raw.clone());
-        if memo.contains_key(&key) {
+        if state.memo.contains_key(&key) || state.in_flight.contains(&key) {
             continue;
         }
+        state.in_flight.insert(key);
+
+        spawn_resolve_task(&semaphore, &mut tasks, registry.clone(), name, constraint);
+    }
+
+    // Main event loop: collect completed tasks and spawn new ones.
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok(Ok(task_result)) => {
+                let mut new_deps = Vec::new();
+
+                let resolved = ResolvedPackage {
+                    id: task_result.pkg_id.clone(),
+                    integrity: task_result.integrity.clone(),
+                    tarball: task_result.tarball.clone(),
+                    dependencies: task_result.deps.clone(),
+                    dev_dependencies: Vec::new(),
+                    optional_dependencies: task_result.opt_deps.clone(),
+                    peer_dependencies: task_result.peer_deps.clone(),
+                    engines: task_result.engines.clone(),
+                    os: task_result.os.clone(),
+                    cpu: task_result.cpu.clone(),
+                    depnodes: task_result
+                        .deps
+                        .iter()
+                        .chain(task_result.opt_deps.iter())
+                        .map(|(n, _)| n.to_string())
+                        .chain(task_result.peer_deps.iter().map(|(n, _)| n.to_string()))
+                        .collect(),
+                    patch: task_result.patch.clone(),
+                };
+
+                state.graph.insert(resolved);
+                state.resolved += 1;
+
+                for (name, raw) in task_result.deps.iter().chain(task_result.opt_deps.iter()) {
+                    let dep_key = (name.clone(), raw.clone());
+                    if !state.memo.contains_key(&dep_key) {
+                        state.discovered += 1;
+                        new_deps.push(dep_key);
+                    }
+                }
+
+                if let Some(tx) = progress_tx {
+                    let _ = tx.try_send(ResolveProgressEvent {
+                        id: task_result.pkg_id.clone(),
+                        discovered: state.discovered,
+                        resolved: state.resolved,
+                    });
+                }
+
+                for (name, raw) in new_deps {
+                    if let Ok(constraint) = VersionConstraint::parse(&raw) {
+                        pending.push_back((name, constraint));
+                    }
+                }
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                anyhow::bail!("resolution task panicked");
+            }
+        }
+
+        // Spawn new tasks while we have capacity.
+        while tasks.len() < concurrency {
+            let Some((name, constraint)) = pending.pop_front() else {
+                break;
+            };
+
+            let key = (name.clone(), constraint.raw.clone());
+            if state.memo.contains_key(&key) || state.in_flight.contains(&key) {
+                continue;
+            }
+            state.in_flight.insert(key);
+
+            spawn_resolve_task(&semaphore, &mut tasks, registry.clone(), name, constraint);
+        }
+    }
+
+    Ok(())
+}
+
+/// Spawn a single package resolution task.
+fn spawn_resolve_task(
+    semaphore: &Arc<Semaphore>,
+    tasks: &mut tokio::task::JoinSet<Result<ResolveTaskResult>>,
+    registry: RegistryClient,
+    name: PackageName,
+    constraint: VersionConstraint,
+) {
+    let semaphore = semaphore.clone();
+    tasks.spawn(async move {
+        let _permit: OwnedSemaphorePermit = semaphore.acquire_owned().await?;
 
         let packument = registry
             .fetch_packument(&name)
@@ -200,11 +243,6 @@ async fn resolve_batch_impl(
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
-        let dev_deps: Vec<(PackageName, String)> = metadata
-            .dev_dependencies
-            .iter()
-            .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-            .collect();
         let opt_deps: Vec<(PackageName, String)> = metadata
             .optional_dependencies
             .iter()
@@ -216,60 +254,33 @@ async fn resolve_batch_impl(
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
 
-        // Resolve each peer dependency against the current memo.
-        for (peer_name, peer_range) in &peer_deps {
-            let _ = resolve_peer_dep(peer_name, peer_range, memo, registry);
-        }
-
-        let depnodes: Vec<String> = deps
-            .iter()
-            .chain(opt_deps.iter())
-            .map(|(n, _)| n.to_string())
-            .chain(peer_deps.iter().map(|(n, _)| n.to_string()))
-            .collect();
-
-        // Extract patch spec if this is a patch: protocol dependency.
         let patch = match &constraint.kind {
             ConstraintKind::Patch(spec) => Some(spec.clone()),
             _ => None,
         };
 
-        let resolved = ResolvedPackage {
-            id: pkg_id.clone(),
-            integrity,
+        Ok(ResolveTaskResult {
+            pkg_id,
+            deps,
+            opt_deps,
+            peer_deps,
             tarball,
-            dependencies: deps.clone(),
-            dev_dependencies: dev_deps,
-            optional_dependencies: opt_deps.clone(),
-            peer_dependencies: peer_deps,
+            integrity,
             engines: metadata.engines.as_ref().and_then(|e| e.node.clone()),
             os: metadata.os.clone(),
             cpu: metadata.cpu.clone(),
-            depnodes,
             patch,
-        };
+        })
+    });
+}
 
-        resolved_count += 1;
-
-        if let Some(ref mut tx) = progress_tx {
-            let total = pending.len() + resolved_count;
-            let _ = tx.try_send(ResolveProgressEvent {
-                id: pkg_id.clone(),
-                index: resolved_count,
-                total,
-            });
-        }
-
-        graph.insert(resolved);
-        memo.insert(key, pkg_id);
-
-        for (n, raw) in deps.iter().chain(opt_deps.iter()) {
-            if let Ok(c) = VersionConstraint::parse(raw) {
-                pending.push((n.clone(), c));
-            }
-        }
-    }
-    Ok(())
+/// Mutable state used during concurrent resolution.
+struct ResolverState {
+    graph: DependencyGraph,
+    memo: BTreeMap<(PackageName, String), PackageId>,
+    in_flight: HashSet<(PackageName, String)>,
+    discovered: usize,
+    resolved: usize,
 }
 
 /// The dependency resolution engine.
@@ -278,6 +289,7 @@ pub struct Resolver {
     memo: BTreeMap<(PackageName, String), PackageId>,
     skipped_optional: Vec<SkippedOptionalDep>,
     progress_tx: Option<mpsc::Sender<ResolveProgressEvent>>,
+    resolve_concurrency: usize,
 }
 
 impl Resolver {
@@ -288,6 +300,7 @@ impl Resolver {
             memo: Default::default(),
             skipped_optional: Vec::new(),
             progress_tx: None,
+            resolve_concurrency: DEFAULT_RESOLVE_CONCURRENCY,
         }
     }
 
@@ -298,7 +311,14 @@ impl Resolver {
             memo: Default::default(),
             skipped_optional: Vec::new(),
             progress_tx: None,
+            resolve_concurrency: DEFAULT_RESOLVE_CONCURRENCY,
         }
+    }
+
+    /// Sets the maximum number of concurrent packument resolutions.
+    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
+        self.resolve_concurrency = concurrency.max(1);
+        self
     }
 
     /// Attaches a progress channel to emit resolution progress events.
@@ -453,9 +473,7 @@ impl Resolver {
             let constraint = if let Some(ws) = workspace {
                 if let orix_domain::ConstraintKind::Catalog(_cat_constraint) = &constraint.kind {
                     if let Some(resolved_version) = ws.resolve_catalog(raw, name.as_str()) {
-                        // Replace catalog reference with the actual version constraint.
                         VersionConstraint::parse(&resolved_version).unwrap_or_else(|_| {
-                            // Fallback: treat resolved version as exact version.
                             VersionConstraint {
                                 raw: resolved_version.clone(),
                                 kind: orix_domain::ConstraintKind::Exact(
@@ -505,11 +523,30 @@ impl Resolver {
         to_resolve: Vec<(PackageName, VersionConstraint)>,
         _workspace: Option<&Workspace>,
     ) -> Result<()> {
-        let memo = &mut self.memo;
-        let registry = &mut self.registry;
-        let progress_tx = self.progress_tx.as_mut();
+        let mut state = ResolverState {
+            graph: DependencyGraph::new(),
+            memo: std::mem::take(&mut self.memo),
+            in_flight: HashSet::new(),
+            discovered: 0,
+            resolved: 0,
+        };
 
-        resolve_batch_impl(graph, memo, registry, progress_tx, to_resolve).await
+        resolve_batch_concurrent(
+            self.registry.clone(),
+            &mut state,
+            self.resolve_concurrency,
+            self.progress_tx.as_ref(),
+            to_resolve,
+        )
+        .await?;
+
+        // Merge resolved graph into caller's graph.
+        for pkg in state.graph.packages() {
+            graph.insert(pkg.clone());
+        }
+
+        self.memo = state.memo;
+        Ok(())
     }
 }
 
@@ -608,6 +645,26 @@ mod tests {
         let resolver = resolver()?;
         let result = resolver.select_version(&packument(), &VersionConstraint::parse("^3.0.0")?);
         assert!(result.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_concurrency_is_configurable() -> anyhow::Result<()> {
+        let resolver =
+            Resolver::new(url::Url::parse("https://registry.npmjs.org/")?).with_concurrency(5);
+        assert_eq!(resolver.resolve_concurrency, 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_progress_event_has_discovered_and_resolved_fields() -> anyhow::Result<()> {
+        let event = ResolveProgressEvent {
+            id: PackageId::new(PackageName::from("react"), Version::parse("18.2.0")?),
+            discovered: 10,
+            resolved: 5,
+        };
+        assert_eq!(event.discovered, 10);
+        assert_eq!(event.resolved, 5);
         Ok(())
     }
 }

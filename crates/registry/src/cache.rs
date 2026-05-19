@@ -209,4 +209,12 @@ mod tests {
         assert!(cache.get("keep-pkg").await.is_some());
         assert!(cache.get("remove-pkg").await.is_none());
     }
+
+    #[tokio::test]
+    async fn registry_client_creates_with_custom_concurrency() {
+        use crate::RegistryClient;
+        let url = url::Url::parse("https://registry.npmjs.org/").expect("valid url");
+        let client = RegistryClient::with_concurrency(url, 20);
+        let _ = client.clone();
+    }
 }

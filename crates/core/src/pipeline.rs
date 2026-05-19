@@ -577,8 +577,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 send_event(
                     &install_progress_tx,
                     InstallEvent::ResolveProgress {
-                        done: event.index,
-                        total: event.total,
+                        done: event.resolved,
+                        total: event.discovered,
                         package: Some(event.id.to_string()),
                     },
                 );
@@ -592,6 +592,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             } else {
                 Resolver::new(config.registry.clone())
             }
+            .with_concurrency(config.concurrency)
             .with_progress(resolve_progress_tx);
 
             let mut merged = orix_domain::DependencyGraph::new();
@@ -610,6 +611,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             } else {
                 Resolver::new(config.registry.clone())
             }
+            .with_concurrency(config.concurrency)
             .with_progress(resolve_progress_tx);
 
             resolver

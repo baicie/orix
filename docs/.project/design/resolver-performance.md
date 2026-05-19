@@ -648,3 +648,49 @@ mock registry 可以为每个 packument 固定延迟 100ms。这样串行 50 个
 - `cargo test -p orix-resolver` 通过。
 - `make check` 通过。
 - `examples/basic-install` 首次安装 Resolve 阶段持续输出进度，且无长时间静默。
+
+## 落地状态
+
+以下 Phase 已完成实现（2026-05-19）：
+
+### Phase 2: 并发解析调度器
+
+已实现，代码在 `crates/resolver/src/resolver.rs`。
+
+- `resolve_batch_concurrent` 使用 `tokio::task::JoinSet` 实现有界并发工作队列，默认并发 10。
+- `ResolverState` 管理共享状态：graph、memo、in_flight 集合、discovered/resolved 计数。
+- 依赖发现通过 `pending` VecDeque 动态追加新任务。
+- 通过 `in_flight: HashSet<(PackageName, String)>` 在调度层面去重同一 `(name, constraint)` 重复派发。
+- `resolve_concurrency` 可通过 `Resolver::with_concurrency()` 配置。
+
+### Phase 3: registry HTTP 并发限制
+
+已实现，代码在 `crates/registry/src/lib.rs`。
+
+- `RegistryClient` 增加 `concurrency: Arc<Semaphore>` 字段。
+- `fetch_packument` 在 HTTP 请求前 `acquire_owned()` permit。
+- `with_concurrency(base_url, n)` 和 `with_auth_concurrency(base_url, token, n)` 构造函数。
+- 单例内存 TTL 缓存（5分钟）保持不变。
+
+### Phase 4: 移除 peer 同步网络查询
+
+已实现，代码在 `crates/resolver/src/resolver.rs`。
+
+- `resolve_peer_dep` 函数已删除。
+- peer dependencies 不再触发 `fetch_packument_sync` 调用。
+- peer 信息仍被解析并存入 `ResolvedPackage.peer_dependencies`，但不参与主动解析。
+- `RegistryClient.fetch_packument_sync` 保留（为向后兼容及测试场景），但 resolver 不再调用。
+
+### Phase 1: 进度事件更新
+
+已实现。
+
+- `ResolveProgressEvent` 字段从 `{id, index, total}` 改为 `{id, discovered, resolved}`。
+- CLI `pipeline.rs` 中 `resolve_progress_forwarder` 已更新映射。
+
+### 未完成 Phase
+
+| Phase | 状态 | 原因 |
+| --- | --- | --- |
+| Phase 5: 磁盘 packument cache | 未开始 | 需要 cache key、TTL、offline/force 语义 |
+| Phase 6: 版本索引缓存 | 未开始 | 并发化后 CPU 不是主瓶颈 |
