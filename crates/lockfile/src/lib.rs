@@ -27,6 +27,14 @@ pub struct Lockfile {
     pub importers: BTreeMap<String, ImporterLock>,
     /// Resolved packages keyed by package ID.
     pub packages: BTreeMap<String, PackageLock>,
+    /// SHA-256 hash of the serialized dependency graph for layout validation.
+    /// When set, the linker can skip rebuild if node_modules was generated from the same graph.
+    #[serde(
+        rename = "orixGraphHash",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub graph_hash: Option<String>,
 }
 
 /// Dependency resolutions for one importer (root or workspace package).
@@ -149,6 +157,7 @@ impl Lockfile {
             save_remote_cache_urls: true,
             importers: Default::default(),
             packages: Default::default(),
+            graph_hash: None,
         }
     }
 
@@ -333,6 +342,8 @@ impl Lockfile {
                 },
             );
         }
+
+        lockfile.graph_hash = Some(graph.graph_hash());
 
         lockfile
     }

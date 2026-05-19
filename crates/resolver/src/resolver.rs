@@ -84,6 +84,8 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
 /// Result of resolving a single task.
 struct ResolveTaskResult {
     pkg_id: PackageId,
+    /// The raw constraint string used for this resolution, for memo key.
+    constraint: String,
     deps: Vec<(PackageName, String)>,
     opt_deps: Vec<(PackageName, String)>,
     peer_deps: Vec<(PackageName, String)>,
@@ -122,15 +124,30 @@ async fn resolve_batch_concurrent(
         if state.memo.contains_key(&key) || state.in_flight.contains(&key) {
             continue;
         }
-        state.in_flight.insert(key);
+        state.in_flight.insert(key.clone());
 
-        spawn_resolve_task(&semaphore, &mut tasks, registry.clone(), name, constraint);
+        spawn_resolve_task(
+            &semaphore,
+            &mut tasks,
+            registry.clone(),
+            name,
+            constraint,
+            key.1.clone(),
+        );
     }
 
     // Main event loop: collect completed tasks and spawn new ones.
     while let Some(result) = tasks.join_next().await {
         match result {
             Ok(Ok(task_result)) => {
+                // Write to memo so repeated constraints on the same package are deduplicated.
+                let key = (
+                    task_result.pkg_id.name.clone(),
+                    task_result.constraint.clone(),
+                );
+                state.memo.insert(key.clone(), task_result.pkg_id.clone());
+                state.in_flight.remove(&key);
+
                 let mut new_deps = Vec::new();
 
                 let resolved = ResolvedPackage {
@@ -159,7 +176,7 @@ async fn resolve_batch_concurrent(
 
                 for (name, raw) in task_result.deps.iter().chain(task_result.opt_deps.iter()) {
                     let dep_key = (name.clone(), raw.clone());
-                    if !state.memo.contains_key(&dep_key) {
+                    if !state.memo.contains_key(&dep_key) && !state.in_flight.contains(&dep_key) {
                         state.discovered += 1;
                         new_deps.push(dep_key);
                     }
@@ -195,9 +212,16 @@ async fn resolve_batch_concurrent(
             if state.memo.contains_key(&key) || state.in_flight.contains(&key) {
                 continue;
             }
-            state.in_flight.insert(key);
+            state.in_flight.insert(key.clone());
 
-            spawn_resolve_task(&semaphore, &mut tasks, registry.clone(), name, constraint);
+            spawn_resolve_task(
+                &semaphore,
+                &mut tasks,
+                registry.clone(),
+                name,
+                constraint,
+                key.1.clone(),
+            );
         }
     }
 
@@ -211,6 +235,7 @@ fn spawn_resolve_task(
     registry: RegistryClient,
     name: PackageName,
     constraint: VersionConstraint,
+    constraint_raw: String,
 ) {
     let semaphore = semaphore.clone();
     tasks.spawn(async move {
@@ -261,6 +286,7 @@ fn spawn_resolve_task(
 
         Ok(ResolveTaskResult {
             pkg_id,
+            constraint: constraint_raw,
             deps,
             opt_deps,
             peer_deps,

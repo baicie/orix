@@ -348,6 +348,7 @@ impl PnpmLockfile {
             save_remote_cache_urls: true,
             importers: orix_importers,
             packages: orix_packages,
+            graph_hash: None,
         }
     }
 }

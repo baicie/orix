@@ -64,6 +64,14 @@ pub struct InstallReport {
     pub lockfile_changed: bool,
     /// Wall-clock time in seconds.
     pub duration_secs: f64,
+    /// Resolve phase duration in milliseconds (None if skipped via fast path).
+    pub resolve_ms: Option<u64>,
+    /// Fetch phase duration in milliseconds.
+    pub fetch_ms: Option<u64>,
+    /// Link phase duration in milliseconds.
+    pub link_ms: Option<u64>,
+    /// Lockfile phase duration in milliseconds.
+    pub lockfile_ms: Option<u64>,
 }
 
 /// Report from a remove operation.
@@ -288,6 +296,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         None
     };
 
+    // Phase duration tracking
+    let mut resolve_instant: Option<Instant> = None;
+    let fetch_ms: Option<u64>;
+    let link_ms: Option<u64>;
+    let mut lockfile_ms: Option<u64> = None;
+
     // Fast path: if lockfile exists and manifest unchanged, skip resolver/fetch entirely.
     // Only apply when network is not forced and we're not in frozen mode.
     if !opts.frozen_lockfile && !opts.force {
@@ -394,10 +408,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     .chain(manifest.dev_dependencies.keys())
                     .cloned()
                     .collect();
-                let link_report = if linker
-                    .validate_layout(&direct_deps)
-                    .map(|r| r.is_ok())
-                    .unwrap_or(false)
+                let graph_hash = graph.graph_hash();
+                let link_report = if linker.is_layout_valid(&graph_hash)
+                    && linker
+                        .validate_layout(&direct_deps)
+                        .map(|r| r.is_ok())
+                        .unwrap_or(false)
                 {
                     debug!(target: "orix", "layout valid, skipping unlink+link");
                     LinkReport {
@@ -405,6 +421,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                         copied_files: 0,
                         symlinks_created: 0,
                         bytes_saved: 0,
+                        skipped: Some("layout valid".to_string()),
                     }
                 } else {
                     let t2 = Instant::now();
@@ -412,7 +429,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                         .unlink()
                         .with_context(|| "failed to clean old node_modules")?;
                     let report = linker
-                        .link_graph(&graph, &direct_deps, workspace.as_ref())
+                        .link_graph(
+                            &graph,
+                            &direct_deps,
+                            workspace.as_ref(),
+                            &graph.graph_hash(),
+                        )
                         .with_context(|| "failed to link packages")?;
                     debug!(target: "orix", "link (unlink+link_graph): {:?}", t2.elapsed());
                     report
@@ -451,7 +473,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                                 )
                             })?;
                             pkg_linker
-                                .link_graph(&graph, &pkg_deps, workspace.as_ref())
+                                .link_graph(
+                                    &graph,
+                                    &pkg_deps,
+                                    workspace.as_ref(),
+                                    &graph.graph_hash(),
+                                )
                                 .with_context(|| {
                                     format!(
                                         "failed to link packages for {}",
@@ -537,6 +564,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     lockfile_diff: None,
                     lockfile_changed,
                     duration_secs: duration.as_secs_f64(),
+                    resolve_ms: None,
+                    fetch_ms: None,
+                    link_ms: None,
+                    lockfile_ms: None,
                 });
             }
         }
@@ -562,6 +593,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             anyhow::bail!("frozen lockfile mode requires an existing lockfile");
         }
     } else {
+        resolve_instant = Some(Instant::now());
         send_event(
             &opts.progress_tx,
             InstallEvent::PhaseStarted {
@@ -642,6 +674,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         graph
     };
 
+    let resolve_ms: Option<u64> = resolve_instant.map(|i| i.elapsed().as_millis() as u64);
+
     let store = Store::open(config.store_dir.clone()).with_context(|| "failed to open store")?;
     let tarball_cache = TarballCache::new(config.cache_dir.clone());
     let fetcher = Fetcher::new(tarball_cache, store.clone(), project_root.to_path_buf())
@@ -659,6 +693,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             phase: InstallPhase::Fetch,
         },
     );
+    let fetch_instant = Instant::now();
 
     let total_to_fetch = graph.len();
     send_event(
@@ -704,6 +739,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .await
         .with_context(|| "failed to fetch packages")?;
     let _ = fetch_progress_forwarder.await;
+    fetch_ms = Some(fetch_instant.elapsed().as_millis() as u64);
 
     send_event(
         &opts.progress_tx,
@@ -751,6 +787,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             phase: InstallPhase::Link,
         },
     );
+    let link_instant = Instant::now();
     use std::collections::HashSet;
     let direct_deps: HashSet<String> = manifest
         .dependencies
@@ -765,7 +802,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .with_context(|| "failed to clean old node_modules")?;
 
     let link_report = linker
-        .link_graph(&graph, &direct_deps, workspace.as_ref())
+        .link_graph(
+            &graph,
+            &direct_deps,
+            workspace.as_ref(),
+            &graph.graph_hash(),
+        )
         .with_context(|| "failed to link packages")?;
 
     if let Some(ref ws) = workspace {
@@ -790,7 +832,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 .collect();
 
             pkg_linker
-                .link_graph(&graph, &pkg_deps, workspace.as_ref())
+                .link_graph(&graph, &pkg_deps, workspace.as_ref(), &graph.graph_hash())
                 .with_context(|| {
                     format!(
                         "failed to link packages for {}",
@@ -799,6 +841,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 })?;
         }
     }
+
+    link_ms = Some(link_instant.elapsed().as_millis() as u64);
 
     send_event(
         &opts.progress_tx,
@@ -835,6 +879,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 phase: InstallPhase::Lockfile,
             },
         );
+        let lockfile_instant = Instant::now();
         let base_lockfile = old_lockfile
             .as_ref()
             .cloned()
@@ -855,6 +900,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
         lockfile_changed =
             !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty();
+        lockfile_ms = Some(lockfile_instant.elapsed().as_millis() as u64);
         if lockfile_changed {
             info!(
                 added = diff.added.len(),
@@ -931,6 +977,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         lockfile_diff,
         lockfile_changed,
         duration_secs: duration.as_secs_f64(),
+        resolve_ms,
+        fetch_ms,
+        link_ms,
+        lockfile_ms,
     })
 }
 

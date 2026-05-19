@@ -1,7 +1,33 @@
 //! UI frame rendering.
 
+use super::color::Theme;
 use super::state::{InstallState, PhaseState, StepStatus};
 use orix_core::reporter::LockfileStatus;
+
+/// A rendered frame with both colored and plain representations.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RenderedFrame {
+    /// The full frame string (may contain ANSI escape sequences).
+    pub frame: String,
+    /// The frame stripped of ANSI codes, used for row count calculations.
+    pub plain: String,
+    /// Number of visual rows the plain frame occupies.
+    pub row_count: usize,
+}
+
+impl RenderedFrame {
+    #[allow(dead_code)]
+    fn new(frame: String, width: usize) -> Self {
+        let plain = super::strip_ansi(&frame);
+        let row_count = super::terminal::visual_row_count(&plain, width);
+        Self {
+            frame,
+            plain,
+            row_count,
+        }
+    }
+}
 
 /// Renders an `InstallState` into a printable string frame.
 pub struct FrameRenderer {
@@ -9,187 +35,322 @@ pub struct FrameRenderer {
     pub width: usize,
     /// Whether to show recent packages list.
     pub show_recent_packages: bool,
+    /// The color theme.
+    theme: Theme,
 }
 
 impl FrameRenderer {
-    /// Create a new renderer with the given terminal width.
+    #[allow(dead_code)]
     pub fn new(width: usize) -> Self {
         Self {
             width,
             show_recent_packages: true,
+            theme: Theme::plain(),
         }
     }
 
-    /// Render the current state into a complete frame string.
-    pub fn render(&self, state: &InstallState) -> String {
-        let mut out = String::new();
+    /// Create a renderer with an explicit theme.
+    pub fn with_theme(width: usize, theme: Theme) -> Self {
+        Self {
+            width,
+            show_recent_packages: true,
+            theme,
+        }
+    }
 
-        self.push_header(&mut out, state);
-        self.push_summary(&mut out, state);
-        self.push_phases(&mut out, state);
+    /// Render the current state into a complete frame.
+    pub fn render(&self, state: &InstallState) -> RenderedFrame {
+        let mut colored = String::new();
+        let mut plain = String::new();
+
+        self.push_header(&mut colored, &mut plain, state);
+        self.push_summary(&mut colored, &mut plain, state);
+        self.push_phases(&mut colored, &mut plain, state);
 
         if state.failed {
-            self.push_error(&mut out, state);
+            self.push_error(&mut colored, &mut plain, state);
         } else if state.finished {
-            self.push_done(&mut out, state);
+            self.push_done(&mut colored, &mut plain, state);
         }
 
-        if !out.ends_with('\n') {
-            out.push('\n');
+        if !colored.ends_with('\n') {
+            colored.push('\n');
+        }
+        if !plain.ends_with('\n') {
+            plain.push('\n');
         }
 
-        out
+        let row_count = super::terminal::visual_row_count(&plain, self.width);
+
+        RenderedFrame {
+            frame: colored,
+            plain,
+            row_count,
+        }
     }
 
-    fn push_header(&self, out: &mut String, state: &InstallState) {
-        out.push_str(&state.command);
-        out.push('\n');
-        out.push_str(&"-".repeat(40));
-        out.push_str("\n\n");
+    fn push_header(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
+        colored.push_str(&self.theme.title(&state.command));
+        colored.push('\n');
+        colored.push_str(&self.theme.dim("-".repeat(40).as_str()));
+        colored.push_str("\n\n");
+
+        plain.push_str(&state.command);
+        plain.push('\n');
+        plain.push_str("-".repeat(40).as_str());
+        plain.push_str("\n\n");
     }
 
-    fn push_summary(&self, out: &mut String, state: &InstallState) {
+    fn push_summary(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
         if state.added > 0 || state.removed > 0 {
-            out.push_str(&format!("Packages: +{} -{}\n", state.added, state.removed));
+            colored.push_str(&self.theme.label("Packages:"));
+            colored.push(' ');
+            colored.push_str(&self.theme.added(&format!("+{}", state.added)));
+            colored.push(' ');
+            colored.push_str(&self.theme.removed(&format!("-{}", state.removed)));
+            colored.push('\n');
+
+            plain.push_str("Packages: ");
+            plain.push_str(&format!("+{} -{}\n", state.added, state.removed));
 
             let bar_width = self.width.saturating_sub(2).min(80);
             let bar = render_diff_bar(state.added, state.removed, bar_width);
 
             if !bar.is_empty() {
-                out.push_str(&bar);
-                out.push('\n');
+                colored.push_str(&self.theme.added(&bar));
+                colored.push('\n');
+                plain.push_str(&bar);
+                plain.push('\n');
             }
         } else if state.direct_packages > 0 || state.total_packages > 0 {
-            out.push_str(&format!(
+            let line = format!(
                 "Packages: +{} direct, +{} total\n",
                 state.direct_packages, state.total_packages
-            ));
+            );
+            colored.push_str(&line);
+            plain.push_str(&line);
         }
 
         if let Some(registry) = &state.registry {
-            out.push_str(&format!("Registry: {registry}\n"));
+            colored.push_str(&self.theme.label("Registry:"));
+            colored.push(' ');
+            colored.push_str(&self.theme.url(registry));
+            colored.push('\n');
+
+            plain.push_str("Registry: ");
+            plain.push_str(registry);
+            plain.push('\n');
         }
 
         if state.direct_packages > 0 || state.total_packages > 0 || state.registry.is_some() {
-            out.push('\n');
+            colored.push('\n');
+            plain.push('\n');
         }
     }
 
-    fn push_phases(&self, out: &mut String, state: &InstallState) {
-        out.push_str(&render_fetch_step(
+    fn push_phases(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
+        let resolve_line = self.render_fetch_step(
             &state.resolve,
             "Resolving dependencies",
             "Resolved dependencies",
-        ));
-        out.push('\n');
+        );
+        colored.push_str(&resolve_line.colored);
+        plain.push_str(&resolve_line.plain);
+        colored.push('\n');
+        plain.push('\n');
 
-        out.push_str(&render_fetch_step(
-            &state.fetch,
-            "Fetching packages",
-            "Fetched packages",
-        ));
-        out.push('\n');
+        let fetch_line =
+            self.render_fetch_step(&state.fetch, "Fetching packages", "Fetched packages");
+        colored.push_str(&fetch_line.colored);
+        plain.push_str(&fetch_line.plain);
+        colored.push('\n');
+        plain.push('\n');
 
         if self.show_recent_packages
             && state.fetch.status == StepStatus::Running
             && !state.recent_packages.is_empty()
         {
             for package in &state.recent_packages {
-                out.push(' ');
-                out.push_str(CHECKMARK);
-                out.push(' ');
-                out.push_str(package);
-                out.push('\n');
+                let styled = format!("  {} {}", CHECKMARK, package);
+                colored.push_str(&self.theme.success(&styled));
+                colored.push('\n');
+
+                plain.push_str("  ");
+                plain.push_str(CHECKMARK);
+                plain.push(' ');
+                plain.push_str(package);
+                plain.push('\n');
             }
         }
 
-        out.push_str(&render_step(
-            &state.link,
-            "Linking dependencies",
-            "Linked dependencies",
-        ));
-        out.push('\n');
+        let link_line =
+            self.render_step(&state.link, "Linking dependencies", "Linked dependencies");
+        colored.push_str(&link_line.colored);
+        plain.push_str(&link_line.plain);
+        colored.push('\n');
+        plain.push('\n');
 
         match &state.lockfile_status {
             Some(LockfileStatus::Unchanged) => {
-                out.push_str(CHECKMARK);
-                out.push_str(" Lockfile unchanged\n");
+                let styled = format!("{} Lockfile unchanged", CHECKMARK);
+                colored.push_str(&self.theme.lockfile_unchanged(&styled));
+                colored.push('\n');
+                plain.push_str(CHECKMARK);
+                plain.push_str(" Lockfile unchanged\n");
             }
             Some(LockfileStatus::Written) => {
-                out.push_str(CHECKMARK);
-                out.push_str(" Lockfile written\n");
+                let styled = format!("{} Lockfile written", CHECKMARK);
+                colored.push_str(&self.theme.lockfile_written(&styled));
+                colored.push('\n');
+                plain.push_str(CHECKMARK);
+                plain.push_str(" Lockfile written\n");
             }
             Some(LockfileStatus::Skipped) => {
-                out.push_str("- Lockfile skipped\n");
+                colored.push_str("- Lockfile skipped\n");
+                plain.push_str("- Lockfile skipped\n");
             }
             None => {
-                out.push_str(&render_step(
-                    &state.lockfile,
-                    "Writing lockfile",
-                    "Wrote lockfile",
-                ));
-                out.push('\n');
+                let line = self.render_step(&state.lockfile, "Writing lockfile", "Wrote lockfile");
+                colored.push_str(&line.colored);
+                plain.push_str(&line.plain);
+                colored.push('\n');
+                plain.push('\n');
             }
         }
     }
 
-    fn push_error(&self, out: &mut String, state: &InstallState) {
-        out.push('\n');
-        out.push_str("Error:\n");
-        out.push_str("  ");
+    fn push_error(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
+        colored.push('\n');
+        plain.push('\n');
+
+        colored.push_str(&self.theme.error_title("Error:"));
+        colored.push('\n');
+        colored.push_str("  ");
+        plain.push_str("Error:\n  ");
 
         if let Some(message) = &state.error_message {
-            out.push_str(message);
-            out.push('\n');
+            colored.push_str(message);
+            colored.push('\n');
+            plain.push_str(message);
+            plain.push('\n');
         }
 
         if let Some(hint) = &state.error_hint {
-            out.push('\n');
-            out.push_str("Hint:\n");
-            out.push_str("  ");
-            out.push_str(hint);
-            out.push('\n');
+            colored.push('\n');
+            plain.push('\n');
+
+            colored.push_str(&self.theme.hint_title("Hint:"));
+            colored.push('\n');
+            colored.push_str("  ");
+            plain.push_str("Hint:\n  ");
+
+            colored.push_str(hint);
+            colored.push('\n');
+            plain.push_str(hint);
+            plain.push('\n');
         }
     }
 
-    fn push_done(&self, out: &mut String, state: &InstallState) {
+    fn push_done(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
         if let Some(duration) = state.duration {
-            out.push('\n');
-            out.push_str(&format!("Done in {}\n", format_duration(duration)));
+            colored.push('\n');
+            plain.push('\n');
+
+            let styled = format!("Done in {}", format_duration(duration));
+            colored.push_str(&self.theme.done(&styled));
+            colored.push('\n');
+            plain.push_str(&styled);
+            plain.push('\n');
+        }
+    }
+
+    fn render_step(&self, phase: &PhaseState, pending: &str, done: &str) -> StepLine {
+        match phase.status {
+            StepStatus::Pending => {
+                let text = format!("○ {pending}");
+                StepLine {
+                    colored: self.theme.pending(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Running => {
+                let text = format!("● {pending}");
+                StepLine {
+                    colored: self.theme.running(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Done => {
+                let text = format!("{CHECKMARK} {done}");
+                StepLine {
+                    colored: self.theme.success(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Failed => {
+                let text = format!("{CROSS} {pending}");
+                StepLine {
+                    colored: self.theme.failed(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Skipped => StepLine {
+                colored: format!("- {pending}"),
+                plain: format!("- {pending}"),
+            },
+        }
+    }
+
+    fn render_fetch_step(&self, phase: &PhaseState, pending: &str, done: &str) -> StepLine {
+        match phase.status {
+            StepStatus::Pending => {
+                let text = format!("○ {pending}");
+                StepLine {
+                    colored: self.theme.pending(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Running => {
+                let text = if phase.total > 0 {
+                    format!("● {pending} {}/{}", phase.done, phase.total)
+                } else {
+                    format!("● {pending}")
+                };
+                StepLine {
+                    colored: self.theme.running(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Done => {
+                let text = if phase.total > 0 {
+                    format!("{CHECKMARK} {done} {}/{}", phase.done, phase.total)
+                } else {
+                    format!("{CHECKMARK} {done}")
+                };
+                StepLine {
+                    colored: self.theme.success(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Failed => {
+                let text = format!("{CROSS} {pending}");
+                StepLine {
+                    colored: self.theme.failed(&text).into_owned(),
+                    plain: text,
+                }
+            }
+            StepStatus::Skipped => StepLine {
+                colored: format!("- {pending}"),
+                plain: format!("- {pending}"),
+            },
         }
     }
 }
 
-fn render_step(phase: &PhaseState, pending: &str, done: &str) -> String {
-    match phase.status {
-        StepStatus::Pending => format!("○ {pending}"),
-        StepStatus::Running => format!("● {pending}"),
-        StepStatus::Done => format!("{CHECKMARK} {done}"),
-        StepStatus::Failed => format!("{CROSS} {pending}"),
-        StepStatus::Skipped => format!("- {pending}"),
-    }
-}
-
-fn render_fetch_step(phase: &PhaseState, pending: &str, done: &str) -> String {
-    match phase.status {
-        StepStatus::Pending => format!("○ {pending}"),
-        StepStatus::Running => {
-            if phase.total > 0 {
-                format!("● {pending} {}/{}", phase.done, phase.total)
-            } else {
-                format!("● {pending}")
-            }
-        }
-        StepStatus::Done => {
-            if phase.total > 0 {
-                format!("{CHECKMARK} {done} {}/{}", phase.done, phase.total)
-            } else {
-                format!("{CHECKMARK} {done}")
-            }
-        }
-        StepStatus::Failed => format!("{CROSS} {pending}"),
-        StepStatus::Skipped => format!("- {pending}"),
-    }
+/// A step line with both colored and plain variants.
+struct StepLine {
+    colored: String,
+    plain: String,
 }
 
 fn render_diff_bar(added: usize, removed: usize, width: usize) -> String {
@@ -256,10 +417,24 @@ mod tests {
     fn test_render_done() {
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&make_state());
-        assert!(frame.contains("orix install"));
-        assert!(frame.contains("Packages: +2 direct, +6 total"));
-        assert!(frame.contains("Registry: https://registry.npmmirror.com/"));
-        assert!(frame.contains("Done in 0.21s"));
+        assert!(frame.plain.contains("orix install"));
+        assert!(frame.plain.contains("Packages: +2 direct, +6 total"));
+        assert!(frame
+            .plain
+            .contains("Registry: https://registry.npmmirror.com/"));
+        assert!(frame.plain.contains("Done in 0.21s"));
+    }
+
+    #[test]
+    fn test_render_colored_has_ansi() {
+        let renderer = FrameRenderer::with_theme(80, Theme::always_color());
+        let frame = renderer.render(&make_state());
+        // Colored version should have ANSI codes
+        assert!(frame.frame.starts_with('\x1b'));
+        // Plain version should be identical to plain()
+        let plain_renderer = FrameRenderer::new(80);
+        let plain_frame = plain_renderer.render(&make_state());
+        assert_eq!(frame.plain, plain_frame.plain);
     }
 
     #[test]
@@ -287,7 +462,7 @@ mod tests {
 
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
-        assert!(frame.contains("● Fetching packages 4/6"));
+        assert!(frame.plain.contains("● Fetching packages 4/6"));
     }
 
     #[test]
@@ -299,7 +474,7 @@ mod tests {
 
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
-        assert!(frame.contains("● Resolving dependencies 3/8"));
+        assert!(frame.plain.contains("● Resolving dependencies 3/8"));
     }
 
     #[test]
@@ -311,7 +486,7 @@ mod tests {
 
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
-        assert!(frame.contains("\u{2713} Resolved dependencies 8/8"));
+        assert!(frame.plain.contains("\u{2713} Resolved dependencies 8/8"));
     }
 
     #[test]
@@ -324,8 +499,18 @@ mod tests {
 
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
-        assert!(frame.contains("Error:"));
-        assert!(frame.contains("Integrity check failed"));
-        assert!(frame.contains("Hint:"));
+        assert!(frame.plain.contains("Error:"));
+        assert!(frame.plain.contains("Integrity check failed"));
+        assert!(frame.plain.contains("Hint:"));
+    }
+
+    #[test]
+    fn test_row_count_uses_plain() {
+        let renderer = FrameRenderer::new(80);
+        let frame = renderer.render(&make_state());
+        // Row count should be based on plain text
+        assert!(frame.row_count >= 1);
+        // Plain should not contain ANSI
+        assert!(!frame.plain.contains("\x1b"));
     }
 }

@@ -471,6 +471,17 @@ impl DependencyGraph {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Compute a stable SHA-256 hash of the dependency graph.
+    /// Used by the linker fast path to detect whether node_modules layout is still valid.
+    pub fn graph_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        for pkg in self.inner.values() {
+            hasher.update(pkg.id.key().as_bytes());
+        }
+        hex::encode(hasher.finalize())
+    }
 }
 
 // ─── Platform utilities ─────────────────────────────────────────────────────────

@@ -82,6 +82,12 @@ impl Store {
     /// Import an extracted package directory into the store.
     /// Returns the set of files that were newly added.
     ///
+    /// Lock strategy (方案 A from design):
+    /// - **Outside lock**: walk source dir, read files, compute hashes, prepare index.
+    ///   This work is per-package and can run concurrently across packages.
+    /// - **Inside lock**: create missing CAS files, hardlink package files, write integrity.json.
+    ///   This is the minimal critical section to prevent duplicate work and race conditions.
+    ///
     /// - `pkg_id`: the package identity
     /// - `source_dir`: directory containing the extracted tarball contents
     /// - `depnodes`: transitive dependency keys that this package declares
@@ -100,35 +106,28 @@ impl Store {
             return Ok(HashSet::new());
         }
 
-        // Acquire exclusive write lock for the entire import operation.
-        // This prevents concurrent imports of the same package from racing to
-        // write integrity.json simultaneously.
-        let _guard = self.io_guard.write();
-
-        debug!(pkg = %pkg_id, source_dir = %source_dir.display(), "importing package into store");
-
-        // Re-check after acquiring lock (another thread may have imported it).
-        if self.contains(pkg_id) {
-            debug!(pkg = %pkg_id, "package already in store, skipping");
-            return Ok(HashSet::new());
+        // ── Phase 1: Compute hashes and prepare file index (outside lock) ──────────
+        // This can run concurrently for different packages without contention.
+        #[derive(Debug)]
+        struct FileEntry {
+            rel_path: PathBuf,
+            content: Vec<u8>,
+            hash: String,
+            dest_path: PathBuf,
+            content_path: PathBuf,
         }
 
-        let dest = self.package_path(pkg_id);
-        debug!(pkg = %pkg_id, dest = %dest.display(), "creating package directory");
-        fs::create_dir_all(&dest).context("failed to create package directory")?;
-
-        let mut new_files = HashSet::new();
-        let mut files_found = 0;
+        let mut file_index: Vec<FileEntry> = Vec::new();
         let mut errors = Vec::new();
 
         for entry in WalkDir::new(source_dir).into_iter().filter_map(|e| e.ok()) {
             if !entry.file_type().is_file() {
                 continue;
             }
-            let rel_path = entry
-                .path()
-                .strip_prefix(source_dir)
-                .with_context(|| format!("path {} not under source_dir", entry.path().display()))?;
+            let rel_path = match entry.path().strip_prefix(source_dir) {
+                Ok(p) => p.to_path_buf(),
+                Err(_) => continue,
+            };
             let rel_str = rel_path.display().to_string().replace('\\', "/");
 
             let content = match fs::read(entry.path()) {
@@ -139,94 +138,112 @@ impl Store {
                 }
             };
             let hash = sha256(&content);
+            let dest_path = self.package_path(pkg_id).join(&rel_str);
             let content_path = self.file_path(&hash);
 
-            let is_new = !content_path.exists();
-            if is_new {
-                if let Some(parent) = content_path.parent() {
+            file_index.push(FileEntry {
+                rel_path,
+                content,
+                hash,
+                dest_path,
+                content_path,
+            });
+        }
+
+        if file_index.is_empty() {
+            warn!(pkg = %pkg_id, "no files found in source directory, skipping import");
+            return Ok(HashSet::new());
+        }
+
+        // ── Phase 2: Write operations under lock ──────────────────────────────────
+        let _guard = self.io_guard.write();
+
+        // Re-check after acquiring lock (another thread may have imported it).
+        if self.contains(pkg_id) {
+            debug!(pkg = %pkg_id, "package already in store, skipping");
+            return Ok(HashSet::new());
+        }
+
+        debug!(pkg = %pkg_id, source_dir = %source_dir.display(), "importing package into store");
+
+        let dest = self.package_path(pkg_id);
+        fs::create_dir_all(&dest).context("failed to create package directory")?;
+
+        let mut new_files = HashSet::new();
+
+        for entry in &file_index {
+            // Create missing CAS files
+            if !entry.content_path.exists() {
+                if let Some(parent) = entry.content_path.parent() {
                     if let Err(e) = fs::create_dir_all(parent) {
                         errors.push(format!("failed to create dir {}: {}", parent.display(), e));
-                        continue;
+                    } else if let Err(e) = fs::write(&entry.content_path, &entry.content) {
+                        errors.push(format!(
+                            "failed to write CAS file {}: {}",
+                            entry.content_path.display(),
+                            e
+                        ));
                     }
-                }
-                if let Err(e) = fs::copy(entry.path(), &content_path) {
-                    errors.push(format!(
-                        "failed to copy to {}: {}",
-                        content_path.display(),
-                        e
-                    ));
-                    continue;
                 }
             }
 
-            let dest_file = dest.join(&rel_str);
-            if let Some(parent) = dest_file.parent() {
+            // Hardlink package file from CAS
+            if let Some(parent) = entry.dest_path.parent() {
                 if let Err(e) = fs::create_dir_all(parent) {
                     errors.push(format!(
                         "failed to create dest dir {}: {}",
                         parent.display(),
                         e
                     ));
-                    continue;
-                }
-            }
-
-            match fs::hard_link(&content_path, &dest_file) {
-                Ok(_) => {}
-                Err(e)
-                    if e.kind() == io::ErrorKind::NotFound
-                        || e.kind() == io::ErrorKind::PermissionDenied =>
-                {
-                    if let Err(e2) = fs::copy(entry.path(), &dest_file) {
-                        errors.push(format!(
-                            "failed to hard_link/copy {} -> {}: {}",
-                            content_path.display(),
-                            dest_file.display(),
-                            e2
-                        ));
+                } else {
+                    #[allow(clippy::incompatible_msrv)]
+                    match fs::hard_link(&entry.content_path, &entry.dest_path) {
+                        Ok(_) => {}
+                        Err(e)
+                            if e.kind() == io::ErrorKind::NotFound
+                                || e.kind() == io::ErrorKind::PermissionDenied
+                                || e.kind() == io::ErrorKind::CrossesDevices =>
+                        {
+                            if let Err(e2) = fs::copy(&entry.content_path, &entry.dest_path) {
+                                errors.push(format!(
+                                    "hard_link/copy failed {} -> {}: {}",
+                                    entry.content_path.display(),
+                                    entry.dest_path.display(),
+                                    e2
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            errors.push(format!(
+                                "hard_link failed {} -> {}: {}",
+                                entry.content_path.display(),
+                                entry.dest_path.display(),
+                                e
+                            ));
+                        }
                     }
                 }
-                Err(e) => {
-                    errors.push(format!(
-                        "hard_link failed {} -> {}: {}",
-                        content_path.display(),
-                        dest_file.display(),
-                        e
-                    ));
-                }
             }
 
-            if is_new {
-                new_files.insert(rel_path.to_path_buf());
-            }
-            files_found += 1;
+            new_files.insert(entry.rel_path.clone());
         }
 
         for err in &errors {
             warn!(pkg = %pkg_id, "{}", err);
         }
 
-        if files_found == 0 {
-            warn!(pkg = %pkg_id, "no files found in source directory, skipping import");
-            return Ok(HashSet::new());
-        }
+        debug!(pkg = %pkg_id, files = file_index.len(), new_files = new_files.len(), "imported package files");
 
-        debug!(pkg = %pkg_id, files = files_found, new_files = new_files.len(), "imported package files");
-
-        let mut files: Vec<(String, String)> = Vec::new();
-        for entry in WalkDir::new(&dest).into_iter().filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let rel_path = entry
-                .path()
-                .strip_prefix(&dest)
-                .with_context(|| format!("path {} not under dest", entry.path().display()))?;
-            let rel_str = rel_path.display().to_string().replace('\\', "/");
-            let content = fs::read(entry.path())?;
-            let hash = sha256(&content);
-            files.push((rel_str, format!("sha256:{}", hash)));
-        }
+        // Build integrity metadata from the file index
+        let files: Vec<(String, String)> = file_index
+            .into_iter()
+            .map(|e| {
+                (
+                    e.rel_path.display().to_string().replace('\\', "/"),
+                    format!("sha256:{}", e.hash),
+                )
+            })
+            .collect();
 
         let integrity = IntegrityMeta {
             name: pkg_id.name.to_string(),

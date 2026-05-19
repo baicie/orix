@@ -1498,8 +1498,10 @@ name = "orix-domain"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "semver",
  "serde",
+ "sha2 0.11.0",
  "thiserror",
  "url",
 ]

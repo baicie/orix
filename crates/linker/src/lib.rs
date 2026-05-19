@@ -17,6 +17,9 @@ pub struct LinkReport {
     pub symlinks_created: u64,
     /// Estimated bytes saved by hardlinking.
     pub bytes_saved: u64,
+    /// Whether the link phase was skipped because the layout was already valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
 }
 
 /// Report from validating a generated node_modules layout.

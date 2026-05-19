@@ -15,11 +15,14 @@
 //! - Progress UI goes to stderr, not stdout.
 //! - Final frame is rendered once (no intermediate flicker left behind).
 
+mod color;
 mod frame;
 mod interactive;
 mod plain;
 mod state;
 mod terminal;
+
+pub use color::{strip_ansi, ColorMode};
 
 pub use orix_core::reporter::InstallEvent;
 
@@ -38,13 +41,13 @@ pub enum Reporter {
 }
 
 impl Reporter {
-    /// Auto-select a reporter based on terminal capabilities.
+    /// Auto-select a reporter based on terminal capabilities and color mode.
     ///
     /// - TTY stderr -> `InteractiveReporter`
     /// - non-TTY or `--no-progress` -> `PlainReporter`
-    pub fn auto(no_progress: bool) -> Self {
+    pub fn auto(no_progress: bool, color_mode: ColorMode) -> Self {
         if !no_progress && stderr_is_terminal() {
-            Self::Interactive(InteractiveReporter::new().into())
+            Self::Interactive(InteractiveReporter::with_color(color_mode).into())
         } else {
             Self::Plain(PlainReporter::new())
         }

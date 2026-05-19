@@ -17,6 +17,8 @@ use orix_core::{
 mod errors;
 mod reporter;
 
+use reporter::ColorMode;
+
 #[derive(Parser)]
 #[command(name = "orix")]
 #[command(
@@ -206,6 +208,16 @@ enum ColorChoice {
     Auto,
 }
 
+impl From<ColorChoice> for ColorMode {
+    fn from(c: ColorChoice) -> Self {
+        match c {
+            ColorChoice::Always => ColorMode::Always,
+            ColorChoice::Never => ColorMode::Never,
+            ColorChoice::Auto => ColorMode::Auto,
+        }
+    }
+}
+
 fn init_tracing(level: &str) {
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("warn"));
     fmt().with_env_filter(filter).init();
@@ -265,7 +277,7 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
 
-                if let Err(e) = run_install(&dir, &install_opts).await {
+                if let Err(e) = run_install(&dir, &install_opts, cli.color.clone().into()).await {
                     eprintln!("{}", errors::format_error(&e, &dir));
                     std::process::exit(1);
                 }
@@ -291,7 +303,15 @@ async fn main() -> Result<()> {
                     pipeline::DepType::Production
                 };
 
-                let run = match run_add(&dir, &args.packages, dep_type, &install_opts).await {
+                let run = match run_add(
+                    &dir,
+                    &args.packages,
+                    dep_type,
+                    &install_opts,
+                    cli.color.clone().into(),
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("{}", errors::format_error(&e, &dir));
@@ -319,7 +339,15 @@ async fn main() -> Result<()> {
                 pipeline::DepType::Production
             };
 
-            let run = match run_add(&dir, &args.packages, dep_type, &opts).await {
+            let run = match run_add(
+                &dir,
+                &args.packages,
+                dep_type,
+                &opts,
+                cli.color.clone().into(),
+            )
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{}", errors::format_error(&e, &dir));
@@ -546,8 +574,12 @@ fn print_cache_clean(project_root: &std::path::Path, overrides: &ConfigOverrides
 }
 
 /// Run the install command and print the final install summary.
-async fn run_install(project_root: &std::path::Path, opts: &InstallOpts) -> Result<()> {
-    let run = run_with_progress(opts.clone(), |install_opts| async move {
+async fn run_install(
+    project_root: &std::path::Path,
+    opts: &InstallOpts,
+    color_mode: ColorMode,
+) -> Result<()> {
+    let run = run_with_progress(opts.clone(), color_mode, |install_opts| async move {
         install(project_root, &install_opts).await
     })
     .await?;
@@ -562,8 +594,9 @@ async fn run_add(
     packages: &[String],
     dep_type: pipeline::DepType,
     opts: &InstallOpts,
+    color_mode: ColorMode,
 ) -> Result<InstallRun> {
-    run_with_progress(opts.clone(), |install_opts| async move {
+    run_with_progress(opts.clone(), color_mode, |install_opts| async move {
         add(project_root, packages, dep_type, &install_opts).await
     })
     .await
@@ -574,7 +607,11 @@ struct InstallRun {
     rendered_summary: bool,
 }
 
-async fn run_with_progress<F, Fut>(mut opts: InstallOpts, operation: F) -> Result<InstallRun>
+async fn run_with_progress<F, Fut>(
+    mut opts: InstallOpts,
+    color_mode: ColorMode,
+    operation: F,
+) -> Result<InstallRun>
 where
     F: FnOnce(InstallOpts) -> Fut,
     Fut: std::future::Future<Output = Result<orix_core::InstallReport>>,
@@ -583,7 +620,7 @@ where
     opts.progress_tx = Some(tx.clone());
 
     let reporter = tokio::spawn(async move {
-        let mut reporter = reporter::Reporter::auto(false);
+        let mut reporter = reporter::Reporter::auto(false, color_mode);
         while let Some(event) = rx.recv().await {
             if let Err(e) = reporter.on_event(event) {
                 eprintln!("reporter error: {}", e);

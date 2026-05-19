@@ -15,6 +15,18 @@ use orix_store::Store;
 use super::{LayoutReport, LinkReport};
 
 const VIRTUAL_STORE_DIR: &str = ".orix";
+const METADATA_FILE: &str = "metadata.json";
+
+/// Marker written to node_modules/.orix/metadata.json after a successful link.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LinkerMarker {
+    /// Hash of the dependency graph at link time.
+    pub graph_hash: String,
+    /// Version of orix that performed the link.
+    pub orix_version: String,
+    /// Number of packages linked.
+    pub package_count: usize,
+}
 
 /// The linker creates the Orix virtual node_modules structure using hardlinks and symlinks.
 pub struct Linker {
@@ -31,6 +43,45 @@ impl Linker {
         }
     }
 
+    /// Path to the marker file.
+    fn marker_path(&self) -> PathBuf {
+        self.node_modules
+            .join(VIRTUAL_STORE_DIR)
+            .join(METADATA_FILE)
+    }
+
+    /// Read the linker marker, if it exists.
+    fn read_marker(&self) -> Option<LinkerMarker> {
+        let path = self.marker_path();
+        let content = fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Check whether the current layout marker matches the given graph hash.
+    /// Returns true if the marker exists and the graph hash matches.
+    pub fn is_layout_valid(&self, graph_hash: &str) -> bool {
+        match self.read_marker() {
+            Some(marker) => marker.graph_hash == graph_hash,
+            None => false,
+        }
+    }
+
+    /// Write the linker marker after a successful link.
+    fn write_marker(&self, graph_hash: &str, package_count: usize) -> Result<()> {
+        let marker = LinkerMarker {
+            graph_hash: graph_hash.to_string(),
+            orix_version: env!("CARGO_PKG_VERSION").to_string(),
+            package_count,
+        };
+        let json = serde_json::to_string_pretty(&marker)?;
+        let path = self.marker_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, json)?;
+        Ok(())
+    }
+
     /// Build the full node_modules layout from a dependency graph.
     /// Workspace packages (tarball is empty) are linked to their local source directories.
     pub fn link_graph(
@@ -38,12 +89,14 @@ impl Linker {
         graph: &DependencyGraph,
         direct_deps: &std::collections::HashSet<String>,
         workspace: Option<&orix_workspace::Workspace>,
+        graph_hash: &str,
     ) -> Result<LinkReport> {
         let mut report = LinkReport {
             hardlinked_files: 0,
             copied_files: 0,
             symlinks_created: 0,
             bytes_saved: 0,
+            skipped: None,
         };
 
         let virtual_store_dir = self.node_modules.join(VIRTUAL_STORE_DIR);
@@ -195,6 +248,9 @@ impl Linker {
                 report.symlinks_created += 1;
             }
         }
+
+        // Write marker after successful link
+        self.write_marker(graph_hash, graph.len())?;
 
         Ok(report)
     }
@@ -528,7 +584,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["react".to_string()]);
-        linker.link_graph(&graph, &direct_deps, None)?;
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
 
         let report = linker.validate_layout(&direct_deps)?;
 
@@ -571,7 +627,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["@scope/pkg".to_string()]);
-        linker.link_graph(&graph, &direct_deps, None)?;
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
 
         let report = linker.validate_layout(&direct_deps)?;
 
@@ -602,7 +658,7 @@ mod tests {
 
         let linker = Linker::new(store, temp.path().join("node_modules"));
         let direct_deps = HashSet::from(["@scope/parent".to_string()]);
-        linker.link_graph(&graph, &direct_deps, None)?;
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
 
         let report = linker.validate_layout(&direct_deps)?;
 

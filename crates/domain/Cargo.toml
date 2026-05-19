@@ -13,6 +13,8 @@ authors.workspace = true
 anyhow = { workspace = true }
 serde = { workspace = true }
 semver = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 
