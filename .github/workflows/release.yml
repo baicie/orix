@@ -21,8 +21,8 @@ jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
 
-  version-sync:
-    name: Version Sync
+  version-check:
+    name: Version Check
     needs: ci
     runs-on: ubuntu-latest
     steps:
@@ -34,30 +34,30 @@ jobs:
 
       - name: Extract version
         id: version
+        shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          VERSION="${VERSION#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Sync versions
-        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
-
-      - name: Commit version bump
+      - name: Check versions are synced
+        shell: bash
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add Cargo.toml npm/*/package.json
-          git diff --cached --quiet && echo "No changes" || git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+          node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
 
-      - name: Push changes
-        uses: ad-m/github-push-action@v0.6.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref_name }}
-          force: true
+          if ! git diff --exit-code -- Cargo.toml npm/*/package.json; then
+            echo "::error::Version files are not synced with tag v${{ steps.version.outputs.version }}."
+            echo "::error::Run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}, commit changes, then recreate the tag."
+            exit 1
+          fi
 
   build-linux:
     name: Build / ${{ matrix.target }}
-    needs: [ci, version-sync]
+    needs: [ci, version-check]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -111,7 +111,7 @@ jobs:
 
   build-windows:
     name: Build / x86_64-pc-windows-msvc
-    needs: [ci, version-sync]
+    needs: [ci, version-check]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -142,7 +142,7 @@ jobs:
 
   build-macos:
     name: Build / ${{ matrix.target }}
-    needs: [ci, version-sync]
+    needs: [ci, version-check]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
