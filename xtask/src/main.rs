@@ -126,7 +126,7 @@ enum Task {
     },
     /// Build, pack, and locally link npm packages for the current platform.
     ///
-    /// Copies the release binary into npm/<platform>/bin, packs the platform
+    /// Copies the release binary into `npm/<platform>/bin`, packs the platform
     /// package and the main package, then runs npm link for local CLI testing.
     NpmTest {
         /// Reuse target/release/orix instead of building it first.
@@ -288,7 +288,7 @@ fn find_npm() -> Result<String> {
                 }
             }
         }
-        return Ok("npm".to_string());
+        Ok("npm".to_string())
     } else {
         if let Ok(output) = Command::new("which").arg("npm").output() {
             if output.status.success() {
@@ -319,17 +319,29 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
     let npm = find_npm()?;
     let npm_str = npm.as_str();
     let platform = current_npm_platform()?;
-    let main_dir = Path::new("npm/main");
-    let platform_dir = Path::new("npm").join(platform.package_dir);
     let platform_package = format!("@orix/orix-{}", platform.package_dir);
+    let version = next_npm_test_version()?;
+    let npm_work_dir = Path::new("target").join("npm-test-work");
+    if npm_work_dir.exists() {
+        fs::remove_dir_all(&npm_work_dir)
+            .with_context(|| format!("failed to clean {}", npm_work_dir.display()))?;
+    }
+    copy_dir_recursive(Path::new("npm"), &npm_work_dir)?;
+    let main_dir = npm_work_dir.join("main");
+    let platform_dir = npm_work_dir.join(platform.package_dir);
 
     eprintln!("=== npm local test: {} ===", platform_package);
 
     if skip_build {
         eprintln!("[1/4] Reusing release binary (--skip-build)...");
+        eprintln!("  Note: existing binary may not report dev version {version}.");
     } else {
-        eprintln!("[1/4] Building release binary...");
-        run("cargo", ["build", "--release", "--package", "orix-cli"])?;
+        eprintln!("[1/4] Building release binary ({version})...");
+        run_with_env(
+            "cargo",
+            ["build", "--release", "--package", "orix-cli"],
+            [("ORIX_VERSION", version.as_str())],
+        )?;
     }
 
     let source_bin = Path::new("target/release").join(platform.binary_name);
@@ -339,6 +351,9 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
             source_bin.display()
         );
     }
+
+    eprintln!("[version] Synchronizing staged npm package versions to {version}...");
+    set_npm_package_versions(&npm_work_dir, &version)?;
 
     eprintln!("[2/4] Preparing platform npm package...");
     let package_bin_dir = platform_dir.join("bin");
@@ -372,20 +387,20 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
     let pack_dir_arg = pack_dir.to_string_lossy().into_owned();
     run_in_dir(
         &platform_dir,
-        npm_str.as_ref(),
+        npm_str,
         ["pack", "--pack-destination", pack_dir_arg.as_str()],
     )?;
     run_in_dir(
-        main_dir,
-        npm_str.as_ref(),
+        &main_dir,
+        npm_str,
         ["pack", "--pack-destination", pack_dir_arg.as_str()],
     )?;
 
     eprintln!("[4/4] Linking npm packages locally...");
-    run_in_dir(&platform_dir, npm_str.as_ref(), ["link"])?;
+    run_in_dir(&platform_dir, npm_str, ["link"])?;
     run_in_dir(
-        main_dir,
-        npm_str.as_ref(),
+        &main_dir,
+        npm_str,
         [
             "link",
             platform_package.as_str(),
@@ -393,7 +408,7 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
             "--package-lock=false",
         ],
     )?;
-    run_in_dir(main_dir, npm_str.as_ref(), ["link"])?;
+    run_in_dir(&main_dir, npm_str, ["link"])?;
 
     eprintln!("\n=== npm local test ready ===");
     eprintln!("  Packed tarballs: {}", pack_dir.display());
@@ -806,6 +821,149 @@ fn set_workspace_version(version: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_npm_package_versions(npm_root: &Path, version: &str) -> Result<()> {
+    for entry in fs::read_dir(npm_root).context("failed to read npm package directory")? {
+        let entry = entry.context("failed to read npm package entry")?;
+        if !entry
+            .file_type()
+            .context("failed to read npm package entry type")?
+            .is_dir()
+        {
+            continue;
+        }
+
+        let path = entry.path().join("package.json");
+        if !path.exists() {
+            continue;
+        }
+
+        update_npm_package_json_version(&path, version)?;
+    }
+
+    Ok(())
+}
+
+fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
+    fs::create_dir_all(dest).with_context(|| format!("failed to create {}", dest.display()))?;
+    for entry in
+        fs::read_dir(source).with_context(|| format!("failed to read {}", source.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", source.display()))?;
+        if entry.file_name() == "node_modules" {
+            continue;
+        }
+        let source_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if entry
+            .file_type()
+            .with_context(|| format!("failed to read type for {}", source_path.display()))?
+            .is_dir()
+        {
+            copy_dir_recursive(&source_path, &dest_path)?;
+        } else {
+            fs::copy(&source_path, &dest_path).with_context(|| {
+                format!(
+                    "failed to copy {} to {}",
+                    source_path.display(),
+                    dest_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn next_npm_test_version() -> Result<String> {
+    let date = local_yyyymmdd();
+    let counter_path = Path::new("target").join("npm-test-version-counter");
+    let next = read_next_dev_counter(&counter_path, &date)?;
+    if let Some(parent) = counter_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(&counter_path, format!("{date} {next}\n"))
+        .with_context(|| format!("failed to write {}", counter_path.display()))?;
+    Ok(format!("0.0.0-dev.{date}.{next}"))
+}
+
+fn read_next_dev_counter(path: &Path, date: &str) -> Result<u32> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(1);
+    };
+    let mut parts = content.split_whitespace();
+    let previous_date = parts.next().unwrap_or_default();
+    let previous_count = parts.next().and_then(|value| value.parse::<u32>().ok());
+
+    if previous_date == date {
+        Ok(previous_count.unwrap_or(0).saturating_add(1))
+    } else {
+        Ok(1)
+    }
+}
+
+fn local_yyyymmdd() -> String {
+    let date = time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .date();
+    format!(
+        "{:04}{:02}{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
+fn update_npm_package_json_version(path: &Path, version: &str) -> Result<()> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut in_optional_dependencies = false;
+    let mut changed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        let should_replace_version = trimmed.starts_with("\"version\":")
+            || (in_optional_dependencies && trimmed.starts_with("\"@orix/orix-"));
+        let next = if trimmed.starts_with("\"optionalDependencies\":") {
+            in_optional_dependencies = true;
+            line.to_string()
+        } else if in_optional_dependencies && trimmed.starts_with('}') {
+            in_optional_dependencies = false;
+            line.to_string()
+        } else if should_replace_version {
+            changed = true;
+            replace_json_string_value(line, version)
+        } else {
+            line.to_string()
+        };
+        lines.push(next);
+    }
+
+    if changed {
+        let mut new_content = lines.join("\n");
+        if content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        fs::write(path, new_content)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn replace_json_string_value(line: &str, value: &str) -> String {
+    let Some(colon) = line.find(':') else {
+        return line.to_string();
+    };
+    let suffix = if line.trim_end().ends_with(',') {
+        ","
+    } else {
+        ""
+    };
+    format!("{}: \"{}\"{}", &line[..colon], value, suffix)
+}
+
 /// Read `version` from the root Cargo.toml.
 fn read_cargo_toml_version() -> Result<String> {
     let content = std::fs::read_to_string("Cargo.toml").context("failed to read Cargo.toml")?;
@@ -1146,6 +1304,35 @@ where
     let args_str = args.join(" ");
     let status = Command::new(cmd)
         .args(&args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("failed to run {cmd} {args_str}"))?;
+
+    if !status.success() {
+        bail!("command failed: {cmd} {args_str}");
+    }
+
+    Ok(())
+}
+
+fn run_with_env<I, A, E, K, V>(cmd: &str, args: I, envs: E) -> Result<()>
+where
+    I: IntoIterator<Item = A>,
+    A: AsRef<std::ffi::OsStr>,
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<std::ffi::OsStr>,
+    V: AsRef<std::ffi::OsStr>,
+{
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned())
+        .collect();
+    let args_str = args.join(" ");
+    let status = Command::new(cmd)
+        .args(&args)
+        .envs(envs)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

@@ -5,8 +5,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use tracing::{debug, warn};
+use anyhow::{Context, Result};
+use tracing::{debug, trace, warn};
 use walkdir::WalkDir;
 
 use orix_domain::DependencyGraph;
@@ -61,9 +61,36 @@ impl Linker {
     /// Returns true if the marker exists and the graph hash matches.
     pub fn is_layout_valid(&self, graph_hash: &str) -> bool {
         match self.read_marker() {
-            Some(marker) => marker.graph_hash == graph_hash,
+            Some(marker) => marker.graph_hash == graph_hash && self.bin_shims_are_valid(),
             None => false,
         }
+    }
+
+    #[cfg(windows)]
+    fn bin_shims_are_valid(&self) -> bool {
+        let bin_dir = self.node_modules.join(".bin");
+        if !bin_dir.is_dir() {
+            return true;
+        }
+
+        WalkDir::new(&bin_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .all(|entry| {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "cmd") {
+                    return true;
+                }
+
+                path.with_extension("cmd").exists()
+            })
+    }
+
+    #[cfg(not(windows))]
+    fn bin_shims_are_valid(&self) -> bool {
+        true
     }
 
     /// Write the linker marker after a successful link.
@@ -128,7 +155,16 @@ impl Linker {
                             if let Some(parent) = top_link.parent() {
                                 fs::create_dir_all(parent)?;
                             }
-                            Self::create_symlink(&local_pkg.abs_path, &top_link)?;
+                            Self::create_dir_link(&local_pkg.abs_path, &top_link).with_context(
+                                || {
+                                    format!(
+                                        "failed to link workspace package {}: {} -> {}",
+                                        pkg.id.name,
+                                        top_link.display(),
+                                        local_pkg.abs_path.display()
+                                    )
+                                },
+                            )?;
                             report.symlinks_created += 1;
                         }
                         continue;
@@ -144,7 +180,7 @@ impl Linker {
             fs::create_dir_all(&pkg_dir)?;
 
             let store_files = self.store.package_files_path(&pkg.id);
-            debug!(pkg = %pkg_key, store = %store_files.display(), "linking package files");
+            trace!(pkg = %pkg_key, store = %store_files.display(), "linking package files");
             if store_files.exists() {
                 let mut hardlink_ok = 0;
                 let mut copy_ok = 0;
@@ -193,7 +229,7 @@ impl Linker {
                 }
                 report.hardlinked_files += hardlink_ok;
                 report.copied_files += copy_ok;
-                debug!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, "link summary");
+                trace!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, "link summary");
                 if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
                     warn!(pkg = %pkg_key, "no files found in store or no files were linked");
                 }
@@ -219,7 +255,17 @@ impl Linker {
                         if let Some(parent) = symlink_path.parent() {
                             fs::create_dir_all(parent)?;
                             let symlink_target = relative_path(parent, &target);
-                            Self::create_symlink(&symlink_target, &symlink_path)?;
+                            Self::create_dir_link(&symlink_target, &symlink_path).with_context(
+                                || {
+                                    format!(
+                                        "failed to link dependency {} for {}: {} -> {}",
+                                        dep_name,
+                                        pkg_key,
+                                        symlink_path.display(),
+                                        target.display()
+                                    )
+                                },
+                            )?;
                         }
                         report.symlinks_created += 1;
                     }
@@ -244,13 +290,28 @@ impl Linker {
                 if let Some(parent) = link.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                Self::create_symlink(&target, &link)?;
+                Self::create_dir_link(&target, &link).with_context(|| {
+                    format!(
+                        "failed to link direct dependency {}: {} -> {}",
+                        pkg.id.name,
+                        link.display(),
+                        target.display()
+                    )
+                })?;
                 report.symlinks_created += 1;
             }
         }
 
         // Write marker after successful link
         self.write_marker(graph_hash, graph.len())?;
+
+        debug!(
+            packages = graph.len(),
+            hardlinked_files = report.hardlinked_files,
+            copied_files = report.copied_files,
+            symlinks_created = report.symlinks_created,
+            "link completed"
+        );
 
         Ok(report)
     }
@@ -327,43 +388,126 @@ impl Linker {
             }
 
             // Global bin link: node_modules/.bin/<cmd> -> ../.orix/<pkg>/bin/<cmd>
-            // Only create if the source actually exists (bin_source exists means the file
-            // was either hardlinked or copied into the package directory).
-            if bin_source.exists() {
+            // Only create if the package-local bin copy exists.
+            if package_bin_dest.exists() {
                 let global_bin_link = global_bin_dir.join(&cmd_name);
                 if !global_bin_link.exists() {
-                    let relative_target = PathBuf::from("..")
-                        .join(VIRTUAL_STORE_DIR)
-                        .join(pkg_key)
-                        .join("bin")
-                        .join(&cmd_name);
-                    Self::create_symlink(&relative_target, &global_bin_link)?;
+                    if let Some(parent) = global_bin_link.parent() {
+                        fs::create_dir_all(parent).with_context(|| {
+                            format!(
+                                "failed to create global bin parent for {}: {}",
+                                cmd_name,
+                                parent.display()
+                            )
+                        })?;
+                    }
+                    let parent = global_bin_link.parent().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "global bin link has no parent: {}",
+                            global_bin_link.display()
+                        )
+                    })?;
+                    let relative_target = relative_path(parent, &package_bin_dest);
+                    Self::create_file_link(&relative_target, &global_bin_link).with_context(
+                        || {
+                            format!(
+                                "failed to link bin {} for {}: {} -> {}",
+                                cmd_name,
+                                pkg_key,
+                                global_bin_link.display(),
+                                package_bin_dest.display()
+                            )
+                        },
+                    )?;
                     report.symlinks_created += 1;
                 }
+
+                #[cfg(windows)]
+                Self::create_windows_cmd_shim(&global_bin_link, &package_bin_dest)?;
             }
         }
 
         Ok(())
     }
 
-    /// Create a symlink, falling back to junction on Windows when needed.
-    fn create_symlink(target: &Path, link: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    fn create_windows_cmd_shim(global_bin_link: &Path, package_bin_dest: &Path) -> io::Result<()> {
+        let shim_path = global_bin_link.with_extension("cmd");
+        if shim_path.exists() {
+            return Ok(());
+        }
+
+        let parent = shim_path.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "shim path has no parent")
+        })?;
+        fs::create_dir_all(parent)?;
+
+        let target = relative_path(parent, package_bin_dest);
+        let target = target.to_string_lossy().replace('/', "\\");
+        let script = format!("@ECHO off\r\nSETLOCAL\r\nnode \"%~dp0{}\" %*\r\n", target);
+
+        fs::write(shim_path, script)
+    }
+
+    /// Create a directory link, falling back to junction on Windows when needed.
+    fn create_dir_link(target: &Path, link: &Path) -> io::Result<()> {
         #[cfg(windows)]
         {
-            // Try symlink_dir first; if it fails due to permissions, try junction
             match std::os::windows::fs::symlink_dir(target, link) {
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                    // Try junction as fallback (doesn't require admin on modern Windows)
-                    Self::create_junction(target, link)
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    debug!(
+                        target = %target.display(),
+                        link = %link.display(),
+                        error = %e,
+                        "directory symlink failed; trying junction fallback"
+                    );
                 }
-                Err(e) => Err(e),
+            }
+
+            let absolute_target = Self::absolutize_link_target(target, link)?;
+            Self::create_junction(&absolute_target, link)
+        }
+        #[cfg(not(windows))]
+        {
+            std::os::unix::fs::symlink(target, link)
+        }
+    }
+
+    /// Create a file link for package binaries.
+    fn create_file_link(target: &Path, link: &Path) -> io::Result<()> {
+        #[cfg(windows)]
+        {
+            let absolute_target = Self::absolutize_link_target(target, link)?;
+            match fs::hard_link(&absolute_target, link) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    debug!(
+                        target = %absolute_target.display(),
+                        link = %link.display(),
+                        error = %e,
+                        "binary hardlink failed; copying file"
+                    );
+                    fs::copy(&absolute_target, link).map(|_| ())
+                }
             }
         }
         #[cfg(not(windows))]
         {
             std::os::unix::fs::symlink(target, link)
         }
+    }
+
+    #[cfg(windows)]
+    fn absolutize_link_target(target: &Path, link: &Path) -> io::Result<PathBuf> {
+        if target.is_absolute() {
+            return target.canonicalize();
+        }
+
+        let parent = link.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "link path has no parent")
+        })?;
+        parent.join(target).canonicalize()
     }
 
     /// Create a Windows junction point (directory symbolic link alternative).
@@ -386,7 +530,13 @@ impl Linker {
 
         match output {
             Ok(o) if o.status.success() => Ok(()),
-            Ok(o) => Err(io::Error::other(String::from_utf8_lossy(&o.stderr))),
+            Ok(o) => Err(io::Error::other(format!(
+                "failed to create junction {} -> {}: {}{}",
+                link.display(),
+                target.display(),
+                String::from_utf8_lossy(&o.stderr),
+                String::from_utf8_lossy(&o.stdout)
+            ))),
             Err(e) => Err(e),
         }
     }
@@ -413,7 +563,14 @@ impl Linker {
             fs::create_dir_all(parent)?;
         }
 
-        Self::create_symlink(local_source, &link_path)?;
+        Self::create_dir_link(local_source, &link_path).with_context(|| {
+            format!(
+                "failed to link local package {}: {} -> {}",
+                pkg_name,
+                link_path.display(),
+                local_source.display()
+            )
+        })?;
         Ok(1)
     }
 
@@ -571,6 +728,26 @@ mod tests {
         Ok(id)
     }
 
+    fn import_package_with_manifest(
+        store: &Store,
+        temp_root: &Path,
+        name: &str,
+        version: &str,
+        manifest: &str,
+    ) -> anyhow::Result<PackageId> {
+        let source = temp_root.join(format!("{}-{}", name.replace('/', "-"), version));
+        fs::create_dir_all(source.join("bin"))?;
+        fs::write(source.join("package.json"), manifest)?;
+        fs::write(source.join("index.js"), "module.exports = 1;\n")?;
+        fs::write(
+            source.join("bin").join("index.mjs"),
+            "#!/usr/bin/env node\n",
+        )?;
+        let id = pkg_id(name, version)?;
+        store.import_package(&id, &source, Vec::new(), None)?;
+        Ok(id)
+    }
+
     #[test]
     fn link_graph_creates_valid_layout_for_direct_and_transitive_deps() -> anyhow::Result<()> {
         let temp = tempfile::tempdir()?;
@@ -690,6 +867,101 @@ mod tests {
     }
 
     #[test]
+    fn link_graph_creates_parent_dirs_for_scoped_bin_names() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package_with_manifest(
+            &store,
+            temp.path(),
+            "@antfu/eslint-config",
+            "9.0.0",
+            r#"{"name":"@antfu/eslint-config","version":"9.0.0","bin":"./bin/index.mjs"}"#,
+        )?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package(
+            "@antfu/eslint-config",
+            "9.0.0",
+            Vec::new(),
+        )?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["@antfu/eslint-config".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join(".bin")
+            .join("@antfu")
+            .join("eslint-config")
+            .exists());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn link_graph_creates_windows_cmd_shim_for_bins() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package_with_manifest(
+            &store,
+            temp.path(),
+            "rollup",
+            "4.0.0",
+            r#"{"name":"rollup","version":"4.0.0","bin":{"rollup":"./bin/index.mjs"}}"#,
+        )?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("rollup", "4.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let shim = temp
+            .path()
+            .join("node_modules")
+            .join(".bin")
+            .join("rollup.cmd");
+        let content = fs::read_to_string(&shim)?;
+
+        assert!(shim.exists());
+        assert!(content.contains("node \"%~dp0"));
+        assert!(content.contains("rollup@4.0.0"));
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn layout_is_invalid_when_windows_bin_shim_is_missing() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let graph_hash = "same-graph";
+
+        fs::create_dir_all(temp.path().join("node_modules").join(".bin"))?;
+        fs::write(
+            temp.path().join("node_modules").join(".bin").join("rollup"),
+            "#!/usr/bin/env node\n",
+        )?;
+        linker.write_marker(graph_hash, 1)?;
+
+        assert!(!linker.is_layout_valid(graph_hash));
+
+        fs::write(
+            temp.path()
+                .join("node_modules")
+                .join(".bin")
+                .join("rollup.cmd"),
+            "@ECHO off\r\n",
+        )?;
+
+        assert!(linker.is_layout_valid(graph_hash));
+        Ok(())
+    }
+
+    #[test]
     fn unlink_removes_node_modules_directory() -> anyhow::Result<()> {
         let temp = tempfile::tempdir()?;
         let store = Store::open(temp.path().join("store"))?;
@@ -750,6 +1022,40 @@ mod tests {
         let created = linker.link_local_package("local-pkg", &source_dir)?;
 
         assert_eq!(created, 0); // Second call should not create again
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_absolutizes_relative_junction_target() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let target = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("dep@1.0.0")
+            .join("node_modules")
+            .join("dep");
+        let link = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("parent@1.0.0")
+            .join("node_modules")
+            .join("parent")
+            .join("node_modules")
+            .join("dep");
+        fs::create_dir_all(&target)?;
+        let link_parent = link
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("test link should have a parent"))?;
+        fs::create_dir_all(link_parent)?;
+
+        let relative = relative_path(link_parent, &target);
+        let absolute = Linker::absolutize_link_target(&relative, &link)?;
+
+        assert!(absolute.is_absolute());
+        assert_eq!(absolute, target.canonicalize()?);
         Ok(())
     }
 }

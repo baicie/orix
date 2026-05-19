@@ -181,7 +181,7 @@ impl InstallState {
                 self.removed = removed;
                 self.resolve.status = StepStatus::Done;
                 self.resolve.done = total;
-                self.resolve.total = total;
+                self.resolve.total = self.resolve.total.max(total);
             }
 
             InstallEvent::FetchProgress {
@@ -348,6 +348,26 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_resolved_preserves_discovered_total() {
+        let mut state = InstallState::default();
+        state.apply(InstallEvent::ResolveProgress {
+            done: 1000,
+            total: 1600,
+            package: Some("last-scanned-package".to_string()),
+        });
+        state.apply(InstallEvent::Resolved {
+            direct: 10,
+            total: 1000,
+            added: 1000,
+            removed: 0,
+        });
+
+        assert_eq!(state.resolve.status, StepStatus::Done);
+        assert_eq!(state.resolve.done, 1000);
+        assert_eq!(state.resolve.total, 1600);
+    }
+
+    #[test]
     fn test_apply_fetch_progress() {
         let mut state = InstallState::default();
         state.apply(InstallEvent::FetchProgress {
@@ -365,6 +385,20 @@ mod tests {
             package: Some("lodash".to_string()),
         });
         assert_eq!(state.fetch.status, StepStatus::Done);
+    }
+
+    #[test]
+    fn test_apply_resolve_progress_preserves_large_counts() {
+        let mut state = InstallState::default();
+        state.apply(InstallEvent::ResolveProgress {
+            done: 1001,
+            total: 1200,
+            package: Some("large-graph-package".to_string()),
+        });
+
+        assert_eq!(state.resolve.status, StepStatus::Running);
+        assert_eq!(state.resolve.done, 1001);
+        assert_eq!(state.resolve.total, 1200);
     }
 
     #[test]

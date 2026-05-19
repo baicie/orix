@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::color::{no_color_env, ColorMode, Theme};
 use super::frame::{FrameRenderer, RenderedFrame};
-use super::state::{InstallState, StepStatus};
+use super::state::InstallState;
 use super::terminal::{stderr_is_terminal, terminal_width, LiveTerminal};
 use orix_core::reporter::InstallEvent;
 
@@ -87,16 +87,10 @@ impl InteractiveReporter {
     fn render(&mut self, force: bool) -> io::Result<()> {
         let now = Instant::now();
 
-        // Skip throttle when any phase is actively running so the user sees live progress.
-        let any_running = matches!(self.state.resolve.status, StepStatus::Running)
-            || matches!(self.state.fetch.status, StepStatus::Running)
-            || matches!(self.state.link.status, StepStatus::Running);
-
         let now_terminal = self.state.finished || self.state.failed;
         let transitioning_to_terminal = now_terminal && !self.rendered_terminal_state;
 
         if !force
-            && !any_running
             && !transitioning_to_terminal
             && now.duration_since(self.last_render_at) < self.min_render_interval
         {

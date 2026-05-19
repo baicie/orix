@@ -3,7 +3,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use crossterm::{
-    cursor::{Hide, MoveDown, MoveToColumn, MoveUp, Show},
+    cursor::{Hide, RestorePosition, SavePosition, Show},
     queue,
     terminal::{self, Clear, ClearType},
 };
@@ -37,6 +37,8 @@ pub struct LiveTerminal<W: Write> {
     last_rows: usize,
     /// Whether the cursor has been hidden.
     hidden_cursor: bool,
+    /// Whether the first frame position has been saved.
+    saved_position: bool,
 }
 
 impl<W: Write> LiveTerminal<W> {
@@ -46,6 +48,7 @@ impl<W: Write> LiveTerminal<W> {
             writer,
             last_rows: 0,
             hidden_cursor: false,
+            saved_position: false,
         }
     }
 
@@ -80,25 +83,18 @@ impl<W: Write> LiveTerminal<W> {
     }
 
     fn clear_previous(&mut self, columns: usize) -> io::Result<()> {
-        if self.last_rows == 0 || columns == 0 {
+        if columns == 0 {
             return Ok(());
         }
 
-        queue!(self.writer, MoveUp(self.last_rows as u16), MoveToColumn(0))?;
-
-        for row in 0..self.last_rows {
-            queue!(self.writer, Clear(ClearType::CurrentLine))?;
-
-            if row + 1 < self.last_rows {
-                queue!(self.writer, MoveDown(1), MoveToColumn(0))?;
-            }
+        if !self.saved_position {
+            queue!(self.writer, SavePosition)?;
+            self.saved_position = true;
+            return Ok(());
         }
 
-        queue!(
-            self.writer,
-            MoveUp(self.last_rows.saturating_sub(1) as u16),
-            MoveToColumn(0)
-        )?;
+        queue!(self.writer, RestorePosition)?;
+        queue!(self.writer, Clear(ClearType::FromCursorDown))?;
         self.writer.flush()?;
 
         Ok(())
@@ -179,14 +175,11 @@ mod tests {
 
         let output = String::from_utf8(terminal.writer.clone())
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let save = SavePosition.to_string();
+        let restore_and_clear = format!("{}{}", RestorePosition, Clear(ClearType::FromCursorDown));
         assert!(
-            output.contains(&format!(
-                "{}{}{}",
-                MoveUp(2),
-                MoveToColumn(0),
-                Clear(ClearType::CurrentLine)
-            )),
-            "second render should move back to the previous frame before clearing; output={output:?}"
+            output.contains(&save) && output.contains(&restore_and_clear),
+            "second render should restore the first frame position and clear downward; output={output:?}"
         );
 
         Ok(())

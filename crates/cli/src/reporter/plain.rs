@@ -1,6 +1,7 @@
 //! Plain text reporter for CI and non-TTY environments.
 
 use std::io::{self, Write};
+use std::time::{Duration, Instant};
 
 use orix_core::reporter::{InstallEvent, InstallPhase, LockfileStatus};
 
@@ -8,6 +9,8 @@ use orix_core::reporter::{InstallEvent, InstallPhase, LockfileStatus};
 /// Suitable for CI logs and non-interactive terminals.
 pub struct PlainReporter {
     writer: io::Stderr,
+    resolve_progress: ProgressThrottle,
+    fetch_progress: ProgressThrottle,
 }
 
 impl PlainReporter {
@@ -15,6 +18,8 @@ impl PlainReporter {
     pub fn new() -> Self {
         Self {
             writer: io::stderr(),
+            resolve_progress: ProgressThrottle::default(),
+            fetch_progress: ProgressThrottle::default(),
         }
     }
 
@@ -56,27 +61,18 @@ impl PlainReporter {
             }
 
             InstallEvent::ResolveProgress { done, total, .. } => {
-                writeln!(self.writer, "resolving packages: {done}/{total}")?;
+                if self.resolve_progress.should_emit(done, total) {
+                    writeln!(self.writer, "resolving packages: {done}/{total}")?;
+                }
             }
 
             InstallEvent::FetchProgress { done, total, .. } => {
-                writeln!(self.writer, "fetching packages: {done}/{total}")?;
-            }
-
-            InstallEvent::PackageFetched {
-                name,
-                version,
-                cached,
-            } => {
-                let version = version.unwrap_or_default();
-                let cached = if cached { " (cached)" } else { "" };
-
-                if version.is_empty() {
-                    writeln!(self.writer, "fetched {name}{cached}")?;
-                } else {
-                    writeln!(self.writer, "fetched {name}@{version}{cached}")?;
+                if self.fetch_progress.should_emit(done, total) {
+                    writeln!(self.writer, "fetching packages: {done}/{total}")?;
                 }
             }
+
+            InstallEvent::PackageFetched { .. } => {}
 
             InstallEvent::PhaseFinished { phase } => {
                 writeln!(self.writer, "finished {}", phase_label(phase))?;
@@ -160,6 +156,45 @@ impl Default for PlainReporter {
     }
 }
 
+struct ProgressThrottle {
+    last_done: usize,
+    last_emit: Option<Instant>,
+    step: usize,
+    min_interval: Duration,
+}
+
+impl Default for ProgressThrottle {
+    fn default() -> Self {
+        Self {
+            last_done: 0,
+            last_emit: None,
+            step: 100,
+            min_interval: Duration::from_secs(1),
+        }
+    }
+}
+
+impl ProgressThrottle {
+    fn should_emit(&mut self, done: usize, total: usize) -> bool {
+        let now = Instant::now();
+        let is_first = self.last_emit.is_none();
+        let is_complete = total > 0 && done >= total;
+        let crossed_step = done >= self.last_done.saturating_add(self.step);
+        let interval_elapsed = self
+            .last_emit
+            .map(|last| now.duration_since(last) >= self.min_interval)
+            .unwrap_or(true);
+
+        if is_first || is_complete || crossed_step || interval_elapsed {
+            self.last_done = done;
+            self.last_emit = Some(now);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 fn phase_index(phase: InstallPhase) -> usize {
     match phase {
         InstallPhase::Resolve => 1,
@@ -203,5 +238,16 @@ mod tests {
             phase_label(InstallPhase::Scripts),
             "running lifecycle scripts"
         );
+    }
+
+    #[test]
+    fn progress_throttle_emits_first_steps_and_completion() {
+        let mut throttle = ProgressThrottle::default();
+
+        assert!(throttle.should_emit(0, 1000));
+        assert!(!throttle.should_emit(1, 1000));
+        assert!(throttle.should_emit(100, 1000));
+        assert!(!throttle.should_emit(150, 1000));
+        assert!(throttle.should_emit(1000, 1000));
     }
 }

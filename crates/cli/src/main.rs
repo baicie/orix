@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use tokio::sync::mpsc;
-use tracing;
 
 use orix_core::{
     add, cache_clean_with_overrides, cache_path_with_overrides, deploy, export_pnpm_lockfile,
@@ -23,7 +22,7 @@ use reporter::ColorMode;
 #[derive(Parser)]
 #[command(name = "orix")]
 #[command(
-    version,
+    version = option_env!("ORIX_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
     about = "Fast, disk-space efficient package manager written in Rust"
 )]
 struct Cli {
@@ -245,7 +244,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let no_progress = cli.no_progress || log_handle.console_enabled();
+    let no_progress = cli.no_progress || cli.debug || log_handle.console_enabled();
 
     #[allow(clippy::cmp_owned)]
     let dir = if cli.dir == PathBuf::from(".") {

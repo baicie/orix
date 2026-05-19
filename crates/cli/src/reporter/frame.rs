@@ -149,7 +149,7 @@ impl FrameRenderer {
     }
 
     fn push_phases(&self, colored: &mut String, plain: &mut String, state: &InstallState) {
-        let resolve_line = self.render_fetch_step(
+        let resolve_line = self.render_resolve_step(
             &state.resolve,
             "Resolving dependencies",
             "Resolved dependencies",
@@ -345,6 +345,21 @@ impl FrameRenderer {
             },
         }
     }
+
+    fn render_resolve_step(&self, phase: &PhaseState, pending: &str, done: &str) -> StepLine {
+        if phase.status == StepStatus::Done && phase.total > phase.done && phase.done > 0 {
+            let text = format!(
+                "{CHECKMARK} {done} {} packages ({} scanned)",
+                phase.done, phase.total
+            );
+            return StepLine {
+                colored: self.theme.success(&text).into_owned(),
+                plain: text,
+            };
+        }
+
+        self.render_fetch_step(phase, pending, done)
+    }
 }
 
 /// A step line with both colored and plain variants.
@@ -487,6 +502,20 @@ mod tests {
         let renderer = FrameRenderer::new(80);
         let frame = renderer.render(&state);
         assert!(frame.plain.contains("\u{2713} Resolved dependencies 8/8"));
+    }
+
+    #[test]
+    fn test_render_resolve_done_with_scanned_total() {
+        let mut state = make_state();
+        state.resolve.status = StepStatus::Done;
+        state.resolve.done = 1000;
+        state.resolve.total = 1600;
+
+        let renderer = FrameRenderer::new(80);
+        let frame = renderer.render(&state);
+        assert!(frame
+            .plain
+            .contains("\u{2713} Resolved dependencies 1000 packages (1600 scanned)"));
     }
 
     #[test]

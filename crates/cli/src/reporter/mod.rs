@@ -30,11 +30,13 @@ use std::io;
 
 use interactive::InteractiveReporter;
 use plain::PlainReporter;
+#[cfg(not(windows))]
 use terminal::stderr_is_terminal;
 
 /// Unified reporter enum, dispatching to the appropriate implementation.
 pub enum Reporter {
     /// Live-updating TTY reporter using crossterm.
+    #[allow(dead_code)]
     Interactive(Box<InteractiveReporter>),
     /// One-line-per-event plain text reporter for CI.
     Plain(PlainReporter),
@@ -46,10 +48,20 @@ impl Reporter {
     /// - TTY stderr -> `InteractiveReporter`
     /// - non-TTY or `--no-progress` -> `PlainReporter`
     pub fn auto(no_progress: bool, color_mode: ColorMode) -> Self {
-        if !no_progress && stderr_is_terminal() {
-            Self::Interactive(InteractiveReporter::with_color(color_mode).into())
-        } else {
+        #[cfg(windows)]
+        {
+            let _ = no_progress;
+            let _ = color_mode;
             Self::Plain(PlainReporter::new())
+        }
+
+        #[cfg(not(windows))]
+        {
+            if !no_progress && stderr_is_terminal() {
+                Self::Interactive(InteractiveReporter::with_color(color_mode).into())
+            } else {
+                Self::Plain(PlainReporter::new())
+            }
         }
     }
 

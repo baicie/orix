@@ -184,7 +184,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn package_metadata_ignores_legacy_array_engines() {
+    fn package_metadata_ignores_legacy_array_engines() -> anyhow::Result<()> {
         let metadata: PackageMetadata = serde_json::from_str(
             r#"{
                 "name": "jsdom",
@@ -192,14 +192,14 @@ mod tests {
                 "engines": ["v8", "ejs", "node", "rhino"],
                 "dist": { "tarball": "https://registry.example/jsdom.tgz" }
             }"#,
-        )
-        .expect("legacy engines array should deserialize");
+        )?;
 
         assert!(metadata.engines.is_none());
+        Ok(())
     }
 
     #[test]
-    fn package_metadata_reads_node_engine_object() {
+    fn package_metadata_reads_node_engine_object() -> anyhow::Result<()> {
         let metadata: PackageMetadata = serde_json::from_str(
             r#"{
                 "name": "jsdom",
@@ -207,17 +207,17 @@ mod tests {
                 "engines": { "node": "^20.19.0 || ^22.12.0 || >=24.0.0" },
                 "dist": { "tarball": "https://registry.example/jsdom.tgz" }
             }"#,
-        )
-        .expect("engine object should deserialize");
+        )?;
 
         assert_eq!(
             metadata.engines.and_then(|engines| engines.node),
             Some("^20.19.0 || ^22.12.0 || >=24.0.0".to_string())
         );
+        Ok(())
     }
 
     #[test]
-    fn package_metadata_works_without_dist() {
+    fn package_metadata_works_without_dist() -> anyhow::Result<()> {
         // Some abbreviated packument versions may omit dist on optional deps.
         let metadata: PackageMetadata = serde_json::from_str(
             r#"{
@@ -227,14 +227,14 @@ mod tests {
                     "fsevents": "2.3.0"
                 }
             }"#,
-        )
-        .expect("metadata without dist should deserialize");
+        )?;
 
         assert!(metadata.dist.is_none());
+        Ok(())
     }
 
     #[test]
-    fn package_metadata_deserializes_bin_shorthand_string() {
+    fn package_metadata_deserializes_bin_shorthand_string() -> anyhow::Result<()> {
         // npm allows "bin": "./path/to/bin.js" as shorthand.
         let metadata: PackageMetadata = serde_json::from_str(
             r#"{
@@ -243,16 +243,20 @@ mod tests {
                 "bin": "./bin/babel-parser.js",
                 "dist": { "tarball": "https://registry.example/babel-parser.tgz" }
             }"#,
-        )
-        .expect("bin shorthand string should deserialize");
+        )?;
 
         assert_eq!(metadata.bin.len(), 1);
-        let (_, path) = metadata.bin.iter().next().unwrap();
+        let (_, path) = metadata
+            .bin
+            .iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("bin entry should exist"))?;
         assert_eq!(path, "./bin/babel-parser.js");
+        Ok(())
     }
 
     #[test]
-    fn package_metadata_ignores_unknown_fields() {
+    fn package_metadata_ignores_unknown_fields() -> anyhow::Result<()> {
         // Unknown fields must be silently ignored (serde default behavior).
         let metadata: PackageMetadata = serde_json::from_str(
             r#"{
@@ -263,10 +267,10 @@ mod tests {
                 "anotherUnknown": { "nested": true },
                 "playwrightMagicField": "value"
             }"#,
-        )
-        .expect("unknown fields should be silently ignored");
+        )?;
 
         assert_eq!(metadata.name, "some-pkg");
         assert_eq!(metadata.version, "1.0.0");
+        Ok(())
     }
 }

@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "commonjs",
   "bin": {
-    "orix": "./bin/orix.js"
+    "orix": "./bin/orix.js",
+    "oi": "./bin/orix.js"
   },
   "files": [
     "bin",

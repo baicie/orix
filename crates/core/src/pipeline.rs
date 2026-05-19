@@ -672,8 +672,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 send_event(
                     &install_progress_tx,
                     InstallEvent::ResolveProgress {
-                        done: event.discovered,
-                        total: event.resolved,
+                        done: event.resolved,
+                        total: event.discovered,
                         package: Some(event.id.to_string()),
                     },
                 );
@@ -876,29 +876,62 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .cloned()
         .collect();
 
+    let graph_hash = graph.graph_hash();
     let linker = Linker::new(store.clone(), config.node_modules_dir());
-    if let Err(e) = linker.unlink() {
-        return Err(link_error(
-            &opts.progress_tx,
-            format!("failed to clean old node_modules: {e}"),
-        ));
-    }
+    let layout_is_valid = linker.is_layout_valid(&graph_hash)
+        && linker
+            .validate_layout(&direct_deps)
+            .with_context(|| "failed to validate existing node_modules layout")?
+            .is_ok();
+    let link_report = if layout_is_valid {
+        LinkReport {
+            hardlinked_files: 0,
+            copied_files: 0,
+            symlinks_created: 0,
+            bytes_saved: 0,
+            skipped: Some("node_modules layout already valid".to_string()),
+        }
+    } else {
+        if let Err(e) = linker.unlink() {
+            return Err(link_error(
+                &opts.progress_tx,
+                format!("failed to clean old node_modules: {e}"),
+            ));
+        }
 
-    let link_report = linker.link_graph(
-        &graph,
-        &direct_deps,
-        workspace.as_ref(),
-        &graph.graph_hash(),
-    );
-    let link_report = match link_report {
-        Ok(r) => r,
-        Err(e) => return Err(link_error(&opts.progress_tx, e.to_string())),
+        let link_report = linker.link_graph(&graph, &direct_deps, workspace.as_ref(), &graph_hash);
+        match link_report {
+            Ok(r) => r,
+            Err(e) => return Err(link_error(&opts.progress_tx, e.to_string())),
+        }
     };
 
     if let Some(ref ws) = workspace {
         for ws_pkg in &ws.packages {
             let nm_dir = ws_pkg.abs_path.join("node_modules");
             let pkg_linker = Linker::new(store.clone(), nm_dir.clone());
+            let pkg_deps: HashSet<String> = ws_pkg
+                .manifest
+                .dependencies
+                .keys()
+                .chain(ws_pkg.manifest.dev_dependencies.keys())
+                .chain(ws_pkg.manifest.optional_dependencies.keys())
+                .cloned()
+                .collect();
+            let layout_is_valid = pkg_linker.is_layout_valid(&graph_hash)
+                && pkg_linker
+                    .validate_layout(&pkg_deps)
+                    .with_context(|| {
+                        format!(
+                            "failed to validate existing node_modules layout for {}",
+                            ws_pkg.manifest.name.as_deref().unwrap_or("?")
+                        )
+                    })?
+                    .is_ok();
+            if layout_is_valid {
+                continue;
+            }
+
             if let Err(e) = pkg_linker.unlink() {
                 return Err(link_error(
                     &opts.progress_tx,
@@ -910,17 +943,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 ));
             }
 
-            let pkg_deps: HashSet<String> = ws_pkg
-                .manifest
-                .dependencies
-                .keys()
-                .chain(ws_pkg.manifest.dev_dependencies.keys())
-                .chain(ws_pkg.manifest.optional_dependencies.keys())
-                .cloned()
-                .collect();
-
             if let Err(e) =
-                pkg_linker.link_graph(&graph, &pkg_deps, workspace.as_ref(), &graph.graph_hash())
+                pkg_linker.link_graph(&graph, &pkg_deps, workspace.as_ref(), &graph_hash)
             {
                 return Err(link_error(
                     &opts.progress_tx,

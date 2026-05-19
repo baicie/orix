@@ -3,6 +3,8 @@
 #![deny(clippy::unwrap_used, clippy::field_reassign_with_default)]
 
 use std::env;
+#[cfg(windows)]
+use std::path::Component;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -92,9 +94,7 @@ impl Config {
             #[allow(clippy::expect_used)]
             registry: Url::parse("https://registry.npmjs.org/")
                 .expect("default registry URL is always valid"),
-            store_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".orix/store/v1"),
+            store_dir: default_store_dir(&project_root),
             cache_dir: dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("orix/tarballs"),
@@ -264,6 +264,34 @@ fn first_env<const N: usize>(keys: [&str; N]) -> Option<String> {
     keys.into_iter().find_map(|key| env::var(key).ok())
 }
 
+fn default_store_dir(project_root: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(root) = volume_root(project_root) {
+            return root.join(".orix").join("store");
+        }
+    }
+
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".orix")
+        .join("store")
+}
+
+#[cfg(windows)]
+fn volume_root(path: &Path) -> Option<PathBuf> {
+    let mut components = path.components();
+    let Component::Prefix(prefix) = components.next()? else {
+        return None;
+    };
+
+    let mut root = PathBuf::from(prefix.as_os_str());
+    if matches!(components.next(), Some(Component::RootDir)) {
+        root.push("\\");
+    }
+    Some(root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +448,18 @@ mod tests {
         )?;
         let config = Config::load(temp.path())?;
         assert_eq!(config.allow_scripts, vec!["esbuild", "@swc/core"]);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn default_store_dir_uses_project_volume_on_windows() -> anyhow::Result<()> {
+        let project_root = PathBuf::from(r"D:\workspace\project");
+
+        assert_eq!(
+            default_store_dir(&project_root),
+            PathBuf::from(r"D:\.orix\store")
+        );
         Ok(())
     }
 }

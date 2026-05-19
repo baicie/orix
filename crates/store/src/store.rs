@@ -43,7 +43,11 @@ impl Clone for Store {
 impl Store {
     /// Open (or create) the store at the given root.
     pub fn open(root: PathBuf) -> Result<Self> {
-        let root = root.join(STORE_VERSION);
+        let root = if root.file_name().and_then(|name| name.to_str()) == Some(STORE_VERSION) {
+            root
+        } else {
+            root.join(STORE_VERSION)
+        };
         let files_root = root.join("files").join("sha256");
         let packages_root = root.join("packages");
 
@@ -575,6 +579,17 @@ mod tests {
 
         assert!(report.is_ok());
         assert_eq!(report.packages_checked, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn open_does_not_append_store_version_twice() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let versioned_root = temp.path().join("store").join(STORE_VERSION);
+        let store = Store::open(versioned_root.clone())?;
+
+        assert_eq!(store.root(), versioned_root.as_path());
+        assert!(versioned_root.join("packages").exists());
         Ok(())
     }
 
