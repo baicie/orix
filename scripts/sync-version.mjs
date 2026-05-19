@@ -40,7 +40,7 @@ const cargo = fs.readFileSync(cargoToml, "utf8");
 const updatedCargo = cargo
   .replace(/^version = "[\d.]+"$/m, `version = "${version}"`)
   .replace(
-    /^(orix-(?:cli|core|config|utils|domain|manifest|resolver|registry|fetcher|store|lockfile|linker|workspace) = \{ path = "[^"]+", version = )"[\d.]+"( })$/m,
+    /^(orix-(?:cli|core|config|utils|domain|manifest|resolver|registry|fetcher|store|lockfile|linker|workspace) = \{ path = "[^"]+", version = )"[\d.]+"( })$/gm,
     `$1"${version}"$2`
   );
 fs.writeFileSync(cargoToml, updatedCargo);

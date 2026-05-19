@@ -21,8 +21,8 @@ jobs:
   ci:
     uses: ./.github/workflows/reusable-ci.yml
 
-  version-check:
-    name: Version Check
+  version-sync:
+    name: Version Sync
     needs: ci
     runs-on: ubuntu-latest
     steps:
@@ -44,20 +44,19 @@ jobs:
           VERSION="${VERSION#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Check versions are synced
-        shell: bash
-        run: |
-          node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
+      - name: Sync versions
+        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
 
-          if ! git diff --exit-code -- Cargo.toml npm/*/package.json; then
-            echo "::error::Version files are not synced with tag v${{ steps.version.outputs.version }}."
-            echo "::error::Run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}, commit changes, then recreate the tag."
-            exit 1
-          fi
+      - name: Upload synced source
+        uses: actions/upload-artifact@v4
+        with:
+          name: synced-source
+          path: .
+          include-hidden-files: true
 
   build-linux:
     name: Build / ${{ matrix.target }}
-    needs: [ci, version-check]
+    needs: [ci, version-sync]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -71,7 +70,11 @@ jobs:
             npm_name: linux-arm64-gnu
             linker: aarch64-linux-gnu-gcc
     steps:
-      - uses: actions/checkout@v6
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -111,10 +114,14 @@ jobs:
 
   build-windows:
     name: Build / x86_64-pc-windows-msvc
-    needs: [ci, version-check]
+    needs: [ci, version-sync]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -142,7 +149,7 @@ jobs:
 
   build-macos:
     name: Build / ${{ matrix.target }}
-    needs: [ci, version-check]
+    needs: [ci, version-sync]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -155,7 +162,11 @@ jobs:
             npm_name: darwin-arm64
             runner: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -361,7 +372,11 @@ jobs:
     env:
       VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -502,7 +517,11 @@ jobs:
       VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - uses: actions/setup-node@v6
         with:
@@ -510,8 +529,8 @@ jobs:
           registry-url: https://registry.npmjs.org
           scope: "@orix"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v5
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
