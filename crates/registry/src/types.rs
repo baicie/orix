@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{de::IgnoredAny, Deserialize, Deserializer};
 
 /// The full packument for a package — metadata for all versions plus dist-tags.
 #[derive(Deserialize, Debug, Clone)]
@@ -36,7 +36,7 @@ pub struct PackageMetadata {
     #[serde(default)]
     pub peer_dependencies: HashMap<String, String>,
     /// Engine constraints.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_engines")]
     pub engines: Option<Engines>,
     /// Supported operating systems.
     #[serde(default)]
@@ -70,4 +70,59 @@ pub struct Dist {
     /// SHA1 shasum (legacy, superseded by integrity).
     #[serde(default)]
     pub shasum: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum EnginesField {
+    Object(Engines),
+    Other(IgnoredAny),
+}
+
+fn deserialize_engines<'de, D>(deserializer: D) -> Result<Option<Engines>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match Option::<EnginesField>::deserialize(deserializer)? {
+        Some(EnginesField::Object(engines)) => Some(engines),
+        Some(EnginesField::Other(_)) | None => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_metadata_ignores_legacy_array_engines() {
+        let metadata: PackageMetadata = serde_json::from_str(
+            r#"{
+                "name": "jsdom",
+                "version": "0.1.13",
+                "engines": ["v8", "ejs", "node", "rhino"],
+                "dist": { "tarball": "https://registry.example/jsdom.tgz" }
+            }"#,
+        )
+        .expect("legacy engines array should deserialize");
+
+        assert!(metadata.engines.is_none());
+    }
+
+    #[test]
+    fn package_metadata_reads_node_engine_object() {
+        let metadata: PackageMetadata = serde_json::from_str(
+            r#"{
+                "name": "jsdom",
+                "version": "27.3.0",
+                "engines": { "node": "^20.19.0 || ^22.12.0 || >=24.0.0" },
+                "dist": { "tarball": "https://registry.example/jsdom.tgz" }
+            }"#,
+        )
+        .expect("engine object should deserialize");
+
+        assert_eq!(
+            metadata.engines.and_then(|engines| engines.node),
+            Some("^20.19.0 || ^22.12.0 || >=24.0.0".to_string())
+        );
+    }
 }

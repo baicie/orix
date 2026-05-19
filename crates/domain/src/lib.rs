@@ -201,6 +201,8 @@ pub enum ConstraintKind {
     Exact(Version),
     /// Range constraint: "^1.0.0", ">=2.0", "*", etc.
     Range(VersionReq),
+    /// Npm OR range: "^9.0.3 || ^10.1.2".
+    AnyRange(Vec<VersionReq>),
     /// "latest" — resolves to the latest published version.
     Latest,
     /// Dist-tag: "next", "beta", etc.
@@ -209,6 +211,13 @@ pub enum ConstraintKind {
     Patch(PatchSpec),
     /// A catalog: protocol reference: "catalog:" or "catalog:name"
     Catalog(CatalogConstraint),
+    /// npm alias protocol: "npm:target@^1.0.0".
+    Alias {
+        /// The real package name to fetch from the registry.
+        package: PackageName,
+        /// The version constraint for the real package.
+        constraint: Box<VersionConstraint>,
+    },
 }
 
 /// A catalog: protocol specification (domain-level).
@@ -263,6 +272,25 @@ impl VersionConstraint {
             });
         }
 
+        // Handle npm alias protocol.
+        if let Some(rest) = raw.strip_prefix("npm:") {
+            let at_pos = rest.rfind('@').ok_or_else(|| {
+                anyhow::anyhow!(
+                    "invalid npm alias format: expected 'npm:name@version', got '{}'",
+                    raw
+                )
+            })?;
+            let package = PackageName::parse(&rest[..at_pos])?;
+            let constraint = VersionConstraint::parse(&rest[at_pos + 1..])?;
+            return Ok(Self {
+                raw,
+                kind: ConstraintKind::Alias {
+                    package,
+                    constraint: Box::new(constraint),
+                },
+            });
+        }
+
         if raw == "latest" {
             return Ok(Self {
                 raw: raw.clone(),
@@ -270,30 +298,42 @@ impl VersionConstraint {
             });
         }
 
-        if raw.starts_with('^')
-            || raw.starts_with('~')
-            || raw.starts_with('>')
-            || raw.starts_with('<')
-            || raw.starts_with('=')
-            || raw == "*"
-        {
-            let req = VersionReq::parse(&raw).map_err(|e| anyhow::anyhow!("{}", e))?;
-            Ok(Self {
+        if let Ok(v) = Version::parse(&raw) {
+            return Ok(Self {
                 raw: raw.clone(),
-                kind: ConstraintKind::Range(req),
-            })
-        } else {
-            match Version::parse(&raw) {
-                Ok(v) => Ok(Self {
-                    raw: raw.clone(),
-                    kind: ConstraintKind::Exact(v),
-                }),
-                Err(_) => Ok(Self {
-                    raw: raw.clone(),
-                    kind: ConstraintKind::Tag(raw.clone()),
-                }),
+                kind: ConstraintKind::Exact(v),
+            });
+        }
+
+        if raw.contains("||") {
+            let ranges: Result<Vec<_>, _> = raw
+                .split("||")
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(parse_npm_version_req)
+                .collect();
+
+            if let Ok(ranges) = ranges {
+                if !ranges.is_empty() {
+                    return Ok(Self {
+                        raw: raw.clone(),
+                        kind: ConstraintKind::AnyRange(ranges),
+                    });
+                }
             }
         }
+
+        if let Ok(req) = parse_npm_version_req(&raw) {
+            return Ok(Self {
+                raw: raw.clone(),
+                kind: ConstraintKind::Range(req),
+            });
+        }
+
+        Ok(Self {
+            raw: raw.clone(),
+            kind: ConstraintKind::Tag(raw.clone()),
+        })
     }
 
     fn parse_patch_spec(rest: &str) -> anyhow::Result<PatchSpec> {
@@ -344,6 +384,26 @@ impl VersionConstraint {
     pub fn is_patch(&self) -> bool {
         matches!(self.kind, ConstraintKind::Patch(_))
     }
+}
+
+fn parse_npm_version_req(raw: &str) -> Result<VersionReq, semver::Error> {
+    VersionReq::parse(raw).or_else(|_| {
+        let tokens = raw.split_whitespace().collect::<Vec<_>>();
+        let mut normalized_parts = Vec::with_capacity(tokens.len());
+        let mut i = 0;
+        while i < tokens.len() {
+            let token = tokens[i];
+            if matches!(token, ">" | ">=" | "<" | "<=" | "=") && i + 1 < tokens.len() {
+                normalized_parts.push(format!("{}{}", token, tokens[i + 1]));
+                i += 2;
+            } else {
+                normalized_parts.push(token.to_string());
+                i += 1;
+            }
+        }
+        let normalized = normalized_parts.join(", ");
+        VersionReq::parse(&normalized)
+    })
 }
 
 // ─── PackageId ─────────────────────────────────────────────────────────────────
@@ -958,6 +1018,40 @@ mod tests {
         let constraint = VersionConstraint::parse("next")?;
 
         assert!(matches!(constraint.kind, ConstraintKind::Tag(tag) if tag == "next"));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_treats_npm_x_range_as_range() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("1.6.x")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::Range(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_treats_npm_or_range_as_any_range() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("^9.0.3 || ^10.1.2")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::AnyRange(ranges) if ranges.len() == 2));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_normalizes_spaced_comparator_range() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse(">= 2.1.2 < 3.0.0")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::Range(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_supports_npm_alias() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("npm:wrap-ansi@^7.0.0")?;
+
+        assert!(
+            matches!(constraint.kind, ConstraintKind::Alias { package, .. } if package.as_str() == "wrap-ansi")
+        );
         Ok(())
     }
 

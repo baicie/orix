@@ -71,7 +71,8 @@ pub fn format_error(error: &anyhow::Error, project_root: &Path) -> String {
             "{} Failed to resolve dependencies.\n  \
                Check your package.json for typos and valid version ranges.\n  \
                {}",
-            EMOJI_ERR, top
+            EMOJI_ERR,
+            format_details(error)
         );
     }
 

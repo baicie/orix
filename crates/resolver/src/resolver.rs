@@ -58,6 +58,19 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
                 .with_context(|| format!("no version satisfies {}", constraint.raw))
         }
 
+        orix_domain::ConstraintKind::AnyRange(ranges) => {
+            let mut candidates: Vec<_> = packument
+                .versions
+                .keys()
+                .filter_map(|v| Version::parse(v).ok())
+                .filter(|v| ranges.iter().any(|range| range.matches(v)))
+                .collect();
+            candidates.sort();
+            candidates
+                .pop()
+                .with_context(|| format!("no version satisfies {}", constraint.raw))
+        }
+
         orix_domain::ConstraintKind::Latest => packument
             .dist_tags
             .get("latest")
@@ -77,6 +90,10 @@ fn select_version_impl(packument: &Packument, constraint: &VersionConstraint) ->
                 "catalog reference '{}' was not expanded — workspace catalog not available",
                 constraint.raw
             );
+        }
+
+        orix_domain::ConstraintKind::Alias { constraint, .. } => {
+            select_version_impl(packument, constraint)
         }
     }
 }
@@ -241,10 +258,15 @@ fn spawn_resolve_task(
     tasks.spawn(async move {
         let _permit: OwnedSemaphorePermit = semaphore.acquire_owned().await?;
 
+        let fetch_name = match &constraint.kind {
+            ConstraintKind::Alias { package, .. } => package.clone(),
+            _ => name.clone(),
+        };
+
         let packument = registry
-            .fetch_packument(&name)
+            .fetch_packument(&fetch_name)
             .await
-            .with_context(|| format!("failed to fetch packument for '{}'", name))?;
+            .with_context(|| format!("failed to fetch packument for '{}'", fetch_name))?;
 
         let version = select_version_impl(&packument, &constraint)
             .with_context(|| format!("failed to select version for '{}'", name))?;
@@ -645,6 +667,24 @@ mod tests {
         let resolver = resolver()?;
         let selected =
             resolver.select_version(&packument(), &VersionConstraint::parse("^1.0.0")?)?;
+        assert_eq!(selected.to_string(), "1.3.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_returns_highest_matching_or_range() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected = resolver
+            .select_version(&packument(), &VersionConstraint::parse("^1.0.0 || ^2.0.0")?)?;
+        assert_eq!(selected.to_string(), "2.0.0");
+        Ok(())
+    }
+
+    #[test]
+    fn select_version_supports_npm_alias_constraint() -> anyhow::Result<()> {
+        let resolver = resolver()?;
+        let selected =
+            resolver.select_version(&packument(), &VersionConstraint::parse("npm:demo@^1.0.0")?)?;
         assert_eq!(selected.to_string(), "1.3.0");
         Ok(())
     }

@@ -135,6 +135,10 @@ impl RegistryClient {
         let resp = self
             .http_client
             .get(url.clone())
+            .header(
+                reqwest::header::ACCEPT,
+                "application/vnd.npm.install-v1+json, application/json",
+            )
             .send()
             .await
             .map_err(|e| RegistryError::Network(e.to_string()))?;
@@ -150,10 +154,12 @@ impl RegistryClient {
             anyhow::bail!(RegistryError::Http(status.as_u16(), text));
         }
 
-        let packument: Packument = resp
-            .json()
+        let text = resp
+            .text()
             .await
             .map_err(|e| RegistryError::Other(e.to_string()))?;
+        let packument: Packument = serde_json::from_str(&text)
+            .map_err(|e| RegistryError::Other(format!("failed to decode packument JSON: {e}")))?;
 
         Ok(packument)
     }
