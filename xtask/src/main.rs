@@ -124,6 +124,18 @@ enum Task {
         #[arg(long)]
         output: Option<std::path::PathBuf>,
     },
+    /// Build, pack, and locally link npm packages for the current platform.
+    ///
+    /// Copies the release binary into npm/<platform>/bin, packs the platform
+    /// package and the main package, then runs npm link for local CLI testing.
+    NpmTest {
+        /// Reuse target/release/orix instead of building it first.
+        #[arg(long)]
+        skip_build: bool,
+        /// Output directory for npm pack tarballs (defaults to dist/npm-local).
+        #[arg(long, default_value = "dist/npm-local")]
+        pack_dir: PathBuf,
+    },
     /// Build a Windows MSI installer using WiX Toolset.
     ///
     /// Downloads WiX automatically if not found. Creates an MSI with
@@ -242,6 +254,10 @@ fn main() -> Result<()> {
             let version = resolve_version(version)?;
             run_dist(&version, preview, bins_only, output.as_deref())?;
         }
+        Task::NpmTest {
+            skip_build,
+            pack_dir,
+        } => run_npm_test(skip_build, &pack_dir)?,
         Task::Msi {
             version,
             preview,
@@ -252,6 +268,163 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Build, pack, and link the npm packages needed by this host platform.
+fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
+    let platform = current_npm_platform()?;
+    let main_dir = Path::new("npm/main");
+    let platform_dir = Path::new("npm").join(platform.package_dir);
+    let platform_package = format!("@orix/orix-{}", platform.package_dir);
+
+    eprintln!("=== npm local test: {} ===", platform_package);
+
+    if skip_build {
+        eprintln!("[1/4] Reusing release binary (--skip-build)...");
+    } else {
+        eprintln!("[1/4] Building release binary...");
+        run("cargo", ["build", "--release", "--package", "orix-cli"])?;
+    }
+
+    let source_bin = Path::new("target/release").join(platform.binary_name);
+    if !source_bin.exists() {
+        bail!(
+            "binary not found at {}. Build first or omit --skip-build.",
+            source_bin.display()
+        );
+    }
+
+    eprintln!("[2/4] Preparing platform npm package...");
+    let package_bin_dir = platform_dir.join("bin");
+    fs::create_dir_all(&package_bin_dir)
+        .with_context(|| format!("failed to create {}", package_bin_dir.display()))?;
+    let package_bin = package_bin_dir.join(platform.binary_name);
+    fs::copy(&source_bin, &package_bin).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            source_bin.display(),
+            package_bin.display()
+        )
+    })?;
+    set_executable(&package_bin)?;
+    eprintln!(
+        "  Copied {} -> {}",
+        source_bin.display(),
+        package_bin.display()
+    );
+
+    eprintln!("[3/4] Packing npm packages...");
+    if pack_dir.exists() {
+        fs::remove_dir_all(pack_dir)
+            .with_context(|| format!("failed to clean {}", pack_dir.display()))?;
+    }
+    fs::create_dir_all(pack_dir)
+        .with_context(|| format!("failed to create {}", pack_dir.display()))?;
+    let pack_dir = pack_dir
+        .canonicalize()
+        .with_context(|| format!("failed to resolve {}", pack_dir.display()))?;
+    let pack_dir_arg = pack_dir.to_string_lossy().into_owned();
+    run_in_dir(
+        &platform_dir,
+        "npm",
+        ["pack", "--pack-destination", pack_dir_arg.as_str()],
+    )?;
+    run_in_dir(
+        main_dir,
+        "npm",
+        ["pack", "--pack-destination", pack_dir_arg.as_str()],
+    )?;
+
+    eprintln!("[4/4] Linking npm packages locally...");
+    run_in_dir(&platform_dir, "npm", ["link"])?;
+    run_in_dir(
+        main_dir,
+        "npm",
+        [
+            "link",
+            platform_package.as_str(),
+            "--no-save",
+            "--package-lock=false",
+        ],
+    )?;
+    run_in_dir(main_dir, "npm", ["link"])?;
+
+    eprintln!("\n=== npm local test ready ===");
+    eprintln!("  Packed tarballs: {}", pack_dir.display());
+    eprintln!("  Linked CLI: @orix/orix -> {}", main_dir.display());
+    eprintln!("  Try: orix --version");
+    eprintln!(
+        "  Unlink: npm unlink -g @orix/orix && npm unlink -g {}",
+        platform_package
+    );
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NpmPlatform {
+    package_dir: &'static str,
+    binary_name: &'static str,
+}
+
+fn current_npm_platform() -> Result<NpmPlatform> {
+    let binary_name = if cfg!(windows) { "orix.exe" } else { "orix" };
+
+    let package_dir = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "darwin-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "darwin-x64"
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "win32-x64-msvc"
+    } else if cfg!(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_env = "musl"
+    )) {
+        "linux-x64-musl"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "linux-x64-gnu"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "linux-arm64-gnu"
+    } else {
+        bail!(
+            "unsupported npm platform: {} {} {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            std::env::consts::FAMILY
+        );
+    };
+
+    let platform = NpmPlatform {
+        package_dir,
+        binary_name,
+    };
+    let package_dir = Path::new("npm").join(platform.package_dir);
+    if !package_dir.join("package.json").exists() {
+        bail!(
+            "npm platform package not found at {}",
+            package_dir.display()
+        );
+    }
+
+    Ok(platform)
+}
+
+#[cfg(unix)]
+fn set_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)
+        .with_context(|| format!("failed to read metadata for {}", path.display()))?
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions)
+        .with_context(|| format!("failed to chmod +x {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn set_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -936,6 +1109,32 @@ where
 
     if !status.success() {
         bail!("command failed: {cmd} {args_str}");
+    }
+
+    Ok(())
+}
+
+fn run_in_dir<I, A>(dir: &Path, cmd: &str, args: I) -> Result<()>
+where
+    I: IntoIterator<Item = A>,
+    A: AsRef<std::ffi::OsStr>,
+{
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned())
+        .collect();
+    let args_str = args.join(" ");
+    let status = Command::new(cmd)
+        .args(&args)
+        .current_dir(dir)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("failed to run {cmd} {args_str} in {}", dir.display()))?;
+
+    if !status.success() {
+        bail!("command failed in {}: {cmd} {args_str}", dir.display());
     }
 
     Ok(())
