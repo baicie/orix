@@ -26,6 +26,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install cargo-machete
+        run: cargo install cargo-machete
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -43,3 +46,6 @@ jobs:
 
       - name: Docs
         run: cargo doc --workspace --all-features --no-deps
+
+      - name: Machete
+        run: cargo-machete --with-metadata

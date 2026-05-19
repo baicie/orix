@@ -17,7 +17,6 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 orix-domain = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros"] }
-futures = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]

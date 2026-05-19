@@ -169,32 +169,32 @@ fn main() -> Result<()> {
         Task::CiLocal => {
             eprintln!("=== Running CI checks locally ===\n");
 
-            eprintln!("[1/5] Format check...");
+            eprintln!("[1/6] Format check...");
             run("cargo", ["fmt", "--all", "--", "--check"])?;
 
-            eprintln!("\n[2/5] Check...");
+            eprintln!("\n[2/6] Check...");
             run(
                 "cargo",
                 ["check", "--workspace", "--all-targets", "--all-features"],
             )?;
 
-            eprintln!("\n[3/5] Clippy...");
-            run_clippy()?;
+            eprintln!("\n[3/6] Clippy (workspace)...");
+            run_clippy_full()?;
 
-            eprintln!("\n[4/5] Tests...");
+            eprintln!("\n[4/6] Tests...");
             run("cargo", ["test", "--workspace", "--all-features"])?;
 
-            eprintln!("\n[5/5] Docs...");
+            eprintln!("\n[5/6] Docs...");
             run(
                 "cargo",
                 ["doc", "--workspace", "--all-features", "--no-deps"],
             )?;
 
+            eprintln!("\n[6/6] Machete...");
+            run("cargo-machete", ["--with-metadata"])?;
+
             eprintln!("\n[bonus] Cargo deny...");
             run_optional("cargo-deny", &["check"])?;
-
-            eprintln!("\n[bonus] Cargo machete...");
-            run_optional("cargo-machete", &["--with-metadata"])?;
 
             eprintln!("\n=== All CI checks passed ===");
         }
@@ -286,7 +286,7 @@ fn run_release(
     } else {
         eprintln!("\n[1/5] Running checks...");
         run("cargo", ["fmt", "--all", "--", "--check"])?;
-        run_clippy()?;
+        run_clippy_full()?;
         run("cargo", ["test", "--workspace", "--all-features"])?;
     }
 
@@ -968,6 +968,21 @@ fn run_clippy() -> Result<()> {
             "unsafe_code",
             "-W",
             "missing_docs",
+        ],
+    )
+}
+
+fn run_clippy_full() -> Result<()> {
+    run(
+        "cargo",
+        [
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings",
         ],
     )
 }

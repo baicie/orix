@@ -213,6 +213,7 @@ mod tests {
     #[tokio::test]
     async fn registry_client_creates_with_custom_concurrency() {
         use crate::RegistryClient;
+        #[allow(clippy::expect_used)]
         let url = url::Url::parse("https://registry.npmjs.org/").expect("valid url");
         let client = RegistryClient::with_concurrency(url, 20);
         let _ = client.clone();

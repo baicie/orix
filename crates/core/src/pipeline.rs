@@ -298,8 +298,6 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
 
     // Phase duration tracking
     let mut resolve_instant: Option<Instant> = None;
-    let fetch_ms: Option<u64>;
-    let link_ms: Option<u64>;
     let mut lockfile_ms: Option<u64> = None;
 
     // Fast path: if lockfile exists and manifest unchanged, skip resolver/fetch entirely.
@@ -739,7 +737,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         .await
         .with_context(|| "failed to fetch packages")?;
     let _ = fetch_progress_forwarder.await;
-    fetch_ms = Some(fetch_instant.elapsed().as_millis() as u64);
+    let fetch_ms: Option<u64> = Some(fetch_instant.elapsed().as_millis() as u64);
 
     send_event(
         &opts.progress_tx,
@@ -842,7 +840,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         }
     }
 
-    link_ms = Some(link_instant.elapsed().as_millis() as u64);
+    let link_ms: Option<u64> = Some(link_instant.elapsed().as_millis() as u64);
 
     send_event(
         &opts.progress_tx,
