@@ -1073,6 +1073,7 @@ mod tests {
         Ok(id)
     }
 
+    #[cfg(unix)]
     fn import_package_with_rollup_style_bin(
         store: &Store,
         temp_root: &Path,
