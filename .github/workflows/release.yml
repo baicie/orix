@@ -593,10 +593,14 @@ jobs:
             fi
           done
 
-      - name: Publish main package
+      - name: Verify npm auth
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish ./dist/main --access public
+        run: |
+          npm config get registry
+          npm whoami
+          npm view @orix/orix version || echo "package not found (may be new)"
+          npm owner ls @orix/orix || echo "owner check failed"
 
       - name: Publish platform packages
         env:
@@ -608,3 +612,8 @@ jobs:
           npm publish ./dist/linux-arm64-gnu --access public
           npm publish ./dist/linux-x64-musl --access public
           npm publish ./dist/win32-x64-msvc --access public
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./dist/main --access public
