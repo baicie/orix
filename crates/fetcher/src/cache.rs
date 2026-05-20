@@ -100,10 +100,25 @@ impl TarballCache {
                         continue;
                     }
 
-                    tokio::fs::write(&cached_path, &bytes)
+                    let cached_path = self.root.join(cache_file_name(url));
+                    let tmp_path = self.root.join(format!(
+                        ".{}.{}.tmp",
+                        cache_file_name(url),
+                        std::process::id()
+                    ));
+
+                    tokio::fs::write(&tmp_path, &bytes).await.with_context(|| {
+                        format!("failed to write temp tarball {}", tmp_path.display())
+                    })?;
+
+                    tokio::fs::rename(&tmp_path, &cached_path)
                         .await
                         .with_context(|| {
-                            format!("failed to write tarball cache {}", cached_path.display())
+                            format!(
+                                "failed to move temp tarball {} -> {}",
+                                tmp_path.display(),
+                                cached_path.display()
+                            )
                         })?;
 
                     let mut verified = self.verified.write().await;
@@ -128,6 +143,29 @@ impl TarballCache {
 
         Err(last_error
             .unwrap_or_else(|| anyhow::anyhow!("download failed after {} attempts", max_retries)))
+    }
+
+    /// Invalidate a cached tarball entry, removing it from both memory and disk.
+    ///
+    /// Used when a cached tarball fails extraction — we remove it so a fresh
+    /// download can be attempted on the next retry.
+    pub async fn invalidate(&self, url: &str) -> Result<()> {
+        let cached_path = self.root.join(cache_file_name(url));
+
+        {
+            let mut verified = self.verified.write().await;
+            verified.retain(|(cached_url, _), _| cached_url != url);
+        }
+
+        if cached_path.exists() {
+            tokio::fs::remove_file(&cached_path)
+                .await
+                .with_context(|| {
+                    format!("failed to remove cached tarball {}", cached_path.display())
+                })?;
+        }
+
+        Ok(())
     }
 
     /// Download tarball with timeout.

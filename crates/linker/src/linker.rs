@@ -3,6 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -190,7 +192,10 @@ impl Linker {
                 self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
             }
 
-            // Create symlinks for this package's declared dependencies
+            // Create symlinks for this package's declared dependencies.
+            // Only create if the target package has been imported into the virtual store.
+            // Transitive deps that haven't been imported yet will be handled when their
+            // parent package is processed (if needed) or skipped (pnpm's standard behavior).
             for (dep_name, _) in pkg
                 .dependencies
                 .iter()
@@ -201,15 +206,22 @@ impl Linker {
                         &pkg_dir.join("node_modules"),
                         dep_name.as_str(),
                     );
-                    let target = Self::package_path_in_node_modules(
-                        &virtual_store_dir.join(dep_key).join("node_modules"),
-                        dep_name.as_str(),
-                    );
+                    let dep_store_dir = virtual_store_dir.join(dep_key);
+                    // Only create the symlink if the target package has been imported.
+                    // This avoids broken symlinks for transitive deps not yet processed.
+                    if !dep_store_dir.exists() {
+                        continue;
+                    }
+
+                    // The symlink target is the dep's store directory.
+                    // The symlink name (dep_name) matches the directory name inside dep_store_dir,
+                    // so the target is just dep_store_dir itself.
+                    let target = &dep_store_dir;
 
                     if !symlink_path.exists() {
                         if let Some(parent) = symlink_path.parent() {
                             fs::create_dir_all(parent)?;
-                            let symlink_target = relative_path(parent, &target);
+                            let symlink_target = relative_path(parent, target);
                             Self::create_dir_link(&symlink_target, &symlink_path).with_context(
                                 || {
                                     format!(
@@ -324,10 +336,10 @@ impl Linker {
         // Once we decide to copy, all remaining files use copy (per-package decision).
         let mut use_copy = false;
 
-        let mut hardlink_ok = 0;
-        let mut copy_ok = 0;
-        let mut hardlink_fail = 0;
-        let mut copy_fail = 0;
+        let mut hardlink_ok = 0u64;
+        let mut copy_ok = 0u64;
+        let mut hardlink_fail = 0u64;
+        let mut copy_fail = 0u64;
 
         // Separate package.json to write it last.
         let mut normal_files: Vec<&(String, String)> = Vec::new();
@@ -352,39 +364,20 @@ impl Linker {
             }
 
             if use_copy {
-                match fs::copy(&src, &dest) {
-                    Ok(_) => copy_ok += 1,
-                    Err(e) => {
-                        copy_fail += 1;
-                        warn!(pkg = %pkg_key, error = %e, "failed to copy {} -> {}", src.display(), dest.display());
-                    }
-                }
+                Self::copy_with_mode(&src, &dest, &mut copy_ok, &mut copy_fail, &pkg_key)?;
             } else {
                 #[allow(clippy::incompatible_msrv)]
                 match fs::hard_link(&src, &dest) {
                     Ok(_) => hardlink_ok += 1,
                     Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
-                        // Cross-device: fall back to copy and remember the decision.
                         use_copy = true;
-                        match fs::copy(&src, &dest) {
-                            Ok(_) => copy_ok += 1,
-                            Err(e2) => {
-                                copy_fail += 1;
-                                warn!(pkg = %pkg_key, error = %e2, "copy failed after EXDEV {} -> {}", src.display(), dest.display());
-                            }
-                        }
+                        Self::copy_with_mode(&src, &dest, &mut copy_ok, &mut copy_fail, &pkg_key)?;
                     }
                     Err(e)
                         if e.kind() == io::ErrorKind::PermissionDenied
                             || e.kind() == io::ErrorKind::NotFound =>
                     {
-                        match fs::copy(&src, &dest) {
-                            Ok(_) => copy_ok += 1,
-                            Err(e2) => {
-                                copy_fail += 1;
-                                warn!(pkg = %pkg_key, error = %e2, "hard_link failed and copy also failed {} -> {}", src.display(), dest.display());
-                            }
-                        }
+                        Self::copy_with_mode(&src, &dest, &mut copy_ok, &mut copy_fail, &pkg_key)?;
                     }
                     Err(e) => {
                         hardlink_fail += 1;
@@ -422,6 +415,37 @@ impl Linker {
             warn!(pkg = %pkg_key, "no files were imported");
         }
 
+        Ok(())
+    }
+
+    /// Copy a file preserving its Unix permissions (mode bits).
+    fn copy_with_mode(
+        src: &Path,
+        dest: &Path,
+        copy_ok: &mut u64,
+        _copy_fail: &mut u64,
+        _pkg_key: &str,
+    ) -> Result<()> {
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(src)
+                .map(|m| m.mode())
+                .with_context(|| format!("failed to stat {} for permission copy", src.display()))?;
+            fs::copy(src, dest).with_context(|| {
+                format!("failed to copy {} -> {}", src.display(), dest.display())
+            })?;
+            fs::set_permissions(dest, PermissionsExt::from_mode(mode & 0o777))
+                .with_context(|| format!("failed to set permissions on {}", dest.display()))?;
+            *copy_ok += 1;
+        }
+        #[cfg(not(unix))]
+        {
+            if fs::copy(src, dest).is_ok() {
+                *copy_ok += 1;
+            } else {
+                *_copy_fail += 1;
+            }
+        }
         Ok(())
     }
 
@@ -1086,10 +1110,11 @@ mod tests {
 
         #[cfg(not(windows))]
         {
-            // Unix can keep the scoped name.
+            // Unix also uses flattened name for consistency across platforms.
+            // @antfu/eslint-config -> eslint-config
             assert!(
-                bin_dir.join("@antfu").join("eslint-config").exists(),
-                "scoped bin symlink should exist on Unix"
+                bin_dir.join("eslint-config").exists(),
+                "flattened bin symlink should exist on Unix"
             );
         }
 

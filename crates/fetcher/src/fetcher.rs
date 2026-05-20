@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Semaphore};
-use tracing::{debug, info_span, warn};
+use tracing::{debug, info_span, warn, Instrument};
 
 use orix_domain::{check_platform_compatibility, DependencyGraph};
 use orix_store::Store;
@@ -83,8 +83,6 @@ impl Fetcher {
         let mut handles = Vec::new();
 
         for pkg in graph.packages() {
-            let span = info_span!("fetch", package = %pkg.id);
-
             // Skip workspace packages (they have no tarball and live on disk).
             if pkg.tarball.is_empty() {
                 debug!(package = %pkg.id, "skipping workspace package (no tarball)");
@@ -112,54 +110,91 @@ impl Fetcher {
             let force = self.force;
             let progress_tx = progress_tx.clone();
 
-            let handle = tokio::spawn(async move {
-                let _permit = sem.acquire().await?;
-                let _guard = span.enter();
-                let tarball = match cache
-                    .get_or_fetch(&tarball_url, &integrity, offline, force)
-                    .await
-                    .with_context(|| format!("failed to fetch tarball for {}", pkg_id))
-                {
-                    Ok(t) => t,
-                    Err(e) => {
-                        warn!(package = %pkg_id, "failed to fetch tarball: {}", e);
-                        if let Some(tx) = &progress_tx {
-                            let _ = tx
-                                .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, e)));
+            let span = info_span!("fetch", package = %pkg_id);
+
+            let handle = tokio::spawn(
+                async move {
+                    let _permit = sem.acquire().await?;
+
+                    let max_extract_attempts = if offline { 1 } else { 2 };
+
+                    for attempt in 0..max_extract_attempts {
+                        let retrying_after_extract_failure = attempt > 0;
+
+                        let tarball = match cache
+                            .get_or_fetch(
+                                &tarball_url,
+                                &integrity,
+                                offline,
+                                force || retrying_after_extract_failure,
+                            )
+                            .await
+                        {
+                            Ok(t) => t,
+                            Err(e) => {
+                                warn!(package = %pkg_id, attempt = attempt + 1, error = %e, "failed to fetch tarball");
+                                if let Some(tx) = &progress_tx {
+                                    let _ = tx.try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, e)));
+                                }
+                                return Err(e).with_context(|| format!("failed to fetch tarball for {}", pkg_id));
+                            }
+                        };
+
+                        let temp_dir = match tempfile::tempdir() {
+                            Ok(d) => d,
+                            Err(e) => {
+                                return Err(e).with_context(|| format!("failed to create temp dir for {}", pkg_id));
+                            }
+                        };
+
+                        debug!(package = %pkg_id, temp_dir = %temp_dir.path().display(), attempt = attempt + 1, "created temp dir");
+
+                        match extract_tarball(&tarball, temp_dir.path()) {
+                            Ok(_) => {
+                                debug!(package = %pkg_id, "importing into store");
+
+                                if let Err(e) = store.import_package(&pkg_id, temp_dir.path(), depnodes, Some(&integrity)) {
+                                    let error = e.context(format!("failed to import package {} into store", pkg_id));
+                                    warn!(package = %pkg_id, error = %error, "failed to import package");
+                                    if let Some(tx) = &progress_tx {
+                                        let _ = tx.try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
+                                    }
+                                    return Err(error);
+                                }
+
+                                debug!(package = %pkg_id, "success");
+                                if let Some(tx) = &progress_tx {
+                                    let _ = tx.try_send(FetchEvent::PackageFetched(pkg_id.to_string()));
+                                }
+                                return Ok(pkg_id);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    package = %pkg_id,
+                                    tarball = %tarball.display(),
+                                    attempt = attempt + 1,
+                                    error = %e,
+                                    "failed to extract tarball"
+                                );
+
+                                if !offline && attempt + 1 < max_extract_attempts {
+                                    let _ = cache.invalidate(&tarball_url).await;
+                                    continue;
+                                }
+
+                                let error = e.context(format!("failed to extract tarball for {}", pkg_id));
+                                if let Some(tx) = &progress_tx {
+                                    let _ = tx.try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
+                                }
+                                return Err(error);
+                            }
                         }
-                        return Err(e);
                     }
-                };
-                let temp_dir = tempfile::tempdir()?;
-                debug!(package = %pkg_id, temp_dir = %temp_dir.path().display(), "created temp dir");
-                if let Err(e) = extract_tarball(&tarball, temp_dir.path()) {
-                    let error = e.context(format!("failed to extract tarball for {}", pkg_id));
-                    warn!(package = %pkg_id, "failed to extract tarball: {}", error);
-                    if let Some(tx) = &progress_tx {
-                        let _ = tx
-                            .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
-                    }
-                    return Err(error);
+
+                    unreachable!("extract attempts loop should always return")
                 }
-                debug!(package = %pkg_id, "importing into store");
-                if let Err(e) =
-                    store.import_package(&pkg_id, temp_dir.path(), depnodes, Some(&integrity))
-                {
-                    let error =
-                        e.context(format!("failed to import package {} into store", pkg_id));
-                    warn!(package = %pkg_id, "failed to import package: {}", error);
-                    if let Some(tx) = &progress_tx {
-                        let _ = tx
-                            .try_send(FetchEvent::PackageFailed(format!("{}: {}", pkg_id, error)));
-                    }
-                    return Err(error);
-                }
-                debug!(package = %pkg_id, "success");
-                if let Some(tx) = &progress_tx {
-                    let _ = tx.try_send(FetchEvent::PackageFetched(pkg_id.to_string()));
-                }
-                Ok::<_, anyhow::Error>(pkg_id)
-            });
+                .instrument(span),
+            );
             handles.push(handle);
         }
 

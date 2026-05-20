@@ -9,9 +9,11 @@ pub use fetcher::{FetchEvent, FetchReport, Fetcher};
 pub use patch::apply_patch;
 
 use std::fs;
+use std::io::{copy as io_copy, Read};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::Engine;
 use flate2::read::GzDecoder;
 use sha1::Digest as Sha1Digest;
@@ -89,34 +91,190 @@ pub fn verify_integrity(content: &[u8], expected: &str) -> Result<()> {
 
 /// Extract a tarball into a destination directory.
 pub fn extract_tarball(tarball_path: &Path, dest: &Path) -> Result<PathBuf> {
-    let file = fs::File::open(tarball_path)?;
+    let file = fs::File::open(tarball_path)
+        .with_context(|| format!("failed to open tarball {}", tarball_path.display()))?;
+
     let decoder = GzDecoder::new(file);
     let mut archive = Archive::new(decoder);
 
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.into_owned();
+    for (index, entry_result) in archive.entries()?.enumerate() {
+        let mut entry = entry_result.with_context(|| {
+            format!(
+                "failed to read tarball entry #{} from {}",
+                index,
+                tarball_path.display()
+            )
+        })?;
 
-        let components: Vec<_> = path.components().collect();
-        let stripped: PathBuf =
-            if components.first().and_then(|c| c.as_os_str().to_str()) == Some("package") {
-                PathBuf::from_iter(&components[1..])
-            } else {
-                path.clone()
-            };
+        let raw_path = entry.path().with_context(|| {
+            format!(
+                "failed to read path for tarball entry #{} from {}",
+                index,
+                tarball_path.display()
+            )
+        })?;
+
+        let stripped = strip_npm_package_prefix(&raw_path);
 
         if stripped.as_os_str().is_empty() {
             continue;
         }
 
+        let entry_header = entry.header().clone();
+        let raw_path_for_msg = raw_path.display().to_string();
+
+        validate_tarball_path(&stripped).with_context(|| {
+            format!(
+                "unsafe tarball path {} in {}",
+                raw_path.display(),
+                tarball_path.display()
+            )
+        })?;
+
         let out_path = dest.join(&stripped);
+
         if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
         }
-        entry.unpack(&out_path)?;
+
+        do_extract(&mut entry, &entry_header, &out_path).with_context(|| {
+            format!(
+                "failed to unpack tarball entry #{} {} -> {}",
+                index,
+                raw_path_for_msg,
+                out_path.display()
+            )
+        })?;
     }
 
     Ok(dest.to_path_buf())
+}
+
+fn do_extract<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    header: &tar::Header,
+    out_path: &Path,
+) -> Result<()> {
+    let entry_type = header.entry_type();
+
+    match entry_type {
+        tar::EntryType::Directory => {
+            fs::create_dir_all(out_path)
+                .with_context(|| format!("failed to create directory {}", out_path.display()))?;
+        }
+        tar::EntryType::Symlink | tar::EntryType::Link => {
+            if out_path.exists() {
+                fs::remove_file(out_path)
+                    .or_else(|_| fs::remove_dir(out_path))
+                    .with_context(|| {
+                        format!(
+                            "failed to remove existing symlink at {}",
+                            out_path.display()
+                        )
+                    })?;
+            }
+
+            let link_target = header
+                .link_name()
+                .with_context(|| format!("failed to read link target for {}", out_path.display()))?
+                .with_context(|| format!("link target is missing for {}", out_path.display()))?;
+
+            if entry_type == tar::EntryType::Symlink {
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&link_target, out_path).with_context(|| {
+                        format!(
+                            "failed to create symlink {} -> {}",
+                            out_path.display(),
+                            link_target.display()
+                        )
+                    })?;
+                }
+                #[cfg(not(unix))]
+                {
+                    anyhow::bail!(
+                        "symlinks are not supported on this platform: {}",
+                        out_path.display()
+                    );
+                }
+            } else {
+                fs::hard_link(&link_target, out_path).with_context(|| {
+                    format!(
+                        "failed to create hard link {} -> {}",
+                        out_path.display(),
+                        link_target.display()
+                    )
+                })?;
+            }
+        }
+        tar::EntryType::Regular | tar::EntryType::Continuous => {
+            let mut file = fs::File::create(out_path)
+                .with_context(|| format!("failed to create file {}", out_path.display()))?;
+
+            io_copy(entry, &mut file)
+                .with_context(|| format!("failed to write content to {}", out_path.display()))?;
+        }
+        tar::EntryType::Block | tar::EntryType::Char => {
+            anyhow::bail!(
+                "unexpected block/char device node in tarball: {}",
+                out_path.display()
+            );
+        }
+        tar::EntryType::Fifo => {
+            anyhow::bail!("unexpected fifo in tarball: {}", out_path.display());
+        }
+        _ => {
+            // Unknown entry type — skip silently.
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let raw_mode = header.mode().unwrap_or(0o644);
+        let desired = if entry_type == tar::EntryType::Directory {
+            raw_mode | 0o111
+        } else {
+            raw_mode
+        };
+        fs::set_permissions(out_path, fs::Permissions::from_mode(desired & 0o777)).with_context(
+            || {
+                format!(
+                    "failed to set permissions {:#o} on {}",
+                    desired,
+                    out_path.display()
+                )
+            },
+        )?;
+    }
+
+    Ok(())
+}
+
+fn strip_npm_package_prefix(path: &Path) -> PathBuf {
+    let components: Vec<_> = path.components().collect();
+
+    if components.first().and_then(|c| c.as_os_str().to_str()) == Some("package") {
+        PathBuf::from_iter(&components[1..])
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn validate_tarball_path(path: &Path) -> Result<()> {
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                anyhow::bail!("tarball entry contains parent dir: {}", path.display());
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                anyhow::bail!("tarball entry is absolute: {}", path.display());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

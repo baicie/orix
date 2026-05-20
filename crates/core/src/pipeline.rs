@@ -131,6 +131,20 @@ fn link_error(tx: &Option<mpsc::Sender<InstallEvent>>, msg: String) -> anyhow::E
     anyhow::anyhow!("link failed")
 }
 
+fn fetch_failure_hint(failures: &[String]) -> String {
+    let joined = failures.join("\n");
+
+    if joined.contains("extract tarball") || joined.contains("unpack") {
+        return "The tarball cache may be corrupted. Try `orix cache clean` or rerun with `--force`.".to_string();
+    }
+
+    if joined.contains("integrity mismatch") {
+        return "The downloaded tarball does not match registry integrity. Try `orix cache clean` and reinstall.".to_string();
+    }
+
+    "Check network connection, registry, proxy, or retry with `--force`.".to_string()
+}
+
 /// Run a single lifecycle event for the project root, sending progress events.
 async fn run_project_lifecycle(
     event: LifecycleEvent,
@@ -423,6 +437,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 );
 
                 if !fetch_report.failures.is_empty() {
+                    let hint = fetch_failure_hint(&fetch_report.failures);
                     send_event(
                         &opts.progress_tx,
                         InstallEvent::Failed {
@@ -431,7 +446,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                                 "failed to fetch packages:\n  {}",
                                 fetch_report.failures.join("\n  ")
                             ),
-                            hint: Some("Check network connection or try --offline.".to_string()),
+                            hint: Some(hint),
                         },
                     );
                     anyhow::bail!(
@@ -801,14 +816,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     );
                 }
                 FetchEvent::PackageFailed(failure) => {
-                    send_event(
-                        &install_progress_tx,
-                        InstallEvent::Failed {
-                            phase: Some(InstallPhase::Fetch),
-                            message: format!("failed to fetch package: {}", failure),
-                            hint: Some("Check network connection or try --offline.".to_string()),
-                        },
-                    );
+                    tracing::debug!(failure = %failure, "package fetch failed");
                 }
             }
         }
@@ -837,6 +845,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     );
 
     if !fetch_report.failures.is_empty() {
+        let hint = fetch_failure_hint(&fetch_report.failures);
         send_event(
             &opts.progress_tx,
             InstallEvent::Failed {
@@ -845,7 +854,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                     "failed to fetch packages:\n  {}",
                     fetch_report.failures.join("\n  ")
                 ),
-                hint: Some("Check network connection or try --offline.".to_string()),
+                hint: Some(hint),
             },
         );
         anyhow::bail!(
@@ -1158,14 +1167,7 @@ async fn fetch_only_missing(
                     );
                 }
                 FetchEvent::PackageFailed(failure) => {
-                    send_event(
-                        &install_progress_tx,
-                        InstallEvent::Failed {
-                            phase: Some(InstallPhase::Fetch),
-                            message: format!("failed to fetch package: {}", failure),
-                            hint: Some("Check network connection or try --offline.".to_string()),
-                        },
-                    );
+                    tracing::debug!(failure = %failure, "package fetch failed");
                 }
             }
         }

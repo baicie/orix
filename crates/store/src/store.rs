@@ -119,6 +119,7 @@ impl Store {
             hash: String,
             dest_path: PathBuf,
             content_path: PathBuf,
+            mode: u32,
         }
 
         let mut file_index: Vec<FileEntry> = Vec::new();
@@ -144,6 +145,13 @@ impl Store {
             let hash = sha256(&content);
             let dest_path = self.package_path(pkg_id).join(&rel_str);
             let content_path = self.file_path(&hash);
+            #[cfg(unix)]
+            let mode = {
+                use std::os::unix::fs::MetadataExt;
+                entry.metadata().map(|m| m.mode()).unwrap_or(0o644)
+            };
+            #[cfg(not(unix))]
+            let mode = 0o644;
 
             file_index.push(FileEntry {
                 rel_path,
@@ -151,6 +159,7 @@ impl Store {
                 hash,
                 dest_path,
                 content_path,
+                mode,
             });
         }
 
@@ -184,6 +193,12 @@ impl Store {
                     } else if let Err(e) = fs::write(&entry.content_path, &entry.content) {
                         errors.push(format!(
                             "failed to write CAS file {}: {}",
+                            entry.content_path.display(),
+                            e
+                        ));
+                    } else if let Err(e) = restore_mode(&entry.content_path, entry.mode) {
+                        errors.push(format!(
+                            "failed to set permissions on CAS file {}: {}",
                             entry.content_path.display(),
                             e
                         ));
@@ -539,6 +554,21 @@ impl Store {
         }
         Some(format!("{}{}", prefix, rest))
     }
+}
+
+/// Restore file permissions after a write operation.
+///
+/// On Unix, restores the original mode bits (e.g. +x for executables).
+/// On Windows, this is a no-op since mode bits don't exist.
+#[cfg(unix)]
+fn restore_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777))
+}
+
+#[cfg(not(unix))]
+fn restore_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
