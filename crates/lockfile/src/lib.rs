@@ -435,6 +435,14 @@ impl Lockfile {
         }
     }
 
+    /// Returns true when the diff contains any package or importer changes.
+    pub fn diff_has_changes(diff: &LockfileDiff) -> bool {
+        !diff.added.is_empty()
+            || !diff.removed.is_empty()
+            || !diff.changed.is_empty()
+            || !diff.importers_changed.is_empty()
+    }
+
     /// Validate that this lockfile exactly matches the manifest dependency specifiers.
     pub fn validate_frozen(
         &self,
@@ -478,9 +486,10 @@ impl Lockfile {
         Ok(())
     }
 
-    /// Validate that the lockfile's specifiers match the manifest.
-    /// Returns `Ok(())` if the lockfile is compatible (lockfile unchanged or changed).
-    /// Returns `Err` only if the lockfile is fundamentally incompatible (missing importer).
+    /// Validate that the lockfile file is structurally usable (version + importer present).
+    ///
+    /// Does **not** compare dependency specifiers to `package.json`. Use
+    /// [`Self::validate_frozen`] before taking the install fast path.
     pub fn validate(
         &self,
         _manifest: &orix_manifest::Manifest,
@@ -494,10 +503,7 @@ impl Lockfile {
             );
         }
 
-        if let Some(importer) = self.importers.get(importer_id) {
-            // We only need to check if the lockfile importer section exists.
-            // Specifier mismatches are fine — we'll diff and report them.
-            let _ = importer;
+        if self.importers.contains_key(importer_id) {
             Ok(())
         } else {
             anyhow::bail!("Lockfile is missing importer '{}'", importer_id);
@@ -863,6 +869,53 @@ mod tests {
         assert_eq!(diff.removed, vec!["/vite@5.0.0"]);
         assert_eq!(diff.changed, vec!["/react@18.2.0"]);
         assert_eq!(diff.importers_changed, vec!["."]);
+        assert!(Lockfile::diff_has_changes(&diff));
+    }
+
+    #[test]
+    fn diff_has_changes_true_for_importers_only() {
+        let mut old = Lockfile::empty();
+        let mut old_importer = ImporterLock::default();
+        old_importer
+            .specifiers
+            .insert("react".to_string(), "^18.0.0".to_string());
+        old.importers.insert(".".to_string(), old_importer);
+
+        let mut new = old.clone();
+        new.importers
+            .get_mut(".")
+            .unwrap()
+            .specifiers
+            .insert("react".to_string(), "^19.0.0".to_string());
+
+        let diff = Lockfile::diff(&old, &new);
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+        assert!(diff.changed.is_empty());
+        assert_eq!(diff.importers_changed, vec!["."]);
+        assert!(Lockfile::diff_has_changes(&diff));
+    }
+
+    #[test]
+    fn validate_frozen_rejects_specifier_change_disables_fast_path() {
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("react".to_string(), "^19.0.0".to_string());
+
+        let mut importer = ImporterLock::default();
+        importer
+            .dependencies
+            .insert("react".to_string(), resolved_dep("18.2.0", "^18.2.0"));
+        importer
+            .specifiers
+            .insert("react".to_string(), "^18.2.0".to_string());
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.importers.insert(".".to_string(), importer);
+
+        assert!(lockfile.validate(&manifest, ".").is_ok());
+        assert!(lockfile.validate_frozen(&manifest, ".").is_err());
     }
 
     #[test]

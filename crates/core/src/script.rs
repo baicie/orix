@@ -10,6 +10,9 @@
 /// Path separator as a string slice (matches the platform separator character).
 const PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
 
+/// Virtual store directory under `node_modules` (must match `crates/linker`).
+pub const VIRTUAL_STORE_DIR: &str = ".orix";
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
@@ -179,12 +182,7 @@ impl ScriptRunner {
 
     /// Check if a dependency package is allowed to run its lifecycle scripts.
     pub fn dependency_scripts_allowed(&self, pkg_name: &str) -> bool {
-        if self.config.ignore_scripts {
-            return false;
-        }
-        self.config.allow_scripts.iter().any(|p| {
-            pkg_name == p || (p.ends_with("/*") && pkg_name.starts_with(&p[..p.len() - 1]))
-        })
+        dependency_scripts_allowed(&self.config, pkg_name)
     }
 
     /// Run the full lifecycle chain (preX, X, postX) for a named script.
@@ -208,6 +206,7 @@ impl ScriptRunner {
             ));
         }
 
+        let args = normalize_script_args(args);
         let mut outputs = Vec::with_capacity(chain.len());
         for script_ref in &chain {
             let script_args = if script_ref.name == name {
@@ -394,10 +393,8 @@ impl ScriptRunner {
             let mut combined = extra_path;
             combined.push(PATH_SEP);
             combined.push(&existing);
-            env.insert(
-                "PATH".to_string(),
-                combined.into_string().unwrap_or_default(),
-            );
+            let path_str = combined.into_string().unwrap_or_default();
+            env.insert("PATH".to_string(), sanitize_path_env(&path_str));
         } else {
             env.insert(
                 "PATH".to_string(),
@@ -645,6 +642,122 @@ impl ScriptRunner {
     }
 }
 
+/// Whether dependency lifecycle scripts may run for `pkg_name`.
+pub fn dependency_scripts_allowed(config: &Config, pkg_name: &str) -> bool {
+    if config.ignore_scripts {
+        return false;
+    }
+    config.allow_scripts.iter().any(|p| {
+        pkg_name == p || (p.ends_with("/*") && pkg_name.starts_with(&p[..p.len() - 1]))
+    })
+}
+
+/// Strip a leading `--` from script arguments (npm compatibility).
+pub fn normalize_script_args(args: Vec<String>) -> Vec<String> {
+    if args.first().is_some_and(|s| s == "--") {
+        args[1..].to_vec()
+    } else {
+        args
+    }
+}
+
+/// Installed package root under `node_modules/.orix/<key>/node_modules/<name>`.
+pub fn installed_package_dir(project_root: &Path, pkg_id: &PackageId) -> PathBuf {
+    let pkg_key = pkg_id.key();
+    let base = project_root
+        .join("node_modules")
+        .join(VIRTUAL_STORE_DIR)
+        .join(&pkg_key)
+        .join("node_modules");
+    package_path_in_node_modules(&base, pkg_id.name.as_str())
+}
+
+fn package_path_in_node_modules(root: &Path, package_name: &str) -> PathBuf {
+    package_name
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
+/// Topological install order: dependencies before dependents.
+pub fn graph_install_order(graph: &orix_domain::DependencyGraph) -> Vec<PackageId> {
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    let ids: HashSet<PackageId> = graph.package_ids().cloned().collect();
+    let key_to_id: HashMap<String, PackageId> = ids.iter().map(|id| (id.key(), id.clone())).collect();
+    let mut in_degree: HashMap<PackageId, usize> = ids.iter().map(|id| (id.clone(), 0)).collect();
+    let mut dependents: HashMap<PackageId, Vec<PackageId>> =
+        ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+
+    for pkg in graph.packages() {
+        for dep_key in &pkg.depnodes {
+            let Some(dep_id) = key_to_id.get(dep_key) else {
+                continue;
+            };
+            if dep_id == &pkg.id {
+                continue;
+            }
+            if let Some(deg) = in_degree.get_mut(&pkg.id) {
+                *deg += 1;
+            }
+            dependents
+                .entry(dep_id.clone())
+                .or_default()
+                .push(pkg.id.clone());
+        }
+    }
+
+    let mut queue: VecDeque<PackageId> = in_degree
+        .iter()
+        .filter(|(_, &d)| d == 0)
+        .map(|(id, _)| id.clone())
+        .collect();
+    let mut order = Vec::with_capacity(ids.len());
+
+    while let Some(id) = queue.pop_front() {
+        order.push(id.clone());
+        if let Some(deps) = dependents.get(&id) {
+            for dependent in deps {
+                if let Some(deg) = in_degree.get_mut(dependent) {
+                    *deg = deg.saturating_sub(1);
+                    if *deg == 0 {
+                        queue.push_back(dependent.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    for id in ids {
+        if !order.contains(&id) {
+            order.push(id);
+        }
+    }
+
+    order
+}
+
+/// Remove invalid PATH segments (e.g. bare `D:` on Windows) that break Node resolution.
+fn sanitize_path_env(path: &str) -> String {
+    path.split(PATH_SEP)
+        .filter(|part| !is_invalid_path_segment(part))
+        .collect::<Vec<_>>()
+        .join(PATH_SEP)
+}
+
+fn is_invalid_path_segment(segment: &str) -> bool {
+    let t = segment.trim();
+    if t.is_empty() {
+        return true;
+    }
+    let bytes = t.as_bytes();
+    // Bare drive letter `D:` or root-only `D:\` / `D:/` breaks Node's realpathSync.
+    if bytes.len() >= 2 && bytes[1] == b':' {
+        let rest = &t[2..];
+        return rest.is_empty() || rest == "\\" || rest == "/";
+    }
+    false
+}
+
 /// Join args into a shell-safe string (for appending to a command).
 fn shell_args_join(args: &[String]) -> String {
     args.iter()
@@ -734,6 +847,26 @@ mod tests {
         assert!(runner.dependency_scripts_allowed("esbuild"));
         assert!(!runner.dependency_scripts_allowed("typescript"));
         Ok(())
+    }
+
+    #[test]
+    fn sanitize_path_env_drops_bare_drive_letter() {
+        let path = format!("D:{PATH_SEP}D:\\workspace\\proj\\node_modules\\.bin{PATH_SEP}node.exe");
+        let sanitized = sanitize_path_env(&path);
+        assert!(!sanitized.contains("D:;"));
+        assert!(sanitized.contains("node_modules"));
+    }
+
+    #[test]
+    fn normalize_script_args_strips_leading_double_dash() {
+        assert_eq!(
+            normalize_script_args(vec!["--".to_string(), "-a".to_string(), "2".to_string()]),
+            vec!["-a".to_string(), "2".to_string()]
+        );
+        assert_eq!(
+            normalize_script_args(vec!["-w".to_string()]),
+            vec!["-w".to_string()]
+        );
     }
 
     #[test]

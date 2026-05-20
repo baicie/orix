@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 
 use orix_core::{
     add, cache_clean_with_overrides, cache_path_with_overrides, deploy, export_pnpm_lockfile,
-    import_pnpm_lockfile, install, pipeline, remove, store_path_with_overrides,
-    store_prune_with_overrides, store_verify_with_overrides, ConfigOverrides, DeployOpts,
-    InstallOpts, Manifest, ScriptRunner, Workspace,
+    import_pnpm_lockfile, install, normalize_script_args, pipeline, remove,
+    store_path_with_overrides, store_prune_with_overrides, store_verify_with_overrides,
+    ConfigOverrides, DeployOpts, InstallOpts, Manifest, ScriptRunner, Workspace,
 };
 
 mod errors;
@@ -65,6 +65,9 @@ enum Command {
     Remove(RemoveArgs),
     #[command(name = "run")]
     Run(RunArgs),
+    /// Implicit script execution (`orix <script> [args...]`, same as `orix run`).
+    #[command(external_subcommand)]
+    Script(Vec<String>),
     #[command(subcommand)]
     Store(StoreCommand),
     #[command(subcommand)]
@@ -147,8 +150,8 @@ struct RemoveArgs {
 struct RunArgs {
     /// Script name to run.
     script: String,
-    /// Additional arguments to pass to the script.
-    #[arg(trailing_var_arg = true)]
+    /// Additional arguments to pass to the script (after the script name; `-` flags allowed).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
     /// Do not error if the script is not defined.
     #[arg(long)]
@@ -406,6 +409,35 @@ async fn main() -> Result<()> {
         }
 
         Command::Run(args) => {
+            if let Err(e) = run_script(&dir, &args).await {
+                eprintln!("{}", errors::format_error(&e, &dir));
+                std::process::exit(1);
+            }
+        }
+
+        Command::Script(mut parts) => {
+            let script = match parts.first() {
+                Some(s) => s.clone(),
+                None => {
+                    eprintln!(
+                        "{}",
+                        errors::format_error(
+                            &anyhow::anyhow!("a script name is required"),
+                            &dir
+                        )
+                    );
+                    std::process::exit(1);
+                }
+            };
+            parts.remove(0);
+            let args = RunArgs {
+                script,
+                args: normalize_script_args(parts),
+                if_present: false,
+                workspace: None,
+                recursive: false,
+                concurrency: 4,
+            };
             if let Err(e) = run_script(&dir, &args).await {
                 eprintln!("{}", errors::format_error(&e, &dir));
                 std::process::exit(1);
@@ -675,17 +707,18 @@ where
     })
 }
 
-/// Run a user script via `orix run`.
+/// Run a user script via `orix run` or implicit `orix <script>`.
 async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::Result<()> {
     let manifest = Manifest::read(&project_root.join("package.json"))
         .with_context(|| "failed to read package.json")?;
     let config = orix_core::Config::load(project_root)?;
     let workspace = Workspace::discover(project_root.to_path_buf()).ok();
+    let script_args = normalize_script_args(args.args.clone());
 
     if args.recursive {
         let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let results = runner
-            .run_recursive(&args.script, args.args.clone(), args.concurrency)
+            .run_recursive(&args.script, script_args, args.concurrency)
             .await?;
 
         let mut failed = false;
@@ -718,7 +751,7 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
     } else if let Some(ref ws_pkg) = args.workspace {
         let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let output = runner
-            .run_in_workspace(ws_pkg, &args.script, args.args.clone(), args.if_present)
+            .run_in_workspace(ws_pkg, &args.script, script_args, args.if_present)
             .await?;
         if !output.status.success() {
             std::process::exit(output.status.code().unwrap_or(-1));
@@ -726,7 +759,7 @@ async fn run_script(project_root: &std::path::Path, args: &RunArgs) -> anyhow::R
     } else {
         let runner = ScriptRunner::new(config, manifest, project_root.to_path_buf(), workspace);
         let outputs = runner
-            .run_script(&args.script, args.args.clone(), args.if_present)
+            .run_script(&args.script, script_args, args.if_present)
             .await?;
 
         let all_success = outputs.iter().all(|o| o.status.success());

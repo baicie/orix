@@ -19,7 +19,10 @@ use orix_store::Store;
 use orix_workspace::{detect_workspace_cycles, Workspace};
 
 use crate::reporter::{InstallEvent, InstallPhase, LockfileStatus};
-use crate::script::{LifecycleEvent, ScriptRunner};
+use crate::script::{
+    dependency_scripts_allowed, graph_install_order, installed_package_dir, LifecycleEvent,
+    ScriptError, ScriptRunner,
+};
 
 /// Options for the install command.
 #[derive(Debug, Clone, Default)]
@@ -131,6 +134,29 @@ fn link_error(tx: &Option<mpsc::Sender<InstallEvent>>, msg: String) -> anyhow::E
     anyhow::anyhow!("link failed")
 }
 
+/// Log a one-line hint when a heavy link pass may trigger post-install AV scanning on Windows.
+fn emit_windows_link_performance_hint(config: &Config, link_report: &orix_linker::LinkReport) {
+    #[cfg(windows)]
+    {
+        if link_report.skipped.is_some() {
+            return;
+        }
+        let touched = link_report.hardlinked_files
+            + link_report.copied_files
+            + link_report.symlinks_created;
+        if touched < 500 {
+            return;
+        }
+        info!(
+            store = %config.store_dir.display(),
+            node_modules = %config.node_modules_dir().display(),
+            "Windows: if the system feels sluggish after linking, add the store path and project \
+             node_modules to Windows Defender exclusions (or keep them on the same NTFS volume)"
+        );
+    }
+    let _ = (config, link_report);
+}
+
 fn fetch_failure_hint(failures: &[String]) -> String {
     let joined = failures.join("\n");
 
@@ -152,7 +178,7 @@ async fn run_project_lifecycle(
     config: &Config,
     project_root: &Path,
     progress_tx: &Option<mpsc::Sender<InstallEvent>>,
-) {
+) -> Result<()> {
     send_event(
         progress_tx,
         InstallEvent::ScriptsPhaseStarted {
@@ -189,49 +215,124 @@ async fn run_project_lifecycle(
                     exit_code: Some(0),
                 },
             );
+            Ok(())
         }
-        Err(crate::script::ScriptError::Disabled) => {
+        Err(ScriptError::Disabled) => {
             send_event(
                 progress_tx,
                 InstallEvent::ScriptsPhaseSkipped {
                     reason: "scripts disabled by --ignore-scripts".to_string(),
                 },
             );
+            Ok(())
         }
-        Err(crate::script::ScriptError::MissingScript(..)) => {
-            // Script not defined — skip silently.
-        }
-        Err(crate::script::ScriptError::Failed { name, code }) => {
+        Err(ScriptError::MissingScript(..)) => Ok(()),
+        Err(ScriptError::Failed { name, code }) => {
             send_event(
                 progress_tx,
                 InstallEvent::ScriptFinished {
-                    name,
+                    name: name.clone(),
                     duration_ms: 0,
                     exit_code: code,
                 },
             );
+            Err(ScriptError::Failed { name, code }.into())
         }
-        Err(crate::script::ScriptError::Terminated { name }) => {
+        Err(ScriptError::Terminated { name }) => {
             send_event(
                 progress_tx,
                 InstallEvent::ScriptFinished {
-                    name,
+                    name: name.clone(),
                     duration_ms: 0,
                     exit_code: None,
                 },
             );
+            Err(ScriptError::Terminated { name }.into())
         }
-        Err(crate::script::ScriptError::Spawn { name, .. }) => {
+        Err(ScriptError::Spawn { name, source }) => {
             send_event(
                 progress_tx,
                 InstallEvent::ScriptFinished {
-                    name,
+                    name: name.clone(),
                     duration_ms: 0,
                     exit_code: Some(-1),
                 },
             );
+            Err(ScriptError::Spawn { name, source }.into())
         }
     }
+}
+
+/// Run preinstall/install/postinstall for allow-listed dependency packages.
+async fn run_dependency_lifecycles(
+    graph: &orix_domain::DependencyGraph,
+    config: &Config,
+    project_root: &Path,
+    progress_tx: &Option<mpsc::Sender<InstallEvent>>,
+) -> Result<()> {
+    if config.ignore_scripts {
+        return Ok(());
+    }
+
+    let events = [
+        LifecycleEvent::Preinstall,
+        LifecycleEvent::Install,
+        LifecycleEvent::Postinstall,
+    ];
+
+    for pkg_id in graph_install_order(graph) {
+        let Some(pkg) = graph.get(&pkg_id) else {
+            continue;
+        };
+        if !is_fetchable_package(pkg) {
+            continue;
+        }
+        let pkg_name = pkg.id.name.as_str();
+        if !dependency_scripts_allowed(config, pkg_name) {
+            continue;
+        }
+
+        let pkg_dir = installed_package_dir(project_root, &pkg.id);
+        let manifest_path = pkg_dir.join("package.json");
+        if !manifest_path.exists() {
+            trace!(
+                pkg = %pkg.id,
+                path = %manifest_path.display(),
+                "skipping dependency scripts: package.json missing"
+            );
+            continue;
+        }
+
+        let dep_manifest = Manifest::read(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+
+        let runner = ScriptRunner::new(
+            config.clone(),
+            dep_manifest,
+            pkg_dir,
+            None,
+        );
+
+        for event in events {
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptsPhaseStarted {
+                    event: format!("{} {}", event.script_name(), pkg.id),
+                },
+            );
+            runner.run_lifecycle(event, &pkg.id).await?;
+            send_event(
+                progress_tx,
+                InstallEvent::ScriptFinished {
+                    name: format!("{}:{}", pkg.id, event.script_name()),
+                    duration_ms: 0,
+                    exit_code: Some(0),
+                },
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// Top-level install orchestration.
@@ -307,7 +408,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         project_root,
         &opts.progress_tx,
     )
-    .await;
+    .await?;
 
     send_event(
         &opts.progress_tx,
@@ -369,11 +470,16 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let mut resolve_instant: Option<Instant> = None;
     let mut lockfile_ms: Option<u64> = None;
 
-    // Fast path: if lockfile exists and manifest unchanged, skip resolver/fetch entirely.
+    // Fast path: lockfile specifiers match package.json — reuse locked resolution.
     // Only apply when network is not forced and we're not in frozen mode.
     if !opts.frozen_lockfile && !opts.force {
         if let Some(ref lf) = old_lockfile {
-            if lf.validate(&manifest, ".").is_ok() {
+            if lf.validate(&manifest, ".").is_ok() && lf.validate_frozen(&manifest, ".").is_err() {
+                info!(
+                    "package.json dependency specifiers changed; re-resolving from registry"
+                );
+            }
+            if lf.validate_frozen(&manifest, ".").is_ok() {
                 debug!(target: "orix", "FAST PATH triggered");
                 let graph = resolve_from_lockfile_packages(&lf.packages);
                 let pkg_count = graph.len();
@@ -494,8 +600,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 } else {
                     let t2 = Instant::now();
                     linker
-                        .unlink()
-                        .with_context(|| "failed to clean old node_modules")?;
+                        .prune_stale_layout(&graph, &direct_deps)
+                        .with_context(|| "failed to prune stale node_modules layout")?;
                     let report = linker.link_graph(
                         &graph,
                         &direct_deps,
@@ -537,11 +643,11 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                                 "workspace pkg layout valid, skipping"
                             );
                         } else {
-                            if let Err(e) = pkg_linker.unlink() {
+                            if let Err(e) = pkg_linker.prune_stale_layout(&graph, &pkg_deps) {
                                 return Err(link_error(
                                     &opts.progress_tx,
                                     format!(
-                                        "failed to clean old node_modules for {}: {}",
+                                        "failed to prune stale node_modules for {}: {}",
                                         ws_pkg.manifest.name.as_deref().unwrap_or("?"),
                                         e
                                     ),
@@ -587,8 +693,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 let base_lockfile = lf.clone();
                 let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
                 let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
-                let lockfile_changed =
-                    !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty();
+                let lockfile_changed = Lockfile::diff_has_changes(&diff);
 
                 if lockfile_changed {
                     send_event(
@@ -904,10 +1009,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             skipped: Some("node_modules layout already valid".to_string()),
         }
     } else {
-        if let Err(e) = linker.unlink() {
+        if let Err(e) = linker.prune_stale_layout(&graph, &direct_deps) {
             return Err(link_error(
                 &opts.progress_tx,
-                format!("failed to clean old node_modules: {e}"),
+                format!("failed to prune stale node_modules layout: {e}"),
             ));
         }
 
@@ -944,11 +1049,11 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
                 continue;
             }
 
-            if let Err(e) = pkg_linker.unlink() {
+            if let Err(e) = pkg_linker.prune_stale_layout(&graph, &pkg_deps) {
                 return Err(link_error(
                     &opts.progress_tx,
                     format!(
-                        "failed to clean old node_modules for {}: {}",
+                        "failed to prune stale node_modules for {}: {}",
                         ws_pkg.manifest.name.as_deref().unwrap_or("?"),
                         e
                     ),
@@ -980,6 +1085,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         link_ms = link_ms,
         "linked dependencies"
     );
+    emit_windows_link_performance_hint(&config, &link_report);
 
     send_event(
         &opts.progress_tx,
@@ -987,6 +1093,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             phase: InstallPhase::Link,
         },
     );
+
+    run_dependency_lifecycles(&graph, &config, project_root, &opts.progress_tx).await?;
 
     // Phase: Run install lifecycle (after link, before lockfile write)
     run_project_lifecycle(
@@ -996,7 +1104,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         project_root,
         &opts.progress_tx,
     )
-    .await;
+    .await?;
 
     let layout_report = linker
         .validate_layout(&direct_deps)
@@ -1035,14 +1143,14 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             .write(&config.lockfile_path())
             .with_context(|| "failed to write lockfile")?;
 
-        lockfile_changed =
-            !diff.added.is_empty() || !diff.removed.is_empty() || !diff.changed.is_empty();
+        lockfile_changed = Lockfile::diff_has_changes(&diff);
         lockfile_ms = Some(lockfile_instant.elapsed().as_millis() as u64);
         if lockfile_changed {
             info!(
                 added = diff.added.len(),
                 removed = diff.removed.len(),
                 changed = diff.changed.len(),
+                importers_changed = diff.importers_changed.len(),
                 "lockfile updated"
             );
         } else {
@@ -1070,10 +1178,6 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         },
     );
 
-    let duration = start.elapsed();
-    info!(duration_ms = duration.as_millis(), "install complete");
-
-    // Phase: Run postinstall and prepare lifecycle (after lockfile, before final validation)
     run_project_lifecycle(
         LifecycleEvent::Postinstall,
         &manifest,
@@ -1081,11 +1185,9 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         project_root,
         &opts.progress_tx,
     )
-    .await;
+    .await?;
 
-    // Initial install: also run prepare
-    let is_initial_install = old_lockfile.is_none();
-    if is_initial_install {
+    if manifest.script(LifecycleEvent::Prepare.script_name()).is_some() {
         run_project_lifecycle(
             LifecycleEvent::Prepare,
             &manifest,
@@ -1093,9 +1195,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
             project_root,
             &opts.progress_tx,
         )
-        .await;
+        .await?;
     }
 
+    let duration = start.elapsed();
     info!(duration_ms = duration.as_millis(), "install complete");
     send_event(
         &opts.progress_tx,

@@ -75,11 +75,11 @@ impl Linker {
             return true;
         }
 
-        WalkDir::new(&bin_dir)
-            .follow_links(false)
+        fs::read_dir(&bin_dir)
             .into_iter()
+            .flatten()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_file())
+            .filter(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
             .all(|entry| {
                 let path = entry.path();
                 if path.extension().is_some_and(|ext| ext == "cmd") {
@@ -97,11 +97,16 @@ impl Linker {
             return true;
         }
 
-        WalkDir::new(&bin_dir)
-            .follow_links(false)
+        fs::read_dir(&bin_dir)
             .into_iter()
+            .flatten()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_symlink() || entry.file_type().is_file())
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .map(|t| t.is_symlink() || t.is_file())
+                    .unwrap_or(false)
+            })
             .all(|entry| {
                 let executable = fs::metadata(entry.path())
                     .map(|metadata| metadata.mode() & 0o111 != 0)
@@ -228,20 +233,11 @@ impl Linker {
             let store_files = self.store.package_files_path(&pkg.id);
             fs::create_dir_all(&pkg_dir)?;
 
-            // Skip if package is already fully imported (package.json exists).
-            let pkg_dest_dir = pkg_dir
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("pkg_dir has no parent: {}", pkg_dir.display()))?;
-            if pkg_dest_dir.join("package.json").exists() {
-                trace!(pkg = %pkg_key, "package already imported, skipping files");
-            } else {
+            if !self.is_package_import_complete(&pkg.id, &pkg_dir)? {
                 self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
+            } else {
+                trace!(pkg = %pkg_key, "package already imported, skipping file import");
             }
-
-            // Import package files from the store using integrity metadata.
-            // Uses integrity.files to avoid WalkDir, pre-creates all directories,
-            // falls back to copy on EXDEV, and writes package.json last.
-            self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
 
             // Link bin executables for this package into .orix/<pkg>/bin/
             let link_global_bins = direct_name_to_key
@@ -390,9 +386,8 @@ impl Linker {
             }
         }
 
-        // Decide import strategy: try hardlink first, fall back to copy on EXDEV.
-        // Once we decide to copy, all remaining files use copy (per-package decision).
-        let mut use_copy = false;
+        // Same volume: hardlink; cross-volume: copy for the whole package (remembered per call).
+        let mut use_copy = !Self::same_volume(store_files, pkg_dir);
 
         let mut hardlink_ok = 0u64;
         let mut copy_ok = 0u64;
@@ -704,15 +699,33 @@ if (Test-Path $exe) {{\n\
         Ok(())
     }
 
+    /// Resolve the directory link target to an absolute path (required on Windows).
+    fn resolve_dir_link_target(target: &Path, link: &Path) -> io::Result<PathBuf> {
+        if target.is_absolute() {
+            fs::canonicalize(target).or_else(|_| Ok(target.to_path_buf()))
+        } else {
+            Self::absolutize_link_target(target, link)
+        }
+    }
+
     /// Create a directory link, falling back to junction on Windows when needed.
+    ///
+    /// On Windows, junction targets must be absolute; relative targets can make Node
+    /// resolve module paths to a bare drive letter (`D:`) and fail with `EISDIR`.
     fn create_dir_link(target: &Path, link: &Path) -> io::Result<()> {
         #[cfg(windows)]
         {
-            match std::os::windows::fs::symlink_dir(target, link) {
+            if link.exists() || fs::symlink_metadata(link).is_ok() {
+                return Ok(());
+            }
+
+            let absolute_target = Self::resolve_dir_link_target(target, link)?;
+
+            match std::os::windows::fs::symlink_dir(&absolute_target, link) {
                 Ok(_) => return Ok(()),
                 Err(e) => {
                     debug!(
-                        target = %target.display(),
+                        target = %absolute_target.display(),
                         link = %link.display(),
                         error = %e,
                         "directory symlink failed; trying junction fallback"
@@ -720,7 +733,6 @@ if (Test-Path $exe) {{\n\
                 }
             }
 
-            let absolute_target = Self::absolutize_link_target(target, link)?;
             Self::create_junction(&absolute_target, link)
         }
         #[cfg(not(windows))]
@@ -798,7 +810,105 @@ if (Test-Path $exe) {{\n\
         }
     }
 
-    /// Remove all generated links and .orix/ content for this project.
+    /// Remove stale virtual-store packages and top-level links not in the current graph.
+    ///
+    /// Unlike [`Self::unlink`], this keeps valid packages and avoids deleting the entire
+    /// `node_modules` tree (important on Windows where full removal is slow and triggers AV).
+    pub fn prune_stale_layout(
+        &self,
+        graph: &DependencyGraph,
+        direct_deps: &std::collections::HashSet<String>,
+    ) -> Result<()> {
+        let expected_keys: HashSet<String> = graph.packages().map(|p| p.id.key()).collect();
+        let virtual_store = self.node_modules.join(VIRTUAL_STORE_DIR);
+
+        if virtual_store.is_dir() {
+            for entry in fs::read_dir(&virtual_store)? {
+                let entry = entry?;
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name == METADATA_FILE {
+                    continue;
+                }
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                if !expected_keys.contains(&file_name) {
+                    if let Err(e) = fs::remove_dir_all(entry.path()) {
+                        warn!(
+                            pkg_key = %file_name,
+                            error = %e,
+                            path = %entry.path().display(),
+                            "failed to prune stale virtual-store package"
+                        );
+                    } else {
+                        trace!(pkg_key = %file_name, "pruned stale virtual-store package");
+                    }
+                }
+            }
+        }
+
+        if self.node_modules.is_dir() {
+            for entry in fs::read_dir(&self.node_modules)? {
+                let entry = entry?;
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name == ".bin" || file_name == VIRTUAL_STORE_DIR {
+                    continue;
+                }
+
+                if file_name.starts_with('@') {
+                    if !entry.file_type()?.is_dir() {
+                        continue;
+                    }
+                    for scoped in fs::read_dir(entry.path())? {
+                        let scoped = scoped?;
+                        let scoped_name = scoped.file_name().to_string_lossy().to_string();
+                        let full_name = format!("{file_name}/{scoped_name}");
+                        if direct_deps.contains(&full_name) {
+                            continue;
+                        }
+                        if path_exists_or_symlink(&scoped.path()) {
+                            if let Err(e) = remove_link_path(&scoped.path()) {
+                                warn!(
+                                    path = %scoped.path().display(),
+                                    error = %e,
+                                    "failed to prune stale scoped package link"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if direct_deps.contains(&file_name) {
+                    continue;
+                }
+                if path_exists_or_symlink(&entry.path()) {
+                    if let Err(e) = remove_link_path(&entry.path()) {
+                        warn!(
+                            path = %entry.path().display(),
+                            error = %e,
+                            "failed to prune stale top-level package link"
+                        );
+                    }
+                }
+            }
+        }
+
+        let bin_dir = self.node_modules.join(".bin");
+        if bin_dir.is_dir() {
+            if let Err(e) = fs::remove_dir_all(&bin_dir) {
+                warn!(
+                    path = %bin_dir.display(),
+                    error = %e,
+                    "failed to clear .bin before relink"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove all generated links and `.orix/` content for this project.
     pub fn unlink(&self) -> Result<()> {
         if self.node_modules.exists() {
             fs::remove_dir_all(&self.node_modules)?;
@@ -851,36 +961,90 @@ if (Test-Path $exe) {{\n\
             }
         }
 
-        for entry in WalkDir::new(&self.node_modules)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if !entry.file_type().is_symlink() {
-                continue;
-            }
+        let virtual_store = self.node_modules.join(VIRTUAL_STORE_DIR);
+        if virtual_store.is_dir() {
+            for entry in WalkDir::new(&virtual_store)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if !entry.file_type().is_symlink() {
+                    continue;
+                }
 
-            let link_path = entry.path();
-            let target = fs::read_link(link_path)?;
-            let resolved = if target.is_absolute() {
-                target
-            } else {
-                link_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new(""))
-                    .join(target)
-            };
+                let link_path = entry.path();
+                let target = fs::read_link(link_path)?;
+                let resolved = if target.is_absolute() {
+                    target
+                } else {
+                    link_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new(""))
+                        .join(target)
+                };
 
-            if !resolved.exists() {
-                report.broken.push(format!(
-                    "broken symlink {} -> {}",
-                    link_path.display(),
-                    resolved.display()
-                ));
+                if !resolved.exists() {
+                    report.broken.push(format!(
+                        "broken symlink {} -> {}",
+                        link_path.display(),
+                        resolved.display()
+                    ));
+                }
             }
         }
 
         Ok(report)
+    }
+
+    /// True when every file listed in store integrity metadata exists under `pkg_dir`.
+    fn is_package_import_complete(
+        &self,
+        pkg_id: &orix_domain::PackageId,
+        pkg_dir: &Path,
+    ) -> Result<bool> {
+        if !pkg_dir.join("package.json").exists() {
+            return Ok(false);
+        }
+
+        let integrity = match self.store.get_integrity(pkg_id) {
+            Ok(i) => i,
+            Err(_) => return Ok(false),
+        };
+
+        Ok(integrity
+            .files
+            .iter()
+            .all(|(rel_path, _)| pkg_dir.join(rel_path).exists()))
+    }
+
+    /// Whether `src` and `dest` live on the same filesystem volume (hardlink-safe).
+    fn same_volume(src: &Path, dest: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) else {
+                return false;
+            };
+            return src_meta.dev() == dest_meta.dev();
+        }
+
+        #[cfg(windows)]
+        {
+            let src_root = src.canonicalize().ok();
+            let dest_root = dest
+                .parent()
+                .and_then(|p| p.canonicalize().ok());
+            match (src_root.as_ref().and_then(|p| volume_root(p)), dest_root.as_ref().and_then(|p| volume_root(p)))
+            {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            }
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (src, dest);
+            false
+        }
     }
 
     fn package_path_in_node_modules(root: &Path, package_name: &str) -> PathBuf {
@@ -891,9 +1055,32 @@ if (Test-Path $exe) {{\n\
 }
 
 /// Returns true if the path exists as a file or symlink.
-#[allow(dead_code)]
 fn path_exists_or_symlink(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
+}
+
+fn remove_link_path(path: &Path) -> io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.is_dir() {
+        fs::remove_dir(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+#[cfg(windows)]
+fn volume_root(path: &Path) -> Option<String> {
+    let s = path.to_string_lossy();
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' {
+        let root_len = if bytes.len() >= 3 && bytes[2] == b'\\' {
+            3
+        } else {
+            2
+        };
+        return Some(s[..root_len].to_string());
+    }
+    None
 }
 
 #[cfg(not(windows))]
@@ -1668,6 +1855,81 @@ mod tests {
         )?;
 
         assert!(linker.is_layout_valid(graph_hash));
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_skips_file_import_when_package_already_complete() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "lodash", "4.17.21")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("lodash", "4.17.21", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["lodash".to_string()]);
+        let hash = graph.graph_hash();
+
+        let first = linker.link_graph(&graph, &direct_deps, None, &hash)?;
+        assert!(
+            first.hardlinked_files > 0 || first.copied_files > 0,
+            "first link should import files (hardlink or copy)"
+        );
+
+        let second = linker.link_graph(&graph, &direct_deps, None, &hash)?;
+        assert_eq!(
+            second.hardlinked_files, 0,
+            "second link should skip integrity-complete packages"
+        );
+        assert_eq!(second.copied_files, 0, "second link should not copy files");
+
+        Ok(())
+    }
+
+    #[test]
+    fn prune_stale_layout_removes_only_obsolete_virtual_store_entries() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "left-pkg", "1.0.0")?;
+        import_package(&store, temp.path(), "right-pkg", "1.0.0")?;
+
+        let mut old_graph = DependencyGraph::new();
+        old_graph.insert(resolved_package("left-pkg", "1.0.0", Vec::new())?);
+        old_graph.insert(resolved_package("right-pkg", "1.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct = HashSet::from(["left-pkg".to_string(), "right-pkg".to_string()]);
+        linker.link_graph(&old_graph, &direct, None, &old_graph.graph_hash())?;
+
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("right-pkg@1.0.0")
+            .exists());
+
+        let mut new_graph = DependencyGraph::new();
+        new_graph.insert(resolved_package("left-pkg", "1.0.0", Vec::new())?);
+        let new_direct = HashSet::from(["left-pkg".to_string()]);
+        linker.prune_stale_layout(&new_graph, &new_direct)?;
+
+        assert!(temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("left-pkg@1.0.0")
+            .exists());
+        assert!(
+            !temp
+                .path()
+                .join("node_modules")
+                .join(".orix")
+                .join("right-pkg@1.0.0")
+                .exists()
+        );
+        assert!(temp.path().join("node_modules").exists());
+
         Ok(())
     }
 

@@ -27,4 +27,7 @@ pub use orix_store::Store;
 pub use orix_workspace::Workspace;
 
 // Script runner exports.
-pub use crate::script::{LifecycleEvent, ScriptError, ScriptKind, ScriptOutput, ScriptRunner};
+pub use crate::script::{
+    dependency_scripts_allowed, graph_install_order, installed_package_dir, normalize_script_args,
+    LifecycleEvent, ScriptError, ScriptKind, ScriptOutput, ScriptRunner, VIRTUAL_STORE_DIR,
+};

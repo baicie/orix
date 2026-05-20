@@ -38,8 +38,15 @@ crates/
 | [安装管道](./core.md) | `crates/core` | 编排完整安装流程：resolve → fetch → store → link → lockfile。 |
 | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) | `crates/manifest` + `crates/domain` + `crates/utils` + `crates/macros` | `package.json` 输入模型、共享领域类型、integrity/parser、路径工具和过程宏边界。 |
 | [Lifecycle Scripts](./lifecycle-scripts.md) | `crates/cli` + `crates/core` + `crates/manifest` + `crates/workspace` | `orix run`、安装 lifecycle、脚本执行器、安全策略和 workspace 作用域。 |
+| [CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md) | `crates/cli` + `crates/core` | 脚本参数无 `--` 透传、`oi dev` 隐式 run、项目/依赖 postinstall 根因与修复顺序。 |
 | [生态兼容](./ecosystem-compat.md) | `crates/resolver` + `crates/lockfile` + `crates/workspace` + `crates/fetcher` + `crates/core` | peerDependencies、pnpm-lock.yaml、patch、catalogs 和 deploy。 |
 | [测试、集成与质量](./testing-quality.md) | `tests/` + CI | 测试分层、端到端 fixture、Windows 链接测试、`make check` 和质量工具。 |
+
+## 已知问题
+
+| 文档 | 说明 |
+| --- | --- |
+| [Issues 目录](../isuess/README.md) | Windows link 后系统卡顿、lockfile 不随版本升级更新等结论与修复方案。 |
 
 ## TODO 覆盖情况
 

@@ -4,6 +4,8 @@
 
 `crates/cli` 是二进制入口点。它解析命令行参数，从 `.npmrc` 加载配置，并将任务委托给核心库。`crates/config` 处理所有配置源：默认值、环境变量、`.npmrc` 和 CLI 参数。
 
+**相关文档**：[CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md)（参数无 `--` 透传、`oi dev` 隐式 run、安装脚本缺口与修复顺序）。
+
 ## CLI 命令
 
 ### Install（安装）
@@ -74,8 +76,13 @@ orix store path
 # 执行当前 package 的 scripts.build
 orix run build
 
-# 参数透传给主脚本
-orix run dev -- --host 0.0.0.0
+# 参数透传给主脚本（脚本名之后无需 `--`，与 pnpm 一致）
+orix run dev --host 0.0.0.0
+orix run build -w --config rollup.config.mjs
+
+# 隐式 run：未匹配内置子命令时等同 orix run（见专项设计文档）
+orix dev
+orix dev --host 0.0.0.0
 
 # 在 workspace 子包中执行
 orix run --workspace @scope/ui build
@@ -84,7 +91,10 @@ orix run --workspace @scope/ui build
 orix run --recursive --if-present test
 ```
 
-详细执行模型、PATH、环境变量、安全策略和 workspace 拓扑顺序见 [Lifecycle Scripts](./lifecycle-scripts.md)。
+- orix 专属选项（`--recursive`、`--workspace`、`--if-present`）须写在**脚本名之前**；脚本名之后的 `-` 开头参数一律交给脚本。
+- 仍支持 npm 习惯：`orix run dev -- --host`（会剥掉一层 `--`）。
+
+详细执行模型、PATH、环境变量、安全策略和 workspace 拓扑顺序见 [Lifecycle Scripts](./lifecycle-scripts.md)。透传解析、隐式 `run` 与 `postinstall` 修复见 [CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md)。
 
 ### 其他
 
@@ -215,8 +225,8 @@ struct RunArgs {
     #[arg(long, short = 'r')]
     recursive: bool,
 
-    /// 传给脚本的剩余参数
-    #[arg(trailing_var_arg = true)]
+    /// 传给脚本的剩余参数（脚本名之后；支持 `-` 开头，见 cli-run-passthrough-lifecycle.md）
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }
 
