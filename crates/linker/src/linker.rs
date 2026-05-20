@@ -18,6 +18,8 @@ use super::{LayoutReport, LinkReport};
 
 const VIRTUAL_STORE_DIR: &str = ".orix";
 const METADATA_FILE: &str = "metadata.json";
+/// Bump when link layout semantics change (forces relink on next install).
+const LINK_PROTOCOL_VERSION: u32 = 2;
 
 /// Marker written to node_modules/.orix/metadata.json after a successful link.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +30,9 @@ struct LinkerMarker {
     pub orix_version: String,
     /// Number of packages linked.
     pub package_count: usize,
+    /// Layout protocol generation; mismatch invalidates cached layout.
+    #[serde(default)]
+    pub link_protocol_version: u32,
 }
 
 /// The linker creates the Orix virtual node_modules structure using hardlinks and symlinks.
@@ -63,7 +68,11 @@ impl Linker {
     /// Returns true if the marker exists and the graph hash matches.
     pub fn is_layout_valid(&self, graph_hash: &str) -> bool {
         match self.read_marker() {
-            Some(marker) => marker.graph_hash == graph_hash && self.bin_shims_are_valid(),
+            Some(marker) => {
+                marker.graph_hash == graph_hash
+                    && marker.link_protocol_version == LINK_PROTOCOL_VERSION
+                    && self.bin_shims_are_valid()
+            }
             None => false,
         }
     }
@@ -147,6 +156,7 @@ impl Linker {
             graph_hash: graph_hash.to_string(),
             orix_version: env!("CARGO_PKG_VERSION").to_string(),
             package_count,
+            link_protocol_version: LINK_PROTOCOL_VERSION,
         };
         let json = serde_json::to_string_pretty(&marker)?;
         let path = self.marker_path();
@@ -285,7 +295,16 @@ impl Linker {
                     dep_name.as_str(),
                 );
 
-                if !path_exists_or_symlink(&symlink_path) {
+                if Self::dir_link_needs_repair(&symlink_path, &target) {
+                    if path_exists_or_symlink(&symlink_path) {
+                        remove_link_path(&symlink_path).with_context(|| {
+                            format!(
+                                "failed to remove stale dependency link for {}: {}",
+                                pkg_key,
+                                symlink_path.display()
+                            )
+                        })?;
+                    }
                     if let Some(parent) = symlink_path.parent() {
                         fs::create_dir_all(parent)?;
                         let symlink_target = relative_path(parent, &target);
@@ -312,7 +331,16 @@ impl Linker {
             let target = Self::package_path_in_node_modules(&target, &direct_name);
             let link = Self::package_path_in_node_modules(&self.node_modules, &direct_name);
 
-            if !link.exists() {
+            if Self::dir_link_needs_repair(&link, &target) {
+                if path_exists_or_symlink(&link) {
+                    remove_link_path(&link).with_context(|| {
+                        format!(
+                            "failed to remove stale direct dependency link {}: {}",
+                            direct_name,
+                            link.display()
+                        )
+                    })?;
+                }
                 if let Some(parent) = link.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -983,7 +1011,13 @@ if (Test-Path $exe) {{\n\
                         .join(target)
                 };
 
-                if !resolved.exists() {
+                if is_bare_drive_path(&resolved) || resolves_to_drive_root_only(&resolved) {
+                    report.broken.push(format!(
+                        "unsafe directory link {} -> {} (bare drive root)",
+                        link_path.display(),
+                        resolved.display()
+                    ));
+                } else if !resolved.exists() {
                     report.broken.push(format!(
                         "broken symlink {} -> {}",
                         link_path.display(),
@@ -994,6 +1028,45 @@ if (Test-Path $exe) {{\n\
         }
 
         Ok(report)
+    }
+
+    /// True when `link` is missing or points at a different / unsafe target than `expected`.
+    fn dir_link_needs_repair(link: &Path, expected: &Path) -> bool {
+        if !path_exists_or_symlink(link) {
+            return true;
+        }
+
+        #[cfg(windows)]
+        {
+            let Ok(raw_target) = fs::read_link(link) else {
+                return true;
+            };
+            let resolved = if raw_target.is_absolute() {
+                raw_target
+            } else {
+                link.parent()
+                    .unwrap_or_else(|| Path::new(""))
+                    .join(&raw_target)
+            };
+
+            if is_bare_drive_path(&resolved) || resolves_to_drive_root_only(&resolved) {
+                return true;
+            }
+
+            let Ok(expected_canon) = expected.canonicalize() else {
+                return true;
+            };
+            let Ok(link_canon) = resolved.canonicalize() else {
+                return true;
+            };
+            return link_canon != expected_canon;
+        }
+
+        #[cfg(not(windows))]
+        {
+            let _ = (link, expected);
+            false
+        }
     }
 
     /// True when every file listed in store integrity metadata exists under `pkg_dir`.
@@ -1066,6 +1139,25 @@ fn remove_link_path(path: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(path)
     }
+}
+
+/// True for paths like `D:` that make Node resolve modules to a drive root (`EISDIR`).
+fn is_bare_drive_path(path: &Path) -> bool {
+    let s = path.as_os_str().to_string_lossy();
+    let trimmed = s.trim_end_matches(['\\', '/']);
+    let bytes = trimmed.as_bytes();
+    bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+/// True when a canonicalized path is only a volume root (e.g. `D:\` with no package segments).
+fn resolves_to_drive_root_only(path: &Path) -> bool {
+    if is_bare_drive_path(path) {
+        return true;
+    }
+    let Ok(canon) = path.canonicalize() else {
+        return false;
+    };
+    !canon.is_dir() || normal_components(&canon).is_empty()
 }
 
 #[cfg(windows)]
@@ -1995,6 +2087,13 @@ mod tests {
 
         assert_eq!(created, 0); // Second call should not create again
         Ok(())
+    }
+
+    #[test]
+    fn is_bare_drive_path_detects_drive_letter_only() {
+        assert!(is_bare_drive_path(Path::new("D:")));
+        assert!(is_bare_drive_path(Path::new("d:\\")));
+        assert!(!is_bare_drive_path(Path::new("D:\\workspace\\proj")));
     }
 
     #[cfg(windows)]
