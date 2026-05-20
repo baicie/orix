@@ -779,7 +779,10 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     );
     let fetch_instant = Instant::now();
 
-    let total_to_fetch = graph.len();
+    let total_to_fetch = graph
+        .packages()
+        .filter(|pkg| is_fetchable_package(pkg))
+        .count();
     send_event(
         &opts.progress_tx,
         InstallEvent::FetchProgress {
@@ -1128,23 +1131,45 @@ async fn fetch_only_missing(
 ) -> Result<(orix_domain::DependencyGraph, orix_fetcher::FetchReport)> {
     let mut missing = orix_domain::DependencyGraph::new();
     for pkg in graph.packages() {
-        if !store.contains(&pkg.id) {
+        if is_fetchable_package(pkg) && !store.contains(&pkg.id) {
             missing.insert(pkg.clone());
         }
     }
+    let total_fetchable = graph
+        .packages()
+        .filter(|pkg| is_fetchable_package(pkg))
+        .count();
+    let cached = total_fetchable.saturating_sub(missing.len());
 
     if missing.is_empty() {
-        debug!(target: "orix", "all {} packages already in store, skipping fetch", graph.len());
+        debug!(target: "orix", "all {} fetchable packages already in store, skipping fetch", total_fetchable);
+        send_event(
+            &progress_tx,
+            InstallEvent::FetchProgress {
+                done: total_fetchable,
+                total: total_fetchable,
+                package: None,
+            },
+        );
         return Ok((graph.clone(), orix_fetcher::FetchReport::default()));
     }
 
-    debug!(target: "orix", "found {} packages in store, fetching {} missing", graph.len() - missing.len(), missing.len());
+    debug!(target: "orix", "found {} packages in store, fetching {} missing", cached, missing.len());
 
-    let total_to_fetch = missing.len();
+    let total_to_fetch = total_fetchable;
+    send_event(
+        &progress_tx,
+        InstallEvent::FetchProgress {
+            done: cached,
+            total: total_to_fetch,
+            package: None,
+        },
+    );
+
     let install_progress_tx = progress_tx.clone();
     let (fetch_progress_tx, mut fetch_progress_rx) = mpsc::channel(8192);
     let fetch_progress_forwarder = tokio::spawn(async move {
-        let mut fetched_count: usize = 0;
+        let mut fetched_count: usize = cached;
         while let Some(event) = fetch_progress_rx.recv().await {
             match event {
                 FetchEvent::PackageFetched(package) => {
@@ -1181,13 +1206,18 @@ async fn fetch_only_missing(
     send_event(
         &progress_tx,
         InstallEvent::FetchProgress {
-            done: fetch_report.success,
+            done: cached + fetch_report.success,
             total: total_to_fetch,
             package: None,
         },
     );
 
     Ok((graph.clone(), fetch_report))
+}
+
+fn is_fetchable_package(pkg: &orix_domain::ResolvedPackage) -> bool {
+    !pkg.tarball.is_empty()
+        && orix_domain::check_platform_compatibility(&pkg.os, &pkg.cpu).is_none()
 }
 
 /// Return the resolved store path for this project.

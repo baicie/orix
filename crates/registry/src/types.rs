@@ -32,16 +32,16 @@ pub struct PackageMetadata {
     #[serde(default)]
     pub dependencies: HashMap<String, String>,
     /// Development dependencies.
-    #[serde(default)]
+    #[serde(rename = "devDependencies", default)]
     pub dev_dependencies: HashMap<String, String>,
     /// Optional dependencies.
-    #[serde(default)]
+    #[serde(rename = "optionalDependencies", default)]
     pub optional_dependencies: HashMap<String, String>,
     /// Peer dependencies.
-    #[serde(default)]
+    #[serde(rename = "peerDependencies", default)]
     pub peer_dependencies: HashMap<String, String>,
     /// Peer dependencies metadata (e.g., optional: true).
-    #[serde(default)]
+    #[serde(rename = "peerDependenciesMeta", default)]
     pub peer_dependencies_meta: HashMap<String, PeerDepMeta>,
     /// Engine constraints.
     #[serde(default, deserialize_with = "deserialize_engines")]
@@ -59,7 +59,7 @@ pub struct PackageMetadata {
     #[serde(default)]
     pub optional: bool,
     /// Deprecation message, if any.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub deprecated: Option<String>,
     /// Bin entries for CLI commands.
     #[serde(default, deserialize_with = "deserialize_bin")]
@@ -68,13 +68,18 @@ pub struct PackageMetadata {
     #[serde(default)]
     pub directories: Directories,
     /// Whether a shrinkwrap is present.
-    #[serde(default)]
+    #[serde(rename = "hasShrinkwrap", default)]
     pub has_shrinkwrap: bool,
     /// Whether an install script is present.
-    #[serde(default)]
+    #[serde(rename = "hasInstallScript", default)]
     pub has_install_script: bool,
     /// Bundled dependencies.
-    #[serde(default)]
+    #[serde(
+        rename = "bundleDependencies",
+        alias = "bundledDependencies",
+        default,
+        deserialize_with = "deserialize_bundle_dependencies"
+    )]
     pub bundle_dependencies: Vec<String>,
     /// Scripts map.
     #[serde(default)]
@@ -86,13 +91,13 @@ pub struct PackageMetadata {
     #[serde(default)]
     pub repository: Option<serde_json::Value>,
     /// Homepage URL.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub homepage: Option<String>,
     /// Package description.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub description: Option<String>,
     /// License (SPDX identifier).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub license: Option<String>,
     /// Keywords.
     #[serde(default)]
@@ -147,6 +152,46 @@ where
         BinField::Map(m) => Ok(m),
         BinField::String(s) => Ok(HashMap::from([(String::new(), s)])),
     }
+}
+
+fn deserialize_bundle_dependencies<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BundleDependenciesField {
+        List(Vec<String>),
+        One(String),
+        Other(IgnoredAny),
+    }
+
+    Ok(
+        match Option::<BundleDependenciesField>::deserialize(deserializer)? {
+            Some(BundleDependenciesField::List(deps)) => deps,
+            Some(BundleDependenciesField::One(dep)) => vec![dep],
+            Some(BundleDependenciesField::Other(_)) | None => Vec::new(),
+        },
+    )
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OptionalStringField {
+        String(String),
+        Other(IgnoredAny),
+    }
+
+    Ok(
+        match Option::<OptionalStringField>::deserialize(deserializer)? {
+            Some(OptionalStringField::String(value)) => Some(value),
+            Some(OptionalStringField::Other(_)) | None => None,
+        },
+    )
 }
 
 /// Distribution info for a published package version.
@@ -230,6 +275,104 @@ mod tests {
         )?;
 
         assert!(metadata.dist.is_none());
+        assert_eq!(
+            metadata.optional_dependencies.get("fsevents"),
+            Some(&"2.3.0".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn package_metadata_reads_npm_camel_case_dependency_fields() -> anyhow::Result<()> {
+        let metadata: PackageMetadata = serde_json::from_str(
+            r#"{
+                "name": "rollup",
+                "version": "4.60.4",
+                "dependencies": {
+                    "@types/estree": "1.0.8"
+                },
+                "devDependencies": {
+                    "typescript": "5.9.3"
+                },
+                "optionalDependencies": {
+                    "@rollup/rollup-darwin-arm64": "4.60.4"
+                },
+                "peerDependencies": {
+                    "node-gyp": "*"
+                },
+                "peerDependenciesMeta": {
+                    "node-gyp": {
+                        "optional": true
+                    }
+                },
+                "hasShrinkwrap": true,
+                "hasInstallScript": true,
+                "bundleDependencies": ["bundled-dep"],
+                "dist": { "tarball": "https://registry.example/rollup.tgz" }
+            }"#,
+        )?;
+
+        assert_eq!(
+            metadata.dependencies.get("@types/estree"),
+            Some(&"1.0.8".to_string())
+        );
+        assert_eq!(
+            metadata.dev_dependencies.get("typescript"),
+            Some(&"5.9.3".to_string())
+        );
+        assert_eq!(
+            metadata
+                .optional_dependencies
+                .get("@rollup/rollup-darwin-arm64"),
+            Some(&"4.60.4".to_string())
+        );
+        assert_eq!(
+            metadata.peer_dependencies.get("node-gyp"),
+            Some(&"*".to_string())
+        );
+        assert!(metadata
+            .peer_dependencies_meta
+            .get("node-gyp")
+            .is_some_and(|meta| meta.optional));
+        assert!(metadata.has_shrinkwrap);
+        assert!(metadata.has_install_script);
+        assert_eq!(metadata.bundle_dependencies, vec!["bundled-dep"]);
+        Ok(())
+    }
+
+    #[test]
+    fn package_metadata_accepts_boolean_bundle_dependencies() -> anyhow::Result<()> {
+        let metadata: PackageMetadata = serde_json::from_str(
+            r#"{
+                "name": "rolldown",
+                "version": "1.0.0",
+                "bundleDependencies": false,
+                "dist": { "tarball": "https://registry.example/rolldown.tgz" }
+            }"#,
+        )?;
+
+        assert!(metadata.bundle_dependencies.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn package_metadata_ignores_boolean_optional_text_fields() -> anyhow::Result<()> {
+        let metadata: PackageMetadata = serde_json::from_str(
+            r#"{
+                "name": "react-is",
+                "version": "16.8.0-alpha.0",
+                "deprecated": false,
+                "homepage": false,
+                "description": false,
+                "license": false,
+                "dist": { "tarball": "https://registry.example/react-is.tgz" }
+            }"#,
+        )?;
+
+        assert!(metadata.deprecated.is_none());
+        assert!(metadata.homepage.is_none());
+        assert!(metadata.description.is_none());
+        assert!(metadata.license.is_none());
         Ok(())
     }
 

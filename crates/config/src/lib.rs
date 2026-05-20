@@ -264,7 +264,7 @@ fn first_env<const N: usize>(keys: [&str; N]) -> Option<String> {
     keys.into_iter().find_map(|key| env::var(key).ok())
 }
 
-fn default_store_dir(project_root: &Path) -> PathBuf {
+fn default_store_dir(_project_root: &Path) -> PathBuf {
     #[cfg(windows)]
     {
         if let Some(root) = volume_root(project_root) {

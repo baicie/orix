@@ -255,6 +255,7 @@ impl PnpmLockfile {
                 }),
                 dependencies: pkg.dependencies,
                 optional_dependencies: pkg.optional_dependencies,
+                peer_dependencies: pkg.peer_dependencies,
                 engines: pkg.engines,
                 os: if pkg.os.is_empty() {
                     None
@@ -292,6 +293,7 @@ impl PnpmLockfile {
                         cpu: dep.cpu,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
+                        peer_dependencies: BTreeMap::new(),
                     },
                 );
             }
@@ -310,6 +312,7 @@ impl PnpmLockfile {
                         cpu: dep.cpu,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
+                        peer_dependencies: BTreeMap::new(),
                     },
                 );
             }
@@ -328,6 +331,7 @@ impl PnpmLockfile {
                         cpu: dep.cpu,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
+                        peer_dependencies: BTreeMap::new(),
                     },
                 );
             }
@@ -525,6 +529,7 @@ packages:
                 cpu: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
             })
         );
         Ok(())

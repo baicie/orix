@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use tracing::{debug, trace, warn};
 use walkdir::WalkDir;
 
-use orix_domain::DependencyGraph;
+use orix_domain::{ConstraintKind, DependencyGraph, PackageId, PackageName, VersionConstraint};
 use orix_store::Store;
 
 use super::{LayoutReport, LinkReport};
@@ -92,7 +92,48 @@ impl Linker {
 
     #[cfg(not(windows))]
     fn bin_shims_are_valid(&self) -> bool {
-        true
+        let bin_dir = self.node_modules.join(".bin");
+        if !bin_dir.is_dir() {
+            return true;
+        }
+
+        WalkDir::new(&bin_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_symlink() || entry.file_type().is_file())
+            .all(|entry| {
+                let executable = fs::metadata(entry.path())
+                    .map(|metadata| metadata.mode() & 0o111 != 0)
+                    .unwrap_or(false);
+                executable && self.bin_shim_points_into_package(entry.path())
+            })
+    }
+
+    #[cfg(not(windows))]
+    fn bin_shim_points_into_package(&self, shim_path: &Path) -> bool {
+        let target = match fs::read_link(shim_path) {
+            Ok(target) => target,
+            Err(_) => return true,
+        };
+        let resolved = if target.is_absolute() {
+            target
+        } else {
+            shim_path
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .join(target)
+        };
+        let resolved = fs::canonicalize(&resolved).unwrap_or(resolved);
+
+        let virtual_store = self.node_modules.join(VIRTUAL_STORE_DIR);
+        if !path_starts_with_lexically(&resolved, &virtual_store) {
+            return true;
+        }
+
+        normal_components(&resolved)
+            .iter()
+            .any(|part| part == "node_modules")
     }
 
     /// Write the linker marker after a successful link.
@@ -134,6 +175,11 @@ impl Linker {
         // Build a lookup from package name -> pkg_id for quick dep resolution
         let name_to_key: HashMap<String, String> = graph
             .packages()
+            .map(|p| (p.id.name.to_string(), p.id.key()))
+            .collect();
+        let direct_name_to_key: HashMap<String, String> = graph
+            .packages()
+            .filter(|p| direct_deps.contains(p.id.name.as_str()))
             .map(|p| (p.id.name.to_string(), p.id.key()))
             .collect();
 
@@ -192,71 +238,83 @@ impl Linker {
                 self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
             }
 
-            // Create symlinks for this package's declared dependencies.
-            // Only create if the target package has been imported into the virtual store.
-            // Transitive deps that haven't been imported yet will be handled when their
-            // parent package is processed (if needed) or skipped (pnpm's standard behavior).
-            for (dep_name, _) in pkg
-                .dependencies
-                .iter()
-                .chain(pkg.optional_dependencies.iter())
-            {
-                if let Some(dep_key) = name_to_key.get(dep_name.as_str()) {
-                    let symlink_path = Self::package_path_in_node_modules(
-                        &pkg_dir.join("node_modules"),
-                        dep_name.as_str(),
-                    );
-                    let dep_store_dir = virtual_store_dir.join(dep_key);
-                    // Only create the symlink if the target package has been imported.
-                    // This avoids broken symlinks for transitive deps not yet processed.
-                    if !dep_store_dir.exists() {
-                        continue;
-                    }
-
-                    // The symlink target is the dep's store directory.
-                    // The symlink name (dep_name) matches the directory name inside dep_store_dir,
-                    // so the target is just dep_store_dir itself.
-                    let target = &dep_store_dir;
-
-                    if !symlink_path.exists() {
-                        if let Some(parent) = symlink_path.parent() {
-                            fs::create_dir_all(parent)?;
-                            let symlink_target = relative_path(parent, target);
-                            Self::create_dir_link(&symlink_target, &symlink_path).with_context(
-                                || {
-                                    format!(
-                                        "failed to link dependency {} for {}: {} -> {}",
-                                        dep_name,
-                                        pkg_key,
-                                        symlink_path.display(),
-                                        target.display()
-                                    )
-                                },
-                            )?;
-                        }
-                        report.symlinks_created += 1;
-                    }
-                }
-            }
-
             // Import package files from the store using integrity metadata.
             // Uses integrity.files to avoid WalkDir, pre-creates all directories,
             // falls back to copy on EXDEV, and writes package.json last.
             self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
 
             // Link bin executables for this package into .orix/<pkg>/bin/
-            self.link_package_bins(&pkg_key, &store_files, &mut report)?;
+            let link_global_bins = direct_name_to_key
+                .get(pkg.id.name.as_str())
+                .is_some_and(|direct_key| direct_key == &pkg_key);
+            self.link_package_bins(&pkg_key, &store_files, link_global_bins, &mut report)?;
         }
 
-        // Create top-level symlinks for direct dependencies
+        // Create package-internal dependency links after all packages have been imported.
+        // This keeps optional dependencies from being skipped due to graph iteration order.
         for pkg in graph.packages() {
-            if !direct_deps.contains(pkg.id.name.as_str()) {
-                continue;
-            }
+            let pkg_key = pkg.id.key();
+            let pkg_dir = Self::package_path_in_node_modules(
+                &virtual_store_dir.join(&pkg_key).join("node_modules"),
+                pkg.id.name.as_str(),
+            );
 
-            let target = virtual_store_dir.join(pkg.id.key()).join("node_modules");
-            let target = Self::package_path_in_node_modules(&target, pkg.id.name.as_str());
-            let link = Self::package_path_in_node_modules(&self.node_modules, pkg.id.name.as_str());
+            for (dep_name, raw) in pkg
+                .dependencies
+                .iter()
+                .chain(pkg.optional_dependencies.iter())
+                .chain(pkg.peer_dependencies.iter())
+            {
+                let Some(dep_key) = select_dependency_key(graph, dep_name, raw)
+                    .or_else(|| name_to_key.get(dep_name.as_str()).cloned())
+                else {
+                    continue;
+                };
+                let target = Self::package_path_in_node_modules(
+                    &virtual_store_dir.join(&dep_key).join("node_modules"),
+                    dep_name.as_str(),
+                );
+                if !target.exists() {
+                    trace!(
+                        pkg = %pkg_key,
+                        dep = %dep_name,
+                        missing = %target.display(),
+                        "dependency target not in virtual store"
+                    );
+                    continue;
+                }
+
+                let symlink_path = Self::package_path_in_node_modules(
+                    &pkg_dir.join("node_modules"),
+                    dep_name.as_str(),
+                );
+
+                if !path_exists_or_symlink(&symlink_path) {
+                    if let Some(parent) = symlink_path.parent() {
+                        fs::create_dir_all(parent)?;
+                        let symlink_target = relative_path(parent, &target);
+                        Self::create_dir_link(&symlink_target, &symlink_path).with_context(
+                            || {
+                                format!(
+                                    "failed to link dependency {} for {}: {} -> {}",
+                                    dep_name,
+                                    pkg_key,
+                                    symlink_path.display(),
+                                    target.display()
+                                )
+                            },
+                        )?;
+                    }
+                    report.symlinks_created += 1;
+                }
+            }
+        }
+
+        // Create top-level symlinks for direct dependencies.
+        for (direct_name, direct_key) in direct_name_to_key {
+            let target = virtual_store_dir.join(direct_key).join("node_modules");
+            let target = Self::package_path_in_node_modules(&target, &direct_name);
+            let link = Self::package_path_in_node_modules(&self.node_modules, &direct_name);
 
             if !link.exists() {
                 if let Some(parent) = link.parent() {
@@ -265,7 +323,7 @@ impl Linker {
                 Self::create_dir_link(&target, &link).with_context(|| {
                     format!(
                         "failed to link direct dependency {}: {} -> {}",
-                        pkg.id.name,
+                        direct_name,
                         link.display(),
                         target.display()
                     )
@@ -460,6 +518,7 @@ impl Linker {
         &self,
         pkg_key: &str,
         store_files: &Path,
+        link_global_bins: bool,
         report: &mut LinkReport,
     ) -> Result<()> {
         let pkg_json_path = store_files.join("package.json");
@@ -488,9 +547,15 @@ impl Linker {
             _ => return Ok(()),
         };
 
-        // Flat package dir: .orix/pkg@ver/ (parent of the package-name subdirectory).
+        let pkg_name = pkg_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        if pkg_name.is_empty() {
+            return Ok(());
+        }
+
+        // Package dir: .orix/<pkg>@<ver>/node_modules/<pkg>/.
         let package_store_dir = self.node_modules.join(VIRTUAL_STORE_DIR).join(pkg_key);
-        let flat_pkg_dir = package_store_dir.parent().unwrap_or(&package_store_dir);
+        let package_dir =
+            Self::package_path_in_node_modules(&package_store_dir.join("node_modules"), pkg_name);
         let global_bin_dir = self.node_modules.join(".bin");
 
         for (bin_name, bin_path) in bin_entries {
@@ -519,48 +584,34 @@ impl Linker {
             // Shim bin name (also flattened).
             let shim_bin_name = flat_bin_name;
 
-            // Destination in flat package dir: .orix/pkg@ver/bin/<flat_name>
-            let flat_bin_dest = flat_pkg_dir.join("bin").join(flat_bin_name);
-            let flat_bin_dest_parent = flat_bin_dest.parent().unwrap_or(&flat_bin_dest);
+            let package_bin = package_dir.join(&bin_path);
+            if !package_bin.exists() {
+                trace!(
+                    pkg = %pkg_key,
+                    bin = %bin_name,
+                    missing = %package_bin.display(),
+                    "bin target not in linked package"
+                );
+                continue;
+            }
 
-            fs::create_dir_all(flat_bin_dest_parent)?;
+            Self::ensure_bin_executable(&package_bin).with_context(|| {
+                format!("failed to make bin executable: {}", package_bin.display())
+            })?;
 
-            // Only hard-link/copy the bin file if the destination doesn't exist yet.
-            if !flat_bin_dest.exists() {
-                #[allow(clippy::incompatible_msrv)]
-                if let Err(e) = fs::hard_link(&bin_source, &flat_bin_dest) {
-                    if e.kind() == io::ErrorKind::PermissionDenied
-                        || e.kind() == io::ErrorKind::NotFound
-                        || e.kind() == io::ErrorKind::CrossesDevices
-                    {
-                        fs::copy(&bin_source, &flat_bin_dest).with_context(|| {
-                            format!(
-                                "failed to copy bin {} -> {}",
-                                bin_source.display(),
-                                flat_bin_dest.display()
-                            )
-                        })?;
-                    } else {
-                        return Err(e).with_context(|| {
-                            format!(
-                                "failed to hard-link bin {} -> {}",
-                                bin_source.display(),
-                                flat_bin_dest.display()
-                            )
-                        });
-                    }
-                }
+            if !link_global_bins {
+                continue;
             }
 
             // Global shims: only create if the bin file was successfully placed.
-            if flat_bin_dest.exists() {
+            if package_bin.exists() {
                 #[cfg(windows)]
                 {
                     // Resolve the bin to an absolute path so the shim works from any cwd.
-                    let absolute_bin = bin_source.canonicalize().with_context(|| {
+                    let absolute_bin = package_bin.canonicalize().with_context(|| {
                         format!(
-                            "failed to resolve bin source {} for shim",
-                            bin_source.display()
+                            "failed to resolve bin target {} for shim",
+                            package_bin.display()
                         )
                     })?;
 
@@ -580,7 +631,7 @@ impl Linker {
                         }
                         let rel = relative_path(
                             shim_link.parent().unwrap_or(std::path::Path::new(".")),
-                            &flat_bin_dest,
+                            &package_bin,
                         );
                         std::os::unix::fs::symlink(&rel, &shim_link)?;
                         report.symlinks_created += 1;
@@ -589,6 +640,21 @@ impl Linker {
             }
         }
 
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn ensure_bin_executable(path: &Path) -> io::Result<()> {
+        let metadata = fs::metadata(path)?;
+        let mode = metadata.mode();
+        if mode & 0o111 != 0 {
+            return Ok(());
+        }
+        fs::set_permissions(path, PermissionsExt::from_mode((mode | 0o111) & 0o777))
+    }
+
+    #[cfg(not(unix))]
+    fn ensure_bin_executable(_path: &Path) -> io::Result<()> {
         Ok(())
     }
 
@@ -830,6 +896,36 @@ fn path_exists_or_symlink(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
 }
 
+fn path_starts_with_lexically(path: &Path, prefix: &Path) -> bool {
+    let path_components = normal_components(path);
+    let prefix_components = normal_components(prefix);
+    path_components.starts_with(&prefix_components)
+}
+
+fn select_dependency_key(
+    graph: &DependencyGraph,
+    dep_name: &PackageName,
+    raw: &str,
+) -> Option<String> {
+    let constraint = VersionConstraint::parse(raw).ok()?;
+    graph
+        .packages()
+        .filter(|pkg| pkg.id.name == *dep_name && package_matches_constraint(&pkg.id, &constraint))
+        .map(|pkg| pkg.id.key())
+        .last()
+}
+
+fn package_matches_constraint(pkg_id: &PackageId, constraint: &VersionConstraint) -> bool {
+    match &constraint.kind {
+        ConstraintKind::Exact(version) => pkg_id.version == *version,
+        ConstraintKind::Range(req) => req.matches(&pkg_id.version),
+        ConstraintKind::AnyRange(ranges) => ranges.iter().any(|req| req.matches(&pkg_id.version)),
+        ConstraintKind::Alias { constraint, .. } => package_matches_constraint(pkg_id, constraint),
+        ConstraintKind::Patch(spec) => pkg_id.version == spec.package_version,
+        ConstraintKind::Latest | ConstraintKind::Tag(_) | ConstraintKind::Catalog(_) => true,
+    }
+}
+
 fn relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
     let from_components = normal_components(from_dir);
     let to_components = normal_components(to_path);
@@ -883,6 +979,31 @@ mod tests {
         version: &str,
         dependencies: Vec<(&str, &str)>,
     ) -> anyhow::Result<ResolvedPackage> {
+        resolved_package_with_optional(name, version, dependencies, Vec::new())
+    }
+
+    fn resolved_package_with_optional(
+        name: &str,
+        version: &str,
+        dependencies: Vec<(&str, &str)>,
+        optional_dependencies: Vec<(&str, &str)>,
+    ) -> anyhow::Result<ResolvedPackage> {
+        resolved_package_with_optional_and_peers(
+            name,
+            version,
+            dependencies,
+            optional_dependencies,
+            Vec::new(),
+        )
+    }
+
+    fn resolved_package_with_optional_and_peers(
+        name: &str,
+        version: &str,
+        dependencies: Vec<(&str, &str)>,
+        optional_dependencies: Vec<(&str, &str)>,
+        peer_dependencies: Vec<(&str, &str)>,
+    ) -> anyhow::Result<ResolvedPackage> {
         Ok(ResolvedPackage {
             id: pkg_id(name, version)?,
             integrity: String::new(),
@@ -892,8 +1013,14 @@ mod tests {
                 .map(|(name, version)| (PackageName::from(name), version.to_string()))
                 .collect(),
             dev_dependencies: Vec::new(),
-            optional_dependencies: Vec::new(),
-            peer_dependencies: Vec::new(),
+            optional_dependencies: optional_dependencies
+                .into_iter()
+                .map(|(name, version)| (PackageName::from(name), version.to_string()))
+                .collect(),
+            peer_dependencies: peer_dependencies
+                .into_iter()
+                .map(|(name, version)| (PackageName::from(name), version.to_string()))
+                .collect(),
             engines: None,
             os: Vec::new(),
             cpu: Vec::new(),
@@ -941,6 +1068,30 @@ mod tests {
             "#!/usr/bin/env node\n",
         )?;
         let id = pkg_id(name, version)?;
+        store.import_package(&id, &source, Vec::new(), None)?;
+        Ok(id)
+    }
+
+    fn import_package_with_rollup_style_bin(
+        store: &Store,
+        temp_root: &Path,
+    ) -> anyhow::Result<PackageId> {
+        let source = temp_root.join("rollup-4.0.0-relative-bin");
+        fs::create_dir_all(source.join("bin"))?;
+        fs::create_dir_all(source.join("shared"))?;
+        fs::write(
+            source.join("package.json"),
+            r#"{"name":"rollup","version":"4.0.0","bin":{"rollup":"./bin/rollup"}}"#,
+        )?;
+        fs::write(
+            source.join("bin").join("rollup"),
+            "#!/usr/bin/env node\nrequire('../shared/rollup.js');\n",
+        )?;
+        fs::write(
+            source.join("shared").join("rollup.js"),
+            "module.exports = 1;\n",
+        )?;
+        let id = pkg_id("rollup", "4.0.0")?;
         store.import_package(&id, &source, Vec::new(), None)?;
         Ok(id)
     }
@@ -1060,6 +1211,125 @@ mod tests {
             .join("@scope")
             .join("child")
             .exists());
+        let dep_link = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("@scope")
+            .join("parent@1.0.0")
+            .join("node_modules")
+            .join("@scope")
+            .join("parent")
+            .join("node_modules")
+            .join("@scope")
+            .join("child");
+        let resolved = fs::canonicalize(&dep_link)?;
+        let expected = fs::canonicalize(
+            temp.path()
+                .join("node_modules")
+                .join(".orix")
+                .join("@scope")
+                .join("child@1.0.0")
+                .join("node_modules")
+                .join("@scope")
+                .join("child"),
+        )?;
+        assert_eq!(resolved, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_links_optional_dependencies_after_all_packages_are_imported() -> anyhow::Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "rollup", "4.0.0")?;
+        import_package(&store, temp.path(), "@rollup/rollup-darwin-arm64", "4.0.0")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package_with_optional(
+            "rollup",
+            "4.0.0",
+            Vec::new(),
+            vec![("@rollup/rollup-darwin-arm64", "4.0.0")],
+        )?);
+        graph.insert(resolved_package(
+            "@rollup/rollup-darwin-arm64",
+            "4.0.0",
+            Vec::new(),
+        )?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let native_link = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup@4.0.0")
+            .join("node_modules")
+            .join("rollup")
+            .join("node_modules")
+            .join("@rollup")
+            .join("rollup-darwin-arm64");
+        let resolved = fs::canonicalize(&native_link)?;
+        let expected = fs::canonicalize(
+            temp.path()
+                .join("node_modules")
+                .join(".orix")
+                .join("@rollup")
+                .join("rollup-darwin-arm64@4.0.0")
+                .join("node_modules")
+                .join("@rollup")
+                .join("rollup-darwin-arm64"),
+        )?;
+
+        assert_eq!(resolved, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_links_peer_dependencies_when_present_in_graph() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "rollup-plugin-esbuild", "6.2.1")?;
+        import_package(&store, temp.path(), "esbuild", "0.27.0")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package_with_optional_and_peers(
+            "rollup-plugin-esbuild",
+            "6.2.1",
+            Vec::new(),
+            Vec::new(),
+            vec![("esbuild", ">=0.18.0")],
+        )?);
+        graph.insert(resolved_package("esbuild", "0.27.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup-plugin-esbuild".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let peer_link = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup-plugin-esbuild@6.2.1")
+            .join("node_modules")
+            .join("rollup-plugin-esbuild")
+            .join("node_modules")
+            .join("esbuild");
+        let resolved = fs::canonicalize(&peer_link)?;
+        let expected = fs::canonicalize(
+            temp.path()
+                .join("node_modules")
+                .join(".orix")
+                .join("esbuild@0.27.0")
+                .join("node_modules")
+                .join("esbuild"),
+        )?;
+
+        assert_eq!(resolved, expected);
         Ok(())
     }
 
@@ -1118,6 +1388,218 @@ mod tests {
             );
         }
 
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_graph_makes_package_bins_executable() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package_with_manifest(
+            &store,
+            temp.path(),
+            "rollup",
+            "4.0.0",
+            r#"{"name":"rollup","version":"4.0.0","bin":{"rollup":"./bin/index.mjs"}}"#,
+        )?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("rollup", "4.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let shim = temp.path().join("node_modules").join(".bin").join("rollup");
+        let target_metadata = fs::metadata(&shim)?;
+
+        assert!(
+            target_metadata.mode() & 0o111 != 0,
+            "bin shim target should be executable"
+        );
+        assert!(linker.is_layout_valid(&graph.graph_hash()));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_graph_keeps_bins_inside_package_for_relative_requires() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package_with_rollup_style_bin(&store, temp.path())?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("rollup", "4.0.0", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let shim = temp.path().join("node_modules").join(".bin").join("rollup");
+        let shim_target = fs::read_link(&shim)?;
+        let shim_parent = shim
+            .parent()
+            .context("rollup shim should have a parent directory")?;
+        let resolved = fs::canonicalize(shim_parent.join(shim_target))?;
+        let expected = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup@4.0.0")
+            .join("node_modules")
+            .join("rollup")
+            .join("bin")
+            .join("rollup");
+
+        assert_eq!(
+            normal_components(&resolved),
+            normal_components(&fs::canonicalize(expected)?)
+        );
+        let resolved_parent = resolved
+            .parent()
+            .context("resolved rollup bin should have a parent directory")?;
+        assert!(resolved_parent.join("../shared/rollup.js").exists());
+        assert!(!temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup@4.0.0")
+            .join("bin")
+            .join("rollup")
+            .exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_graph_prefers_direct_version_for_top_level_bins() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package_with_manifest(
+            &store,
+            temp.path(),
+            "rollup",
+            "1.32.1",
+            r#"{"name":"rollup","version":"1.32.1","bin":{"rollup":"./bin/index.mjs"}}"#,
+        )?;
+        import_package_with_manifest(
+            &store,
+            temp.path(),
+            "rollup",
+            "4.60.4",
+            r#"{"name":"rollup","version":"4.60.4","bin":{"rollup":"./bin/index.mjs"}}"#,
+        )?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package("rollup", "1.32.1", Vec::new())?);
+        graph.insert(resolved_package("rollup", "4.60.4", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let direct_link = temp.path().join("node_modules").join("rollup");
+        let direct_expected = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup@4.60.4")
+            .join("node_modules")
+            .join("rollup");
+        assert_eq!(
+            normal_components(&fs::canonicalize(direct_link)?),
+            normal_components(&fs::canonicalize(direct_expected)?)
+        );
+
+        let shim = temp.path().join("node_modules").join(".bin").join("rollup");
+        let shim_target = fs::read_link(&shim)?;
+        let shim_parent = shim
+            .parent()
+            .context("rollup shim should have a parent directory")?;
+        let resolved = fs::canonicalize(shim_parent.join(shim_target))?;
+        assert!(
+            normal_components(&resolved)
+                .iter()
+                .any(|part| part == "rollup@4.60.4"),
+            "rollup shim should point to direct rollup version"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn link_graph_selects_internal_dependency_by_declared_range() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        import_package(&store, temp.path(), "rollup-pluginutils", "2.8.2")?;
+        import_package(&store, temp.path(), "estree-walker", "0.6.1")?;
+        import_package(&store, temp.path(), "estree-walker", "3.0.3")?;
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package(
+            "rollup-pluginutils",
+            "2.8.2",
+            vec![("estree-walker", "^0.6.1")],
+        )?);
+        graph.insert(resolved_package("estree-walker", "0.6.1", Vec::new())?);
+        graph.insert(resolved_package("estree-walker", "3.0.3", Vec::new())?);
+
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let direct_deps = HashSet::from(["rollup-pluginutils".to_string()]);
+        linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+
+        let dep_link = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup-pluginutils@2.8.2")
+            .join("node_modules")
+            .join("rollup-pluginutils")
+            .join("node_modules")
+            .join("estree-walker");
+        let expected = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("estree-walker@0.6.1")
+            .join("node_modules")
+            .join("estree-walker");
+
+        assert_eq!(
+            normal_components(&fs::canonicalize(dep_link)?),
+            normal_components(&fs::canonicalize(expected)?)
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn layout_is_invalid_when_unix_bin_target_is_not_executable() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("store"))?;
+        let linker = Linker::new(store, temp.path().join("node_modules"));
+        let graph_hash = "same-graph";
+
+        let bin_dir = temp.path().join("node_modules").join(".bin");
+        let target_dir = temp
+            .path()
+            .join("node_modules")
+            .join(".orix")
+            .join("rollup@4.0.0")
+            .join("bin");
+        let target = target_dir.join("rollup");
+        fs::create_dir_all(&bin_dir)?;
+        fs::create_dir_all(&target_dir)?;
+        fs::write(&target, "#!/usr/bin/env node\n")?;
+        fs::set_permissions(&target, PermissionsExt::from_mode(0o644))?;
+        std::os::unix::fs::symlink("../.orix/rollup@4.0.0/bin/rollup", bin_dir.join("rollup"))?;
+        linker.write_marker(graph_hash, 1)?;
+
+        assert!(!linker.is_layout_valid(graph_hash));
+
+        fs::set_permissions(&target, PermissionsExt::from_mode(0o755))?;
+
+        assert!(linker.is_layout_valid(graph_hash));
         Ok(())
     }
 

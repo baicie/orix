@@ -12,7 +12,7 @@ use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Vers
 pub use pnpm::{PnpmImportError, PnpmLockfile};
 
 /// Lockfile format version.
-pub const LOCKFILE_VERSION: i32 = 1;
+pub const LOCKFILE_VERSION: i32 = 3;
 
 /// The lockfile root — mirrors pnpm's orix-lock.yaml structure.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +86,9 @@ pub struct ResolvedDep {
     /// Transitive optional dependencies.
     #[serde(rename = "optionalDependencies", default)]
     pub optional_dependencies: BTreeMap<String, String>,
+    /// Peer dependencies visible from this dependency.
+    #[serde(rename = "peerDependencies", default)]
+    pub peer_dependencies: BTreeMap<String, String>,
 }
 
 /// A resolved package entry in the lockfile.
@@ -111,6 +114,9 @@ pub struct PackageLock {
     /// Transitive optional dependencies.
     #[serde(rename = "optionalDependencies", default)]
     pub optional_dependencies: BTreeMap<String, String>,
+    /// Peer dependencies.
+    #[serde(rename = "peerDependencies", default)]
+    pub peer_dependencies: BTreeMap<String, String>,
     /// Node engine constraint.
     #[serde(rename = "engines", default)]
     pub engines: Option<String>,
@@ -194,6 +200,7 @@ impl Lockfile {
         use std::collections::BTreeMap;
 
         let mut lockfile = self.clone();
+        lockfile.version = LOCKFILE_VERSION;
 
         let importer = lockfile
             .importers
@@ -227,6 +234,11 @@ impl Lockfile {
                     .iter()
                     .map(|(n, c)| (n.to_string(), c.clone()))
                     .collect();
+                let peer_deps: BTreeMap<String, String> = pkg
+                    .peer_dependencies
+                    .iter()
+                    .map(|(n, c)| (n.to_string(), c.clone()))
+                    .collect();
                 importer.dependencies.insert(
                     name.clone(),
                     ResolvedDep {
@@ -240,6 +252,7 @@ impl Lockfile {
                         cpu: Some(pkg.cpu.clone()),
                         dependencies: deps,
                         optional_dependencies: opt_deps,
+                        peer_dependencies: peer_deps,
                     },
                 );
             }
@@ -257,6 +270,11 @@ impl Lockfile {
                     .iter()
                     .map(|(n, c)| (n.to_string(), c.clone()))
                     .collect();
+                let peer_deps: BTreeMap<String, String> = pkg
+                    .peer_dependencies
+                    .iter()
+                    .map(|(n, c)| (n.to_string(), c.clone()))
+                    .collect();
                 importer.dev_dependencies.insert(
                     name.clone(),
                     ResolvedDep {
@@ -270,6 +288,7 @@ impl Lockfile {
                         cpu: Some(pkg.cpu.clone()),
                         dependencies: deps,
                         optional_dependencies: opt_deps,
+                        peer_dependencies: peer_deps,
                     },
                 );
             }
@@ -287,6 +306,11 @@ impl Lockfile {
                     .iter()
                     .map(|(n, c)| (n.to_string(), c.clone()))
                     .collect();
+                let peer_deps: BTreeMap<String, String> = pkg
+                    .peer_dependencies
+                    .iter()
+                    .map(|(n, c)| (n.to_string(), c.clone()))
+                    .collect();
                 importer.optional_dependencies.insert(
                     name.clone(),
                     ResolvedDep {
@@ -300,6 +324,7 @@ impl Lockfile {
                         cpu: Some(pkg.cpu.clone()),
                         dependencies: deps,
                         optional_dependencies: opt_deps,
+                        peer_dependencies: peer_deps,
                     },
                 );
             }
@@ -314,6 +339,11 @@ impl Lockfile {
                 .collect();
             let opt_deps: BTreeMap<String, String> = pkg
                 .optional_dependencies
+                .iter()
+                .map(|(n, c)| (n.to_string(), c.clone()))
+                .collect();
+            let peer_deps: BTreeMap<String, String> = pkg
+                .peer_dependencies
                 .iter()
                 .map(|(n, c)| (n.to_string(), c.clone()))
                 .collect();
@@ -336,6 +366,7 @@ impl Lockfile {
                     }),
                     dependencies: deps,
                     optional_dependencies: opt_deps,
+                    peer_dependencies: peer_deps,
                     engines: pkg.engines.clone(),
                     os: Some(pkg.os.clone()),
                     cpu: Some(pkg.cpu.clone()),
@@ -410,6 +441,14 @@ impl Lockfile {
         manifest: &orix_manifest::Manifest,
         importer_id: &str,
     ) -> anyhow::Result<()> {
+        if self.version != LOCKFILE_VERSION {
+            anyhow::bail!(
+                "Lockfile version {} is not supported by this orix version (expected {}). Run orix install to regenerate it.",
+                self.version,
+                LOCKFILE_VERSION
+            );
+        }
+
         let importer = self.importers.get(importer_id).ok_or_else(|| {
             anyhow::anyhow!(
                 "Lockfile mismatch: importer '{}' is missing from lockfile",
@@ -447,6 +486,14 @@ impl Lockfile {
         _manifest: &orix_manifest::Manifest,
         importer_id: &str,
     ) -> anyhow::Result<()> {
+        if self.version != LOCKFILE_VERSION {
+            anyhow::bail!(
+                "Lockfile version {} is not supported by this orix version (expected {})",
+                self.version,
+                LOCKFILE_VERSION
+            );
+        }
+
         if let Some(importer) = self.importers.get(importer_id) {
             // We only need to check if the lockfile importer section exists.
             // Specifier mismatches are fine — we'll diff and report them.
@@ -547,10 +594,16 @@ pub fn resolve_from_lockfile_packages(packages: &BTreeMap<String, PackageLock>) 
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
+        let peer_deps: Vec<(PackageName, String)> = pkg
+            .peer_dependencies
+            .iter()
+            .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+            .collect();
 
         let depnodes: Vec<String> = deps
             .iter()
             .chain(opt_deps.iter())
+            .chain(peer_deps.iter())
             .map(|(n, _)| n.to_string())
             .collect();
 
@@ -561,7 +614,7 @@ pub fn resolve_from_lockfile_packages(packages: &BTreeMap<String, PackageLock>) 
             dependencies: deps,
             dev_dependencies: Vec::new(),
             optional_dependencies: opt_deps,
-            peer_dependencies: Vec::new(),
+            peer_dependencies: peer_deps,
             engines: pkg.engines.clone(),
             os: pkg.os.clone().unwrap_or_default(),
             cpu: pkg.cpu.clone().unwrap_or_default(),
@@ -641,6 +694,7 @@ mod tests {
             cpu: None,
             dependencies: BTreeMap::new(),
             optional_dependencies: BTreeMap::new(),
+            peer_dependencies: BTreeMap::new(),
         }
     }
 
@@ -662,6 +716,7 @@ mod tests {
             }),
             dependencies: BTreeMap::new(),
             optional_dependencies: BTreeMap::new(),
+            peer_dependencies: BTreeMap::new(),
             engines: None,
             os: None,
             cpu: None,
@@ -862,6 +917,7 @@ mod tests {
                 resolution: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
@@ -878,6 +934,7 @@ mod tests {
                 resolution: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
@@ -899,6 +956,7 @@ mod tests {
                 cpu: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
             },
         );
         lockfile.importers.insert(".".to_string(), importer);
@@ -929,6 +987,10 @@ mod tests {
                     "fsevents".to_string(),
                     "2.3.3".to_string(),
                 )]),
+                peer_dependencies: BTreeMap::from([(
+                    "esbuild".to_string(),
+                    ">=0.18.0".to_string(),
+                )]),
                 id: None,
                 local: None,
                 integrity: None,
@@ -952,6 +1014,7 @@ mod tests {
                 }),
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 id: None,
                 local: None,
                 integrity: None,
@@ -977,6 +1040,13 @@ mod tests {
             "expected scheduler@0.23.0 in {:?}",
             pkg_ids
         );
+        assert!(graph.packages().any(|pkg| {
+            pkg.id.name.as_str() == "react"
+                && pkg
+                    .peer_dependencies
+                    .iter()
+                    .any(|(name, range)| name.as_str() == "esbuild" && range == ">=0.18.0")
+        }));
     }
 
     #[test]
@@ -998,6 +1068,7 @@ mod tests {
                 version: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
@@ -1020,6 +1091,7 @@ mod tests {
                 version: None,
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,

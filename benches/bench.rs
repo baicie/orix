@@ -236,6 +236,7 @@ fn lockfile_serialize(c: &mut Criterion) {
                 }),
                 dependencies: BTreeMap::new(),
                 optional_dependencies: BTreeMap::new(),
+                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,

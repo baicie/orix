@@ -388,6 +388,10 @@ impl VersionConstraint {
 
 fn parse_npm_version_req(raw: &str) -> Result<VersionReq, semver::Error> {
     VersionReq::parse(raw).or_else(|_| {
+        if let Some(normalized) = normalize_npm_hyphen_range(raw) {
+            return VersionReq::parse(&normalized);
+        }
+
         let tokens = raw.split_whitespace().collect::<Vec<_>>();
         let mut normalized_parts = Vec::with_capacity(tokens.len());
         let mut i = 0;
@@ -404,6 +408,43 @@ fn parse_npm_version_req(raw: &str) -> Result<VersionReq, semver::Error> {
         let normalized = normalized_parts.join(", ");
         VersionReq::parse(&normalized)
     })
+}
+
+fn normalize_npm_hyphen_range(raw: &str) -> Option<String> {
+    let (lower, upper) = raw.split_once(" - ")?;
+    let lower = normalize_partial_version_lower(lower.trim())?;
+    let upper = normalize_partial_version_upper(upper.trim())?;
+    Some(format!(">={lower}, {upper}"))
+}
+
+fn normalize_partial_version_lower(raw: &str) -> Option<String> {
+    let parts = parse_partial_version_parts(raw)?;
+    Some(format!(
+        "{}.{}.{}",
+        parts[0],
+        parts.get(1).copied().unwrap_or(0),
+        parts.get(2).copied().unwrap_or(0)
+    ))
+}
+
+fn normalize_partial_version_upper(raw: &str) -> Option<String> {
+    let parts = parse_partial_version_parts(raw)?;
+    match parts.as_slice() {
+        [major] => Some(format!("<{}.0.0", major + 1)),
+        [major, minor] => Some(format!("<{major}.{}.0", minor + 1)),
+        [major, minor, patch] => Some(format!("<={major}.{minor}.{patch}")),
+        _ => None,
+    }
+}
+
+fn parse_partial_version_parts(raw: &str) -> Option<Vec<u64>> {
+    let parts = raw
+        .split('.')
+        .map(str::trim)
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (!parts.is_empty() && parts.len() <= 3).then_some(parts)
 }
 
 // ─── PackageId ─────────────────────────────────────────────────────────────────
@@ -1040,6 +1081,14 @@ mod tests {
     #[test]
     fn version_constraint_parse_normalizes_spaced_comparator_range() -> anyhow::Result<()> {
         let constraint = VersionConstraint::parse(">= 2.1.2 < 3.0.0")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::Range(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_supports_npm_hyphen_range() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("0.81 - 0.85")?;
 
         assert!(matches!(constraint.kind, ConstraintKind::Range(_)));
         Ok(())

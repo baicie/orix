@@ -4,7 +4,7 @@ mod cache;
 mod types;
 
 pub use cache::PackumentCache;
-pub use types::{Dist, PackageMetadata, Packument};
+pub use types::{Dist, PackageMetadata, Packument, PeerDepMeta};
 
 use std::sync::Arc;
 

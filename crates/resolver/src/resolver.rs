@@ -13,7 +13,7 @@ use orix_domain::{
     VersionConstraint,
 };
 use orix_manifest::Manifest;
-use orix_registry::{Packument, RegistryClient};
+use orix_registry::{PackageMetadata, Packument, RegistryClient};
 use orix_workspace::{Workspace, WorkspaceSpec};
 use url::Url;
 
@@ -191,7 +191,12 @@ async fn resolve_batch_concurrent(
                 state.graph.insert(resolved);
                 state.resolved += 1;
 
-                for (name, raw) in task_result.deps.iter().chain(task_result.opt_deps.iter()) {
+                for (name, raw) in task_result
+                    .deps
+                    .iter()
+                    .chain(task_result.opt_deps.iter())
+                    .chain(task_result.peer_deps.iter())
+                {
                     let dep_key = (name.clone(), raw.clone());
                     if !state.memo.contains_key(&dep_key) && !state.in_flight.contains(&dep_key) {
                         state.discovered += 1;
@@ -300,11 +305,7 @@ fn spawn_resolve_task(
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
-        let peer_deps: Vec<(PackageName, String)> = metadata
-            .peer_dependencies
-            .iter()
-            .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
-            .collect();
+        let peer_deps = collect_required_peer_deps(metadata);
 
         let patch = match &constraint.kind {
             ConstraintKind::Patch(spec) => Some(spec.clone()),
@@ -325,6 +326,20 @@ fn spawn_resolve_task(
             patch,
         })
     });
+}
+
+fn collect_required_peer_deps(metadata: &PackageMetadata) -> Vec<(PackageName, String)> {
+    metadata
+        .peer_dependencies
+        .iter()
+        .filter(|(name, _)| {
+            !metadata
+                .peer_dependencies_meta
+                .get(*name)
+                .is_some_and(|meta| meta.optional)
+        })
+        .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
+        .collect()
 }
 
 /// Mutable state used during concurrent resolution.
@@ -731,6 +746,54 @@ mod tests {
         let result = resolver.select_version(&packument(), &VersionConstraint::parse("^3.0.0")?);
         assert!(result.is_err());
         Ok(())
+    }
+
+    #[test]
+    fn collect_required_peer_deps_skips_optional_peer_meta() {
+        let metadata = PackageMetadata {
+            name: "vite".to_string(),
+            version: "8.0.13".to_string(),
+            dependencies: HashMap::new(),
+            dev_dependencies: HashMap::new(),
+            optional_dependencies: HashMap::new(),
+            peer_dependencies: HashMap::from([
+                ("esbuild".to_string(), "^0.28.0".to_string()),
+                ("rollup".to_string(), "^4.0.0".to_string()),
+            ]),
+            peer_dependencies_meta: HashMap::from([(
+                "esbuild".to_string(),
+                orix_registry::PeerDepMeta { optional: true },
+            )]),
+            engines: None,
+            os: Vec::new(),
+            cpu: Vec::new(),
+            dist: Some(Dist {
+                tarball: "https://registry.npmjs.org/vite/-/vite-8.0.13.tgz".to_string(),
+                integrity: None,
+                shasum: None,
+            }),
+            optional: false,
+            deprecated: None,
+            bin: HashMap::new(),
+            directories: Default::default(),
+            has_shrinkwrap: false,
+            has_install_script: false,
+            bundle_dependencies: Vec::new(),
+            scripts: HashMap::new(),
+            funding: None,
+            repository: None,
+            homepage: None,
+            description: None,
+            license: None,
+            keywords: Vec::new(),
+        };
+
+        let peers = collect_required_peer_deps(&metadata);
+
+        assert_eq!(
+            peers,
+            vec![(PackageName::from("rollup"), "^4.0.0".to_string())]
+        );
     }
 
     #[tokio::test]
