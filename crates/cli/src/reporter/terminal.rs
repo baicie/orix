@@ -3,7 +3,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use crossterm::{
-    cursor::{Hide, RestorePosition, SavePosition, Show},
+    cursor::{Hide, MoveToColumn, MoveUp, Show},
     queue,
     terminal::{self, Clear, ClearType},
 };
@@ -16,7 +16,6 @@ pub fn visual_row_count(frame: &str, columns: usize) -> usize {
         return 1;
     }
 
-    // Strip ANSI before counting to avoid escape sequences inflating the count.
     let plain = super::strip_ansi(frame);
 
     let rows = plain
@@ -31,14 +30,15 @@ pub fn visual_row_count(frame: &str, columns: usize) -> usize {
 }
 
 /// A terminal that can redraw frames in-place, hiding the cursor during updates.
+///
+/// Uses MoveUp + Clear(FromCursorDown) instead of SavePosition/RestorePosition
+/// because the latter is unreliable on Windows Terminal / PowerShell.
 pub struct LiveTerminal<W: Write> {
     writer: W,
     /// Number of rows rendered in the last frame.
     last_rows: usize,
     /// Whether the cursor has been hidden.
     hidden_cursor: bool,
-    /// Whether the first frame position has been saved.
-    saved_position: bool,
 }
 
 impl<W: Write> LiveTerminal<W> {
@@ -48,7 +48,6 @@ impl<W: Write> LiveTerminal<W> {
             writer,
             last_rows: 0,
             hidden_cursor: false,
-            saved_position: false,
         }
     }
 
@@ -56,7 +55,7 @@ impl<W: Write> LiveTerminal<W> {
     pub fn render(&mut self, frame: &str) -> io::Result<()> {
         self.hide_cursor_once()?;
         let columns = terminal_width();
-        self.clear_previous(columns)?;
+        self.clear_previous()?;
 
         write!(self.writer, "{frame}")?;
         self.writer.flush()?;
@@ -82,20 +81,21 @@ impl<W: Write> LiveTerminal<W> {
         Ok(())
     }
 
-    fn clear_previous(&mut self, columns: usize) -> io::Result<()> {
-        if columns == 0 {
+    /// Move cursor up by the number of rows the previous frame occupied,
+    /// then clear from that position downward. This overwrites the old frame
+    /// in-place without relying on SavePosition/RestorePosition (which can
+    /// drift on Windows Terminal / PowerShell).
+    fn clear_previous(&mut self) -> io::Result<()> {
+        if self.last_rows == 0 {
             return Ok(());
         }
 
-        if !self.saved_position {
-            queue!(self.writer, SavePosition)?;
-            self.saved_position = true;
-            return Ok(());
-        }
-
-        queue!(self.writer, RestorePosition)?;
-        queue!(self.writer, Clear(ClearType::FromCursorDown))?;
-        self.writer.flush()?;
+        queue!(
+            self.writer,
+            MoveUp(self.last_rows as u16),
+            MoveToColumn(0),
+            Clear(ClearType::FromCursorDown)
+        )?;
 
         Ok(())
     }
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_clears_previous_frame_from_top() -> io::Result<()> {
+    fn test_render_clears_previous_frame_with_move_up() -> io::Result<()> {
         let mut terminal = LiveTerminal::new(Vec::new());
 
         terminal.render("orix install\nPackages: +4 direct, +50 total\n")?;
@@ -175,11 +175,11 @@ mod tests {
 
         let output = String::from_utf8(terminal.writer.clone())
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        let save = SavePosition.to_string();
-        let restore_and_clear = format!("{}{}", RestorePosition, Clear(ClearType::FromCursorDown));
+        let move_up = MoveUp(2).to_string();
+        let clear = Clear(ClearType::FromCursorDown).to_string();
         assert!(
-            output.contains(&save) && output.contains(&restore_and_clear),
-            "second render should restore the first frame position and clear downward; output={output:?}"
+            output.contains(&move_up) && output.contains(&clear),
+            "second render should MoveUp and clear; output={output:?}"
         );
 
         Ok(())

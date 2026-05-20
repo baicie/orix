@@ -51,7 +51,7 @@ impl InteractiveReporter {
                 row_count: 0,
             },
             last_render_at: Instant::now() - Duration::from_secs(1),
-            min_render_interval: Duration::from_millis(33),
+            min_render_interval: Duration::from_millis(80),
             theme,
             rendered_terminal_state: false,
             finished: false,
@@ -67,14 +67,19 @@ impl InteractiveReporter {
     /// Process an install event and re-render if needed.
     pub fn on_event(&mut self, event: InstallEvent) -> io::Result<()> {
         let was_finished = self.state.finished || self.state.failed;
-        // Check event type before consuming it.
-        let force_phase_started = matches!(&event, InstallEvent::PhaseStarted { .. });
+        // Force render on key transitions so the final Done/Failed frame is never silently dropped.
+        // PhaseStarted does NOT force render — let the 80ms throttle handle it.
+        let force = matches!(
+            &event,
+            InstallEvent::Started { .. }
+                | InstallEvent::RegistrySelected { .. }
+                | InstallEvent::Resolved { .. }
+                | InstallEvent::Lockfile { .. }
+                | InstallEvent::Failed { .. }
+                | InstallEvent::Finished { .. }
+        );
         self.state.apply(event);
         let now_finished = self.state.finished || self.state.failed;
-
-        // PhaseStarted: always render immediately so user sees "○ Resolving..." right away.
-        // Finished/Failed: force re-render so the final frame (with "Done in Xs") is shown.
-        let force = force_phase_started || now_finished;
         self.render(force)?;
 
         // On transition to terminal state, always call finish to restore the cursor.

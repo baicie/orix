@@ -177,62 +177,17 @@ impl Linker {
                 pkg.id.name.as_str(),
             );
 
+            let store_files = self.store.package_files_path(&pkg.id);
             fs::create_dir_all(&pkg_dir)?;
 
-            let store_files = self.store.package_files_path(&pkg.id);
-            trace!(pkg = %pkg_key, store = %store_files.display(), "linking package files");
-            if store_files.exists() {
-                let mut hardlink_ok = 0;
-                let mut copy_ok = 0;
-                let mut hardlink_fail = 0;
-                let mut copy_fail = 0;
-                for entry in WalkDir::new(&store_files)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
-                    if !entry.file_type().is_file() {
-                        continue;
-                    }
-                    let rel_path = entry.path().strip_prefix(&store_files)?;
-                    let dest = pkg_dir.join(rel_path);
-
-                    if let Some(parent) = dest.parent() {
-                        if let Err(e) = fs::create_dir_all(parent) {
-                            warn!(pkg = %pkg_key, "failed to create dir {}: {}", parent.display(), e);
-                            continue;
-                        }
-                    }
-
-                    #[allow(clippy::incompatible_msrv)]
-                    match fs::hard_link(entry.path(), &dest) {
-                        Ok(_) => {
-                            hardlink_ok += 1;
-                        }
-                        Err(e)
-                            if e.kind() == io::ErrorKind::PermissionDenied
-                                || e.kind() == io::ErrorKind::NotFound
-                                || e.kind() == io::ErrorKind::CrossesDevices =>
-                        {
-                            match fs::copy(entry.path(), &dest) {
-                                Ok(_) => copy_ok += 1,
-                                Err(e2) => {
-                                    copy_fail += 1;
-                                    warn!(pkg = %pkg_key, "hard_link failed and copy also failed {} -> {}: {}", entry.path().display(), dest.display(), e2);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            hardlink_fail += 1;
-                            warn!(pkg = %pkg_key, "hard_link failed {} -> {}: {}", entry.path().display(), dest.display(), e);
-                        }
-                    }
-                }
-                report.hardlinked_files += hardlink_ok;
-                report.copied_files += copy_ok;
-                trace!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, "link summary");
-                if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
-                    warn!(pkg = %pkg_key, "no files found in store or no files were linked");
-                }
+            // Skip if package is already fully imported (package.json exists).
+            let pkg_dest_dir = pkg_dir
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("pkg_dir has no parent: {}", pkg_dir.display()))?;
+            if pkg_dest_dir.join("package.json").exists() {
+                trace!(pkg = %pkg_key, "package already imported, skipping files");
+            } else {
+                self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
             }
 
             // Create symlinks for this package's declared dependencies
@@ -272,8 +227,13 @@ impl Linker {
                 }
             }
 
+            // Import package files from the store using integrity metadata.
+            // Uses integrity.files to avoid WalkDir, pre-creates all directories,
+            // falls back to copy on EXDEV, and writes package.json last.
+            self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
+
             // Link bin executables for this package into .orix/<pkg>/bin/
-            self.link_package_bins(&pkg_dir, &pkg_key, &store_files, &mut report)?;
+            self.link_package_bins(&pkg_key, &store_files, &mut report)?;
         }
 
         // Create top-level symlinks for direct dependencies
@@ -316,16 +276,168 @@ impl Linker {
         Ok(report)
     }
 
+    /// Import package files from the store into a package directory.
+    ///
+    /// Optimizations:
+    /// - Iterates `integrity.files` instead of WalkDir to avoid scanning the store directory.
+    /// - Pre-creates all needed directories in one pass before linking/copying files.
+    /// - Falls back to copy on EXDEV and remembers the decision per-package.
+    /// - Writes `package.json` last as a completion marker.
+    fn import_package_files(
+        &self,
+        pkg_id: &orix_domain::PackageId,
+        pkg_dir: &Path,
+        store_files: &Path,
+        report: &mut LinkReport,
+    ) -> Result<()> {
+        let pkg_key = pkg_id.key();
+
+        // Read integrity metadata to get the file list without WalkDir.
+        let integrity = match self.store.get_integrity(pkg_id) {
+            Ok(i) => i,
+            Err(e) => {
+                warn!(pkg = %pkg_key, error = %e, "failed to read integrity metadata, skipping files");
+                return Ok(());
+            }
+        };
+
+        // Collect and pre-create all needed directories in one pass.
+        let mut dirs: HashSet<PathBuf> = HashSet::new();
+        for (rel_path, _) in &integrity.files {
+            if let Some(parent) = Path::new(rel_path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    dirs.insert(parent.to_path_buf());
+                }
+            }
+        }
+        // Sort by depth so shallow dirs are created before deep ones.
+        let mut dirs: Vec<_> = dirs.into_iter().collect();
+        dirs.sort_by_key(|p| p.components().count());
+        for dir in &dirs {
+            let full = pkg_dir.join(dir);
+            if let Err(e) = fs::create_dir_all(&full) {
+                warn!(pkg = %pkg_key, error = %e, "failed to create dir {}", full.display());
+            }
+        }
+
+        // Decide import strategy: try hardlink first, fall back to copy on EXDEV.
+        // Once we decide to copy, all remaining files use copy (per-package decision).
+        let mut use_copy = false;
+
+        let mut hardlink_ok = 0;
+        let mut copy_ok = 0;
+        let mut hardlink_fail = 0;
+        let mut copy_fail = 0;
+
+        // Separate package.json to write it last.
+        let mut normal_files: Vec<&(String, String)> = Vec::new();
+        let mut package_json: Option<&(String, String)> = None;
+
+        for entry in &integrity.files {
+            if entry.0 == "package.json" {
+                package_json = Some(entry);
+            } else {
+                normal_files.push(entry);
+            }
+        }
+
+        // Import all files except package.json.
+        for (rel_path, _) in normal_files {
+            let src = store_files.join(rel_path);
+            let dest = pkg_dir.join(rel_path);
+
+            if !src.exists() {
+                warn!(pkg = %pkg_key, missing = %src.display(), "file missing from store");
+                continue;
+            }
+
+            if use_copy {
+                match fs::copy(&src, &dest) {
+                    Ok(_) => copy_ok += 1,
+                    Err(e) => {
+                        copy_fail += 1;
+                        warn!(pkg = %pkg_key, error = %e, "failed to copy {} -> {}", src.display(), dest.display());
+                    }
+                }
+            } else {
+                #[allow(clippy::incompatible_msrv)]
+                match fs::hard_link(&src, &dest) {
+                    Ok(_) => hardlink_ok += 1,
+                    Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+                        // Cross-device: fall back to copy and remember the decision.
+                        use_copy = true;
+                        match fs::copy(&src, &dest) {
+                            Ok(_) => copy_ok += 1,
+                            Err(e2) => {
+                                copy_fail += 1;
+                                warn!(pkg = %pkg_key, error = %e2, "copy failed after EXDEV {} -> {}", src.display(), dest.display());
+                            }
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == io::ErrorKind::PermissionDenied
+                            || e.kind() == io::ErrorKind::NotFound =>
+                    {
+                        match fs::copy(&src, &dest) {
+                            Ok(_) => copy_ok += 1,
+                            Err(e2) => {
+                                copy_fail += 1;
+                                warn!(pkg = %pkg_key, error = %e2, "hard_link failed and copy also failed {} -> {}", src.display(), dest.display());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        hardlink_fail += 1;
+                        warn!(pkg = %pkg_key, error = %e, "hard_link failed {} -> {}", src.display(), dest.display());
+                    }
+                }
+            }
+        }
+
+        // Write package.json last as the completion marker.
+        if let Some((rel_path, _)) = package_json {
+            let src = store_files.join(rel_path);
+            let dest = pkg_dir.join(rel_path);
+            if src.exists() {
+                match fs::copy(&src, &dest) {
+                    Ok(_) => {
+                        if use_copy {
+                            copy_ok += 1;
+                        } else {
+                            hardlink_ok += 1;
+                        }
+                    }
+                    Err(e) => {
+                        copy_fail += 1;
+                        warn!(pkg = %pkg_key, error = %e, "failed to write package.json {}", dest.display());
+                    }
+                }
+            }
+        }
+
+        report.hardlinked_files += hardlink_ok;
+        report.copied_files += copy_ok;
+        trace!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, use_copy, "imported package files");
+        if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
+            warn!(pkg = %pkg_key, "no files were imported");
+        }
+
+        Ok(())
+    }
+
     /// Link bin executables from a package into the .orix/<pkg>/bin directory.
-    /// Also creates the global .bin/ directory with symlinks to each bin.
+    /// Also creates the global .bin/ directory with shims for each bin.
+    ///
+    /// Windows: creates .cmd and .ps1 shims pointing to the actual bin file.
+    /// Unix: creates symlinks.
+    /// Scoped bin names (e.g. `@antfu/eslint-config`) are flattened to just the
+    /// filename part (`eslint-config`) to avoid `@` characters in filenames.
     fn link_package_bins(
         &self,
-        pkg_dir: &Path,
         pkg_key: &str,
         store_files: &Path,
         report: &mut LinkReport,
     ) -> Result<()> {
-        // Read the package.json from the store to get bin field
         let pkg_json_path = store_files.join("package.json");
         if !pkg_json_path.exists() {
             return Ok(());
@@ -340,7 +452,7 @@ impl Linker {
             None => return Ok(()),
         };
 
-        let bin_entries = match bin_value {
+        let bin_entries: Vec<(String, String)> = match bin_value {
             serde_json::Value::String(s) => {
                 let pkg_name = pkg_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 vec![(pkg_name.to_string(), s.clone())]
@@ -352,41 +464,56 @@ impl Linker {
             _ => return Ok(()),
         };
 
-        let package_bin_dir = self
-            .node_modules
-            .join(VIRTUAL_STORE_DIR)
-            .join(pkg_key)
-            .join("bin");
+        // Flat package dir: .orix/pkg@ver/ (parent of the package-name subdirectory).
+        let package_store_dir = self.node_modules.join(VIRTUAL_STORE_DIR).join(pkg_key);
+        let flat_pkg_dir = package_store_dir.parent().unwrap_or(&package_store_dir);
         let global_bin_dir = self.node_modules.join(".bin");
 
-        fs::create_dir_all(&package_bin_dir)?;
-        fs::create_dir_all(&global_bin_dir)?;
-
-        for (cmd_name, bin_path) in bin_entries {
-            if cmd_name.is_empty() {
+        for (bin_name, bin_path) in bin_entries {
+            if bin_name.is_empty() || bin_path.is_empty() {
                 continue;
             }
 
-            // Source: the bin file inside the package directory
-            let bin_source = pkg_dir.join(&bin_path);
-            // Dest in .orix/<pkg>/bin/<cmd>
-            let package_bin_dest = package_bin_dir.join(&cmd_name);
+            // The actual bin file in the store.
+            let bin_source = store_files.join(&bin_path);
+            if !bin_source.exists() {
+                trace!(
+                    pkg = %pkg_key,
+                    bin = %bin_name,
+                    missing = %bin_source.display(),
+                    "bin source not in store"
+                );
+                continue;
+            }
 
-            if bin_source.exists() && !package_bin_dest.exists() {
-                if let Some(parent) = package_bin_dest.parent() {
-                    fs::create_dir_all(parent)?;
-                }
+            // Flatten scoped bin names: "@antfu/eslint-config" -> "eslint-config"
+            let flat_bin_name = std::path::Path::new(&bin_name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&bin_name);
+
+            // Shim bin name (also flattened).
+            let shim_bin_name = flat_bin_name;
+
+            // Destination in flat package dir: .orix/pkg@ver/bin/<flat_name>
+            let flat_bin_dest = flat_pkg_dir.join("bin").join(flat_bin_name);
+            let flat_bin_dest_parent = flat_bin_dest.parent().unwrap_or(&flat_bin_dest);
+
+            fs::create_dir_all(flat_bin_dest_parent)?;
+
+            // Only hard-link/copy the bin file if the destination doesn't exist yet.
+            if !flat_bin_dest.exists() {
                 #[allow(clippy::incompatible_msrv)]
-                if let Err(e) = fs::hard_link(&bin_source, &package_bin_dest) {
+                if let Err(e) = fs::hard_link(&bin_source, &flat_bin_dest) {
                     if e.kind() == io::ErrorKind::PermissionDenied
                         || e.kind() == io::ErrorKind::NotFound
                         || e.kind() == io::ErrorKind::CrossesDevices
                     {
-                        fs::copy(&bin_source, &package_bin_dest).with_context(|| {
+                        fs::copy(&bin_source, &flat_bin_dest).with_context(|| {
                             format!(
                                 "failed to copy bin {} -> {}",
                                 bin_source.display(),
-                                package_bin_dest.display()
+                                flat_bin_dest.display()
                             )
                         })?;
                     } else {
@@ -394,51 +521,46 @@ impl Linker {
                             format!(
                                 "failed to hard-link bin {} -> {}",
                                 bin_source.display(),
-                                package_bin_dest.display()
+                                flat_bin_dest.display()
                             )
                         });
                     }
                 }
             }
 
-            // Global bin link: node_modules/.bin/<cmd> -> ../.orix/<pkg>/bin/<cmd>
-            // Only create if the package-local bin copy exists.
-            if package_bin_dest.exists() {
-                let global_bin_link = global_bin_dir.join(&cmd_name);
-                if !global_bin_link.exists() {
-                    if let Some(parent) = global_bin_link.parent() {
-                        fs::create_dir_all(parent).with_context(|| {
-                            format!(
-                                "failed to create global bin parent for {}: {}",
-                                cmd_name,
-                                parent.display()
-                            )
-                        })?;
-                    }
-                    let parent = global_bin_link.parent().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "global bin link has no parent: {}",
-                            global_bin_link.display()
-                        )
-                    })?;
-                    let relative_target = relative_path(parent, &package_bin_dest);
-                    Self::create_file_link(&relative_target, &global_bin_link).with_context(
-                        || {
-                            format!(
-                                "failed to link bin {} for {}: {} -> {}",
-                                cmd_name,
-                                pkg_key,
-                                global_bin_link.display(),
-                                package_bin_dest.display()
-                            )
-                        },
-                    )?;
-                    report.symlinks_created += 1;
-                }
-
+            // Global shims: only create if the bin file was successfully placed.
+            if flat_bin_dest.exists() {
                 #[cfg(windows)]
                 {
-                    Self::create_windows_cmd_shim(&global_bin_dir, &cmd_name, &package_bin_dest)?;
+                    // Resolve the bin to an absolute path so the shim works from any cwd.
+                    let absolute_bin = bin_source.canonicalize().with_context(|| {
+                        format!(
+                            "failed to resolve bin source {} for shim",
+                            bin_source.display()
+                        )
+                    })?;
+
+                    Self::create_windows_bin_shims(&global_bin_dir, shim_bin_name, &absolute_bin)
+                        .with_context(|| {
+                        format!("failed to create Windows bin shim for {}", bin_name)
+                    })?;
+                    report.symlinks_created += 2;
+                }
+
+                #[cfg(not(windows))]
+                {
+                    let shim_link = global_bin_dir.join(shim_bin_name);
+                    if !path_exists_or_symlink(&shim_link) {
+                        if let Some(parent) = shim_link.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        let rel = relative_path(
+                            shim_link.parent().unwrap_or(std::path::Path::new(".")),
+                            &flat_bin_dest,
+                        );
+                        std::os::unix::fs::symlink(&rel, &shim_link)?;
+                        report.symlinks_created += 1;
+                    }
                 }
             }
         }
@@ -447,36 +569,47 @@ impl Linker {
     }
 
     #[cfg(windows)]
-    fn create_windows_cmd_shim(
+    fn create_windows_bin_shims(
         global_bin_dir: &Path,
-        cmd_name: &str,
-        package_bin_dest: &Path,
+        shim_bin_name: &str,
+        absolute_bin_path: &Path,
     ) -> Result<()> {
-        let shim_path = global_bin_dir.join(format!("{cmd_name}.cmd"));
-        if shim_path.exists() {
-            return Ok(());
-        }
+        fs::create_dir_all(global_bin_dir)
+            .with_context(|| format!("failed to create {}", global_bin_dir.display()))?;
 
-        let shim_parent = shim_path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "shim path has no parent")
-        })?;
+        let cmd_path = global_bin_dir.join(format!("{shim_bin_name}.cmd"));
+        let ps1_path = global_bin_dir.join(format!("{shim_bin_name}.ps1"));
 
-        fs::create_dir_all(shim_parent)?;
+        let target = absolute_bin_path.display().to_string().replace('/', "\\");
 
-        // Resolve the actual bin file to an absolute path so the shim works from any cwd.
-        // canonicalize resolves symlinks and converts to an absolute path.
-        let absolute_bin = package_bin_dest.canonicalize().with_context(|| {
-            format!(
-                "failed to resolve bin file {} for shim",
-                package_bin_dest.display()
-            )
-        })?;
+        let cmd_content = format!(
+            "@ECHO off\r\n\
+SETLOCAL\r\n\
+SET \"basedir=%~dp0\"\r\n\
+IF EXIST \"%basedir%\\node.exe\" (\r\n\
+  SET \"_prog=%basedir%\\node.exe\"\r\n\
+) ELSE (\r\n\
+  SET \"_prog=node\"\r\n\
+)\r\n\
+\"%_prog%\" \"{target}\" %*\r\n"
+        );
 
-        let target = absolute_bin.display().to_string().replace('/', "\\");
-        let script = format!("@ECHO off\r\nSETLOCAL\r\nnode \"{target}\" %*\r\n");
+        let ps1_target = target.replace('\\', "/");
+        let ps1_content = format!(
+            "$basedir = Split-Path $MyInvocation.MyCommand.Definition -Parent\n\
+$exe = Join-Path $basedir 'node.exe'\n\
+if (Test-Path $exe) {{\n\
+  & $exe '{ps1_target}' @args\n\
+}} else {{\n\
+  & node '{ps1_target}' @args\n\
+}}\n"
+        );
 
-        fs::write(&shim_path, script)
-            .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
+        fs::write(&cmd_path, &cmd_content)
+            .with_context(|| format!("failed to write {}", cmd_path.display()))?;
+
+        fs::write(&ps1_path, &ps1_content)
+            .with_context(|| format!("failed to write {}", ps1_path.display()))?;
 
         Ok(())
     }
@@ -507,6 +640,8 @@ impl Linker {
     }
 
     /// Create a file link for package binaries.
+    #[cfg(not(windows))]
+    #[allow(dead_code)]
     fn create_file_link(target: &Path, link: &Path) -> io::Result<()> {
         #[cfg(windows)]
         {
@@ -663,6 +798,12 @@ impl Linker {
             .split('/')
             .fold(root.to_path_buf(), |path, part| path.join(part))
     }
+}
+
+/// Returns true if the path exists as a file or symlink.
+#[allow(dead_code)]
+fn path_exists_or_symlink(path: &Path) -> bool {
+    path.exists() || fs::symlink_metadata(path).is_ok()
 }
 
 fn relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
@@ -921,13 +1062,37 @@ mod tests {
         let direct_deps = HashSet::from(["@antfu/eslint-config".to_string()]);
         linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
 
-        assert!(temp
-            .path()
-            .join("node_modules")
-            .join(".bin")
-            .join("@antfu")
-            .join("eslint-config")
-            .exists());
+        // Scoped bin names are flattened to avoid @ and / in Windows filenames.
+        // The shim should be eslint-config (not @antfu/eslint-config).
+        let bin_dir = temp.path().join("node_modules").join(".bin");
+
+        #[cfg(windows)]
+        {
+            // Windows creates .cmd and .ps1 shims with the flattened name.
+            assert!(
+                bin_dir.join("eslint-config.cmd").exists(),
+                "flattened .cmd shim should exist"
+            );
+            assert!(
+                bin_dir.join("eslint-config.ps1").exists(),
+                "flattened .ps1 shim should exist"
+            );
+            // The original scoped path should NOT exist as a file.
+            assert!(
+                !bin_dir.join("@antfu").join("eslint-config").exists(),
+                "scoped path should not exist on Windows"
+            );
+        }
+
+        #[cfg(not(windows))]
+        {
+            // Unix can keep the scoped name.
+            assert!(
+                bin_dir.join("@antfu").join("eslint-config").exists(),
+                "scoped bin symlink should exist on Unix"
+            );
+        }
+
         Ok(())
     }
 
@@ -959,12 +1124,11 @@ mod tests {
         let content = fs::read_to_string(&shim)?;
 
         assert!(shim.exists());
-        // Shim should contain the resolved absolute path to the bin file.
-        // The bin was copied to .orix/<pkg>/bin/<cmd> (no extension in this case).
-        assert!(content.contains("node \""));
-        assert!(content.contains("rollup@4.0.0"));
-        assert!(content.contains(".orix"));
-        // %* passes all arguments to the script
+        // Shim uses %~dp0 to find the .bin directory at runtime.
+        // Target is a relative path like ..\.orix\rollup@4.0.0\bin\rollup
+        assert!(content.contains("basedir=%~dp0"));
+        assert!(content.contains("node"));
+        assert!(content.contains("index.mjs"));
         assert!(content.contains("%*"));
         Ok(())
     }
