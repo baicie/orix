@@ -20,6 +20,7 @@ use orix_config::Config;
 use orix_domain::PackageId;
 use orix_manifest::Manifest;
 use orix_workspace::Workspace;
+use tracing::debug;
 
 /// Lifecycle event names (npm convention).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -299,6 +300,14 @@ impl ScriptRunner {
             format!("{} {}", command, shell_args_join(&args))
         };
 
+        debug!(
+            script = name,
+            command = %full_command,
+            cwd = %cwd.display(),
+            path = env.get("PATH").map(String::as_str).unwrap_or(""),
+            "running script"
+        );
+
         let start = Instant::now();
         let child =
             self.spawn_shell(&full_command, &env, &cwd)
@@ -401,22 +410,21 @@ impl ScriptRunner {
 
     /// Build the PATH prefix: project .bin, workspace root .bin, then original PATH.
     /// Returns the extra PATH entries as an OsString (to be prepended to existing PATH).
+    /// Directories are included even if they don't yet exist, to aid debugging.
     fn build_path(&self) -> std::ffi::OsString {
         let mut parts = Vec::new();
 
         // Current project's node_modules/.bin
         let project_bin = self.project_root.join("node_modules").join(".bin");
-        if project_bin.is_dir() {
-            parts.push(project_bin);
-        }
+        parts.push(project_bin.clone());
+        debug!(path = %project_bin.display(), "adding project .bin to PATH");
 
         // Workspace root's node_modules/.bin (if we're in a workspace package)
         if let Some(ref ws) = self.workspace {
             if ws.root != self.project_root {
                 let root_bin = ws.root.join("node_modules").join(".bin");
-                if root_bin.is_dir() {
-                    parts.push(root_bin);
-                }
+                parts.push(root_bin.clone());
+                debug!(path = %root_bin.display(), "adding workspace root .bin to PATH");
             }
         }
 

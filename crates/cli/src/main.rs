@@ -244,7 +244,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let no_progress = cli.no_progress || cli.debug || log_handle.console_enabled();
+    let no_progress = cli.no_progress || log_handle.console_enabled();
 
     #[allow(clippy::cmp_owned)]
     let dir = if cli.dir == PathBuf::from(".") {

@@ -30,7 +30,6 @@ use std::io;
 
 use interactive::InteractiveReporter;
 use plain::PlainReporter;
-#[cfg(not(windows))]
 use terminal::stderr_is_terminal;
 
 /// Unified reporter enum, dispatching to the appropriate implementation.
@@ -45,23 +44,17 @@ pub enum Reporter {
 impl Reporter {
     /// Auto-select a reporter based on terminal capabilities and color mode.
     ///
-    /// - TTY stderr -> `InteractiveReporter`
-    /// - non-TTY or `--no-progress` -> `PlainReporter`
+    /// - TTY stderr + progress enabled -> InteractiveReporter
+    /// - non-TTY / CI / --no-progress -> PlainReporter
     pub fn auto(no_progress: bool, color_mode: ColorMode) -> Self {
-        #[cfg(windows)]
+        if !no_progress
+            && stderr_is_terminal()
+            && std::env::var_os("CI").is_none()
+            && std::env::var_os("ORIX_NO_PROGRESS").is_none()
         {
-            let _ = no_progress;
-            let _ = color_mode;
+            Self::Interactive(InteractiveReporter::with_color(color_mode).into())
+        } else {
             Self::Plain(PlainReporter::new())
-        }
-
-        #[cfg(not(windows))]
-        {
-            if !no_progress && stderr_is_terminal() {
-                Self::Interactive(InteractiveReporter::with_color(color_mode).into())
-            } else {
-                Self::Plain(PlainReporter::new())
-            }
         }
     }
 

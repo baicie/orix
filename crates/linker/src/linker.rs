@@ -382,7 +382,21 @@ impl Linker {
                         || e.kind() == io::ErrorKind::NotFound
                         || e.kind() == io::ErrorKind::CrossesDevices
                     {
-                        let _ = fs::copy(&bin_source, &package_bin_dest);
+                        fs::copy(&bin_source, &package_bin_dest).with_context(|| {
+                            format!(
+                                "failed to copy bin {} -> {}",
+                                bin_source.display(),
+                                package_bin_dest.display()
+                            )
+                        })?;
+                    } else {
+                        return Err(e).with_context(|| {
+                            format!(
+                                "failed to hard-link bin {} -> {}",
+                                bin_source.display(),
+                                package_bin_dest.display()
+                            )
+                        });
                     }
                 }
             }
@@ -423,7 +437,9 @@ impl Linker {
                 }
 
                 #[cfg(windows)]
-                Self::create_windows_cmd_shim(&global_bin_link, &package_bin_dest)?;
+                {
+                    Self::create_windows_cmd_shim(&global_bin_dir, &cmd_name, &package_bin_dest)?;
+                }
             }
         }
 
@@ -431,22 +447,38 @@ impl Linker {
     }
 
     #[cfg(windows)]
-    fn create_windows_cmd_shim(global_bin_link: &Path, package_bin_dest: &Path) -> io::Result<()> {
-        let shim_path = global_bin_link.with_extension("cmd");
+    fn create_windows_cmd_shim(
+        global_bin_dir: &Path,
+        cmd_name: &str,
+        package_bin_dest: &Path,
+    ) -> Result<()> {
+        let shim_path = global_bin_dir.join(format!("{cmd_name}.cmd"));
         if shim_path.exists() {
             return Ok(());
         }
 
-        let parent = shim_path.parent().ok_or_else(|| {
+        let shim_parent = shim_path.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "shim path has no parent")
         })?;
-        fs::create_dir_all(parent)?;
 
-        let target = relative_path(parent, package_bin_dest);
-        let target = target.to_string_lossy().replace('/', "\\");
-        let script = format!("@ECHO off\r\nSETLOCAL\r\nnode \"%~dp0{}\" %*\r\n", target);
+        fs::create_dir_all(shim_parent)?;
 
-        fs::write(shim_path, script)
+        // Resolve the actual bin file to an absolute path so the shim works from any cwd.
+        // canonicalize resolves symlinks and converts to an absolute path.
+        let absolute_bin = package_bin_dest.canonicalize().with_context(|| {
+            format!(
+                "failed to resolve bin file {} for shim",
+                package_bin_dest.display()
+            )
+        })?;
+
+        let target = absolute_bin.display().to_string().replace('/', "\\");
+        let script = format!("@ECHO off\r\nSETLOCAL\r\nnode \"{target}\" %*\r\n");
+
+        fs::write(&shim_path, script)
+            .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
+
+        Ok(())
     }
 
     /// Create a directory link, falling back to junction on Windows when needed.
@@ -927,8 +959,13 @@ mod tests {
         let content = fs::read_to_string(&shim)?;
 
         assert!(shim.exists());
-        assert!(content.contains("node \"%~dp0"));
+        // Shim should contain the resolved absolute path to the bin file.
+        // The bin was copied to .orix/<pkg>/bin/<cmd> (no extension in this case).
+        assert!(content.contains("node \""));
         assert!(content.contains("rollup@4.0.0"));
+        assert!(content.contains(".orix"));
+        // %* passes all arguments to the script
+        assert!(content.contains("%*"));
         Ok(())
     }
 
