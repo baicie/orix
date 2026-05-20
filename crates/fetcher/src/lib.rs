@@ -10,8 +10,10 @@ pub use patch::apply_patch;
 
 use std::fs;
 use std::io::{copy as io_copy, Read};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use anyhow::{Context, Result};
 use base64::Engine;

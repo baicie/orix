@@ -896,6 +896,7 @@ fn path_exists_or_symlink(path: &Path) -> bool {
     path.exists() || fs::symlink_metadata(path).is_ok()
 }
 
+#[cfg(not(windows))]
 fn path_starts_with_lexically(path: &Path, prefix: &Path) -> bool {
     let path_components = normal_components(path);
     let prefix_components = normal_components(prefix);
