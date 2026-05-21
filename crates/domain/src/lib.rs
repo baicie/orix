@@ -70,6 +70,24 @@ mod tests {
     }
 
     #[test]
+    fn version_constraint_parse_supports_npm_hyphen_x_range() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("7.x - 11.x")?;
+
+        assert!(matches!(constraint.kind, ConstraintKind::Range(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn version_constraint_parse_supports_v_prefixed_exact_version() -> anyhow::Result<()> {
+        let constraint = VersionConstraint::parse("v0.5.0")?;
+
+        assert!(
+            matches!(constraint.kind, ConstraintKind::Exact(version) if version.to_string() == "0.5.0")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn version_constraint_parse_supports_npm_alias() -> anyhow::Result<()> {
         let constraint = VersionConstraint::parse("npm:wrap-ansi@^7.0.0")?;
 
@@ -80,12 +98,20 @@ mod tests {
     }
 
     #[test]
-    fn package_name_parse_normalizes_scoped_names() -> anyhow::Result<()> {
+    fn package_name_parse_preserves_scoped_name_case() -> anyhow::Result<()> {
         let name = PackageName::parse("@Scope/Package")?;
 
-        assert_eq!(name.as_str(), "@scope/package");
-        assert_eq!(name.scope(), Some("scope"));
-        assert_eq!(name.unscoped(), "package");
+        assert_eq!(name.as_str(), "@Scope/Package");
+        assert_eq!(name.scope(), Some("Scope"));
+        assert_eq!(name.unscoped(), "Package");
+        Ok(())
+    }
+
+    #[test]
+    fn package_name_parse_preserves_legacy_uppercase_names() -> anyhow::Result<()> {
+        let name = PackageName::parse("JSONStream")?;
+
+        assert_eq!(name.as_str(), "JSONStream");
         Ok(())
     }
 
@@ -125,6 +151,17 @@ mod tests {
         let url = package_metadata_url(&registry, &name)?;
 
         assert_eq!(url.as_str(), "https://registry.npmjs.org/@scope%2fpkg");
+        Ok(())
+    }
+
+    #[test]
+    fn package_metadata_url_preserves_legacy_uppercase_names() -> anyhow::Result<()> {
+        let registry = Url::parse("https://registry.npmjs.org")?;
+        let name = PackageName::parse("JSONStream")?;
+
+        let url = package_metadata_url(&registry, &name)?;
+
+        assert_eq!(url.as_str(), "https://registry.npmjs.org/JSONStream");
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use std::ops::Deref;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// A normalized package name (always lowercase).
+/// A validated package name.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct PackageName(Cow<'static, str>);
 
@@ -62,13 +62,13 @@ pub enum PackageNameError {
 
 impl From<String> for PackageName {
     fn from(s: String) -> Self {
-        Self(Cow::Owned(s.to_lowercase()))
+        Self(Cow::Owned(s))
     }
 }
 
 impl From<&str> for PackageName {
     fn from(s: &str) -> Self {
-        Self(Cow::Owned(s.to_lowercase()))
+        Self(Cow::Owned(s.to_string()))
     }
 }
 
@@ -115,17 +115,13 @@ fn normalize_package_name(name: &str) -> Result<String, PackageNameError> {
         }
         validate_package_segment(scope, name)?;
         validate_package_segment(package, name)?;
-        Ok(format!(
-            "@{}/{}",
-            scope.to_lowercase(),
-            package.to_lowercase()
-        ))
+        Ok(format!("@{scope}/{package}"))
     } else {
         if name.contains('/') {
             return Err(PackageNameError::InvalidCharacter(name.to_string()));
         }
         validate_package_segment(name, name)?;
-        Ok(name.to_lowercase())
+        Ok(name.to_string())
     }
 }
 

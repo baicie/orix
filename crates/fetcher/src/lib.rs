@@ -227,7 +227,9 @@ fn do_extract<R: Read>(
             anyhow::bail!("unexpected fifo in tarball: {}", out_path.display());
         }
         _ => {
-            // Unknown entry type — skip silently.
+            // Metadata entries such as PAX global headers do not materialize as
+            // files, so there is no output path to chmod.
+            return Ok(());
         }
     }
 
@@ -335,6 +337,41 @@ mod tests {
             result.is_ok(),
             "unknown algorithm should be skipped (fallback to ok)"
         );
+    }
+
+    #[test]
+    fn extract_tarball_skips_pax_global_header() -> Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let tarball_path = tmp.path().join("with-pax.tgz");
+        let tarball = fs::File::create(&tarball_path)?;
+        let encoder = flate2::write::GzEncoder::new(tarball, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+
+        let pax_body = b"";
+        let mut pax_header = tar::Header::new_gnu();
+        pax_header.set_path("pax_global_header")?;
+        pax_header.set_entry_type(tar::EntryType::XGlobalHeader);
+        pax_header.set_size(pax_body.len() as u64);
+        pax_header.set_cksum();
+        builder.append(&pax_header, &pax_body[..])?;
+
+        let package_json = br#"{"name":"demo","version":"1.0.0"}"#;
+        let mut file_header = tar::Header::new_gnu();
+        file_header.set_path("package/package.json")?;
+        file_header.set_entry_type(tar::EntryType::Regular);
+        file_header.set_size(package_json.len() as u64);
+        file_header.set_cksum();
+        builder.append(&file_header, &package_json[..])?;
+        let encoder = builder.into_inner()?;
+        encoder.finish()?;
+
+        let dest = tmp.path().join("out");
+        fs::create_dir_all(&dest)?;
+        extract_tarball(&tarball_path, &dest)?;
+
+        assert!(dest.join("package.json").exists());
+        assert!(!dest.join("pax_global_header").exists());
+        Ok(())
     }
 
     #[test]

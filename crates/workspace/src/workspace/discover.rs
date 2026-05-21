@@ -132,12 +132,29 @@ impl Workspace {
     fn find_packages(root: &Path, patterns: &[String]) -> Result<Vec<WorkspacePackage>> {
         let mut packages = Vec::new();
         let mut seen = HashSet::new();
+        let exclude_patterns: Vec<glob::Pattern> = patterns
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .map(|pattern| glob::Pattern::new(&root.join(pattern).display().to_string()))
+            .collect::<Result<_, _>>()?;
 
         for pattern in patterns {
+            if pattern.starts_with('!') {
+                continue;
+            }
+
             let full_pattern = root.join(pattern);
 
             for entry in glob::glob(&full_pattern.display().to_string())? {
                 let pkg_path = entry?;
+                if path_contains_node_modules(&pkg_path)
+                    || exclude_patterns
+                        .iter()
+                        .any(|pattern| pattern.matches_path(&pkg_path))
+                {
+                    continue;
+                }
+
                 let manifest_path = pkg_path.join("package.json");
 
                 if !manifest_path.exists() {
@@ -197,4 +214,9 @@ impl Workspace {
             .iter()
             .find(|p| p.manifest.name.as_deref() == Some(name))
     }
+}
+
+fn path_contains_node_modules(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == "node_modules")
 }

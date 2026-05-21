@@ -13,7 +13,7 @@ pub struct Packument {
     /// Available versions keyed by version string.
     pub versions: HashMap<String, PackageMetadata>,
     /// Distribution tags (e.g., latest, next, beta).
-    #[serde(default)]
+    #[serde(rename = "dist-tags", default)]
     pub dist_tags: HashMap<String, String>,
 }
 
@@ -227,6 +227,30 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packument_reads_npm_dist_tags_field() -> anyhow::Result<()> {
+        let packument: Packument = serde_json::from_str(
+            r#"{
+                "name": "demo",
+                "versions": {},
+                "dist-tags": {
+                    "latest": "2.0.0",
+                    "next": "2.1.0-beta.1"
+                }
+            }"#,
+        )?;
+
+        assert_eq!(
+            packument.dist_tags.get("latest"),
+            Some(&"2.0.0".to_string())
+        );
+        assert_eq!(
+            packument.dist_tags.get("next"),
+            Some(&"2.1.0-beta.1".to_string())
+        );
+        Ok(())
+    }
 
     #[test]
     fn package_metadata_ignores_legacy_array_engines() -> anyhow::Result<()> {

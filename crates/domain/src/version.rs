@@ -15,6 +15,10 @@ pub struct Version(SemverVersion);
 impl Version {
     /// Parse a version string.
     pub fn parse(s: &str) -> anyhow::Result<Self> {
+        let s = s
+            .strip_prefix('v')
+            .or_else(|| s.strip_prefix('V'))
+            .unwrap_or(s);
         Ok(Self(
             SemverVersion::parse(s).map_err(|e| anyhow::anyhow!("{}", e))?,
         ))
@@ -302,11 +306,14 @@ fn normalize_partial_version_upper(raw: &str) -> Option<String> {
 }
 
 fn parse_partial_version_parts(raw: &str) -> Option<Vec<u64>> {
-    let parts = raw
-        .split('.')
-        .map(str::trim)
-        .map(str::parse::<u64>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
+    let mut parts = Vec::new();
+    for part in raw.split('.').map(str::trim) {
+        if matches!(part, "x" | "X" | "*") {
+            break;
+        }
+
+        parts.push(part.parse::<u64>().ok()?);
+    }
+
     (!parts.is_empty() && parts.len() <= 3).then_some(parts)
 }

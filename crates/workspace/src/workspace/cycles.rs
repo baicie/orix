@@ -1,6 +1,7 @@
 //! Workspace dependency cycle detection.
 
 use super::types::Workspace;
+use crate::WorkspaceSpec;
 
 #[allow(dead_code)]
 /// Cycle detection result: a list of packages involved in a dependency cycle.
@@ -21,16 +22,16 @@ pub fn detect_workspace_cycles(workspace: &Workspace) -> Vec<String> {
             let deps: Vec<String> = pkg
                 .manifest
                 .dependencies
-                .keys()
-                .chain(pkg.manifest.dev_dependencies.keys())
-                .chain(pkg.manifest.optional_dependencies.keys())
-                .filter(|k| {
+                .iter()
+                .chain(pkg.manifest.dev_dependencies.iter())
+                .chain(pkg.manifest.optional_dependencies.iter())
+                .filter_map(|(dep_name, raw)| workspace_dep_target(dep_name, raw))
+                .filter(|dep_name| {
                     workspace
                         .packages
                         .iter()
-                        .any(|p| p.manifest.name.as_ref() == Some(k))
+                        .any(|p| p.manifest.name.as_ref() == Some(dep_name))
                 })
-                .cloned()
                 .collect();
             adj.insert(name.clone(), deps);
         }
@@ -88,4 +89,16 @@ pub fn detect_workspace_cycles(workspace: &Workspace) -> Vec<String> {
     }
 
     Vec::new()
+}
+
+fn workspace_dep_target(dep_name: &str, raw: &str) -> Option<String> {
+    let spec = WorkspaceSpec::parse(raw);
+    if !spec.is_workspace_spec() {
+        return None;
+    }
+
+    match spec.name {
+        Some(name) if raw.starts_with("workspace:@") => Some(name),
+        _ => Some(dep_name.to_string()),
+    }
 }

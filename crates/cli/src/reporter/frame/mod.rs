@@ -94,4 +94,33 @@ impl FrameRenderer {
             row_count,
         }
     }
+
+    /// Render only the dynamic portion of the frame.
+    pub fn render_dynamic(&self, state: &InstallState) -> RenderedFrame {
+        let mut colored = String::new();
+        let mut plain = String::new();
+
+        self.push_phases(&mut colored, &mut plain, state);
+
+        if state.failed {
+            self.push_error(&mut colored, &mut plain, state);
+        } else if state.finished {
+            self.push_done(&mut colored, &mut plain, state);
+        }
+
+        if !colored.ends_with('\n') {
+            colored.push('\n');
+        }
+        if !plain.ends_with('\n') {
+            plain.push('\n');
+        }
+
+        let row_count = super::terminal::visual_row_count(&plain, self.width);
+
+        RenderedFrame {
+            frame: colored,
+            plain,
+            row_count,
+        }
+    }
 }
