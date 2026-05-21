@@ -95,11 +95,12 @@ impl FrameRenderer {
         }
     }
 
-    /// Render only the dynamic portion of the frame.
-    pub fn render_dynamic(&self, state: &InstallState) -> RenderedFrame {
+    /// Render the portion below the static command header.
+    pub fn render_body(&self, state: &InstallState) -> RenderedFrame {
         let mut colored = String::new();
         let mut plain = String::new();
 
+        self.push_summary(&mut colored, &mut plain, state);
         self.push_phases(&mut colored, &mut plain, state);
 
         if state.failed {

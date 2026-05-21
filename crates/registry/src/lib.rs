@@ -7,13 +7,16 @@ pub use cache::PackumentCache;
 pub use types::{Dist, PackageMetadata, Packument, PeerDepMeta};
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use url::Url;
 
 use orix_domain::{package_metadata_url, PackageName};
+
+const PACKUMENT_MAX_RETRIES: usize = 6;
 
 /// Errors from the npm registry client.
 #[derive(Error, Debug)]
@@ -132,6 +135,29 @@ impl RegistryClient {
 
     /// Perform the actual HTTP fetch for a packument.
     async fn do_fetch_packument(&self, url: &Url) -> Result<Packument> {
+        let mut last_error = None;
+
+        for attempt in 0..PACKUMENT_MAX_RETRIES {
+            match self.do_fetch_packument_once(url).await {
+                Ok(packument) => return Ok(packument),
+                Err(error) if is_retryable_packument_error(&error) => {
+                    last_error = Some(error);
+                    if attempt + 1 < PACKUMENT_MAX_RETRIES {
+                        tokio::time::sleep(packument_retry_delay(attempt)).await;
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("packument request did not run"))
+            .context(format!(
+                "failed to fetch packument from {url} after {PACKUMENT_MAX_RETRIES} attempts"
+            )))
+    }
+
+    async fn do_fetch_packument_once(&self, url: &Url) -> Result<Packument> {
         let resp = self
             .http_client
             .get(url.clone())
@@ -144,6 +170,11 @@ impl RegistryClient {
             .map_err(|e| RegistryError::Network(e.to_string()))?;
 
         let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         if status.as_u16() == 404 {
             anyhow::bail!(RegistryError::PackageNotFound(PackageName::from(
                 url.as_str()
@@ -154,12 +185,17 @@ impl RegistryClient {
             anyhow::bail!(RegistryError::Http(status.as_u16(), text));
         }
 
-        let text = resp
-            .text()
+        let body = resp
+            .bytes()
             .await
-            .map_err(|e| RegistryError::Other(e.to_string()))?;
-        let packument: Packument = serde_json::from_str(&text)
-            .map_err(|e| RegistryError::Other(format!("failed to decode packument JSON: {e}")))?;
+            .with_context(|| format!("failed to read response body from {url}"))?;
+        let packument: Packument = serde_json::from_slice(&body).map_err(|e| {
+            RegistryError::Other(format!(
+                "failed to decode packument JSON from {url}: {e}; content-type: {}; body prefix: {}",
+                content_type.as_deref().unwrap_or("<unknown>"),
+                body_prefix(&body)
+            ))
+        })?;
 
         Ok(packument)
     }
@@ -189,3 +225,60 @@ impl RegistryClient {
         Ok(packument)
     }
 }
+
+fn is_retryable_packument_error(error: &anyhow::Error) -> bool {
+    for cause in error.chain() {
+        let message = cause.to_string();
+        if message.contains("response body")
+            || message.contains("error reading a body from connection")
+            || message.contains("unexpected EOF")
+        {
+            return true;
+        }
+
+        if let Some(reqwest_error) = cause.downcast_ref::<reqwest::Error>() {
+            return reqwest_error.is_timeout()
+                || reqwest_error.is_connect()
+                || reqwest_error.is_request()
+                || reqwest_error.is_body();
+        }
+
+        if let Some(registry_error) = cause.downcast_ref::<RegistryError>() {
+            return match registry_error {
+                RegistryError::Network(_) => true,
+                RegistryError::Http(status, _) => *status == 429 || *status >= 500,
+                RegistryError::PackageNotFound(_) | RegistryError::Other(_) => false,
+            };
+        }
+    }
+
+    false
+}
+
+fn packument_retry_delay(attempt: usize) -> Duration {
+    if cfg!(test) {
+        return Duration::from_millis(1);
+    }
+
+    let millis = 250_u64.saturating_mul(1 << attempt.min(3));
+    Duration::from_millis(millis)
+}
+
+fn body_prefix(body: &[u8]) -> String {
+    const LIMIT: usize = 200;
+
+    let prefix = String::from_utf8_lossy(&body[..body.len().min(LIMIT)]);
+    let escaped = prefix
+        .chars()
+        .flat_map(char::escape_default)
+        .collect::<String>();
+
+    if body.len() > LIMIT {
+        format!("{escaped}...")
+    } else {
+        escaped
+    }
+}
+
+#[cfg(test)]
+mod tests;

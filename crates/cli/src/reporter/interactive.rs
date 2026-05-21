@@ -29,6 +29,8 @@ pub struct InteractiveReporter {
     rendered_terminal_state: bool,
     /// Whether finish() has been called to restore the cursor.
     finished: bool,
+    /// Whether the static header/summary has already been printed.
+    rendered_static_frame: bool,
 }
 
 impl InteractiveReporter {
@@ -55,6 +57,7 @@ impl InteractiveReporter {
             theme,
             rendered_terminal_state: false,
             finished: false,
+            rendered_static_frame: false,
         }
     }
 
@@ -67,18 +70,24 @@ impl InteractiveReporter {
     /// Process an install event and re-render if needed.
     pub fn on_event(&mut self, event: InstallEvent) -> io::Result<()> {
         let was_finished = self.state.finished || self.state.failed;
+        let should_render = !matches!(
+            &event,
+            InstallEvent::Started { .. } | InstallEvent::RegistrySelected { .. }
+        );
         // Force render on key transitions so the final Done/Failed frame is never silently dropped.
         // PhaseStarted does NOT force render — let the 80ms throttle handle it.
         let force = matches!(
             &event,
-            InstallEvent::Started { .. }
-                | InstallEvent::RegistrySelected { .. }
+            InstallEvent::DirectPackages { .. }
                 | InstallEvent::Resolved { .. }
                 | InstallEvent::Lockfile { .. }
                 | InstallEvent::Failed { .. }
                 | InstallEvent::Finished { .. }
         );
         self.state.apply(event);
+        if !should_render {
+            return Ok(());
+        }
         let now_finished = self.state.finished || self.state.failed;
         self.render(force)?;
 
@@ -104,7 +113,12 @@ impl InteractiveReporter {
 
         let width = terminal_width();
         let renderer = FrameRenderer::with_theme(width, self.theme.clone());
-        let frame = renderer.render(&self.state);
+        let body_frame = renderer.render_body(&self.state);
+        let frame = if self.rendered_static_frame {
+            body_frame.clone()
+        } else {
+            renderer.render(&self.state)
+        };
 
         // Compare plain text to avoid re-rendering when only colors change (no actual state change).
         // Also bypass comparison when transitioning to terminal state (Finished/Failed) so the
@@ -122,6 +136,10 @@ impl InteractiveReporter {
 
         if let Some(terminal) = self.terminal.as_mut() {
             terminal.render(&self.last_frame.frame)?;
+            if !self.rendered_static_frame {
+                terminal.set_last_rows(body_frame.row_count);
+                self.rendered_static_frame = true;
+            }
         }
 
         Ok(())
@@ -168,6 +186,10 @@ mod tests {
         reporter.on_event(InstallEvent::Started {
             command: "orix install".to_string(),
         })?;
+        reporter.on_event(InstallEvent::DirectPackages {
+            count: 1,
+            names: vec!["react".to_string()],
+        })?;
 
         let frame1 = reporter.last_frame.plain.clone();
         assert!(!frame1.is_empty());
@@ -204,6 +226,10 @@ mod tests {
         reporter.on_event(InstallEvent::Started {
             command: "orix install".to_string(),
         })?;
+        reporter.on_event(InstallEvent::DirectPackages {
+            count: 1,
+            names: vec!["react".to_string()],
+        })?;
 
         assert!(
             reporter.last_frame.frame.starts_with('\x1b'),
@@ -218,6 +244,10 @@ mod tests {
 
         reporter.on_event(InstallEvent::Started {
             command: "orix install".to_string(),
+        })?;
+        reporter.on_event(InstallEvent::DirectPackages {
+            count: 1,
+            names: vec!["react".to_string()],
         })?;
 
         assert!(

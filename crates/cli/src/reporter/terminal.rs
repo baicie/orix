@@ -65,6 +65,11 @@ impl<W: Write> LiveTerminal<W> {
         Ok(())
     }
 
+    /// Override how many rows the next render should clear.
+    pub fn set_last_rows(&mut self, rows: usize) {
+        self.last_rows = rows;
+    }
+
     /// Restore the cursor after the final frame has already been rendered.
     pub fn finish(mut self, _frame: &str) -> io::Result<()> {
         queue!(self.writer, Show)?;
@@ -180,6 +185,26 @@ mod tests {
         assert!(
             output.contains(&move_up) && output.contains(&clear),
             "second render should MoveUp and clear; output={output:?}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_last_rows_limits_next_clear() -> io::Result<()> {
+        let mut terminal = LiveTerminal::new(Vec::new());
+
+        terminal.render(
+            "orix install\n----------------------------------------\n\nphase 1\nphase 2\n",
+        )?;
+        terminal.set_last_rows(2);
+        terminal.render("phase 1 updated\nphase 2\n")?;
+
+        let output = String::from_utf8(terminal.writer.clone())
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        assert!(
+            output.contains(&MoveUp(2).to_string()),
+            "second render should only clear dynamic rows; output={output:?}"
         );
 
         Ok(())

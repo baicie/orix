@@ -47,6 +47,16 @@ fn test_render_done() {
 }
 
 #[test]
+fn test_render_body_omits_command_header_but_keeps_summary() {
+    let renderer = FrameRenderer::new(80);
+    let frame = renderer.render_body(&make_state());
+
+    assert!(!frame.plain.contains("orix install"));
+    assert!(frame.plain.contains("Packages: +2 direct, +6 total"));
+    assert!(frame.plain.contains("Done in 0.21s"));
+}
+
+#[test]
 fn test_render_colored_has_ansi() {
     let renderer = FrameRenderer::with_theme(80, Theme::always_color());
     let frame = renderer.render(&make_state());

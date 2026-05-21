@@ -166,13 +166,7 @@ pub(crate) async fn try_install_fast_path(
     };
 
     if let Some(ref ws) = workspace {
-        super::workspace_link::link_workspace_packages(
-            &store,
-            &graph,
-            ws,
-            &graph_hash,
-            &opts.progress_tx,
-        )?;
+        super::workspace_link::link_workspace_packages(&store, &graph, ws, &opts.progress_tx)?;
     }
 
     send_event(

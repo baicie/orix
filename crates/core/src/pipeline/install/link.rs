@@ -58,7 +58,7 @@ pub(crate) fn link_install_graph(
     };
 
     if let Some(ref ws) = workspace {
-        super::workspace_link::link_workspace_packages(store, graph, ws, &graph_hash, progress_tx)?;
+        super::workspace_link::link_workspace_packages(store, graph, ws, progress_tx)?;
     }
 
     let link_ms: Option<u64> = Some(link_instant.elapsed().as_millis() as u64);

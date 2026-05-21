@@ -104,6 +104,77 @@ impl Linker {
         Ok(())
     }
 
+    /// Remove stale top-level links and `.bin` without pruning hidden virtual-store packages.
+    ///
+    /// Workspace member installs use this lighter pass because stale packages under
+    /// `node_modules/.orix` are not visible to Node unless a live symlink points at them.
+    /// Avoiding recursive deletion keeps large workspaces from paying an O(all packages)
+    /// cleanup cost for every member package.
+    pub fn prune_stale_direct_links(
+        &self,
+        direct_deps: &std::collections::HashSet<String>,
+    ) -> Result<()> {
+        if self.node_modules.is_dir() {
+            for entry in fs::read_dir(&self.node_modules)? {
+                let entry = entry?;
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name == ".bin" || file_name == VIRTUAL_STORE_DIR {
+                    continue;
+                }
+
+                if file_name.starts_with('@') {
+                    if !entry.file_type()?.is_dir() {
+                        continue;
+                    }
+                    for scoped in fs::read_dir(entry.path())? {
+                        let scoped = scoped?;
+                        let scoped_name = scoped.file_name().to_string_lossy().to_string();
+                        let full_name = format!("{file_name}/{scoped_name}");
+                        if direct_deps.contains(&full_name) {
+                            continue;
+                        }
+                        if path_exists_or_symlink(&scoped.path()) {
+                            if let Err(e) = remove_link_path(&scoped.path()) {
+                                warn!(
+                                    path = %scoped.path().display(),
+                                    error = %e,
+                                    "failed to prune stale scoped package link"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if direct_deps.contains(&file_name) {
+                    continue;
+                }
+                if path_exists_or_symlink(&entry.path()) {
+                    if let Err(e) = remove_link_path(&entry.path()) {
+                        warn!(
+                            path = %entry.path().display(),
+                            error = %e,
+                            "failed to prune stale top-level package link"
+                        );
+                    }
+                }
+            }
+        }
+
+        let bin_dir = self.node_modules.join(".bin");
+        if bin_dir.is_dir() {
+            if let Err(e) = fs::remove_dir_all(&bin_dir) {
+                warn!(
+                    path = %bin_dir.display(),
+                    error = %e,
+                    "failed to clear .bin before relink"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     /// Remove all generated links and `.orix/` content for this project.
     pub fn unlink(&self) -> Result<()> {
         if self.node_modules.exists() {
@@ -265,7 +336,7 @@ impl Linker {
             let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) else {
                 return false;
             };
-            return src_meta.dev() == dest_meta.dev();
+            src_meta.dev() == dest_meta.dev()
         }
 
         #[cfg(windows)]
