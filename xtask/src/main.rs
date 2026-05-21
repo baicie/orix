@@ -397,6 +397,8 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
     )?;
 
     eprintln!("[4/4] Linking npm packages locally...");
+    prepare_global_npm_link(npm_str, "@orix/orix")?;
+    prepare_global_npm_link(npm_str, platform_package.as_str())?;
     run_in_dir(&platform_dir, npm_str, ["link"])?;
     run_in_dir(
         &main_dir,
@@ -419,6 +421,72 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
         platform_package
     );
 
+    Ok(())
+}
+
+/// Global npm prefix (`npm root -g`), e.g. `~/.nvm/.../lib/node_modules`.
+fn npm_global_modules_root(npm: &str) -> Result<PathBuf> {
+    let output = Command::new(npm)
+        .args(["root", "-g"])
+        .output()
+        .with_context(|| format!("failed to run `{npm} root -g`"))?;
+    if !output.status.success() {
+        bail!(
+            "`{npm} root -g` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if root.is_empty() {
+        bail!("`{npm} root -g` returned an empty path");
+    }
+    Ok(PathBuf::from(root))
+}
+
+/// Resolve a scoped package name to a path under the global modules root.
+fn global_scoped_package_path(modules_root: &Path, package: &str) -> Result<PathBuf> {
+    let rest = package
+        .strip_prefix('@')
+        .with_context(|| format!("expected scoped package name, got `{package}`"))?;
+    let (scope, name) = rest
+        .split_once('/')
+        .with_context(|| format!("invalid scoped package name `{package}`"))?;
+    Ok(modules_root.join(format!("@{scope}")).join(name))
+}
+
+/// Remove a prior global install/link so `npm link` can replace it with a symlink.
+///
+/// `npm link` renames the existing global entry before linking. If a previous
+/// `npm install -g` left a real directory (not a symlink), that rename fails with
+/// `ENOTDIR`.
+fn prepare_global_npm_link(npm: &str, package: &str) -> Result<()> {
+    let _ = Command::new(npm)
+        .args(["unlink", "-g", package])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let modules_root = npm_global_modules_root(npm)?;
+    let package_path = global_scoped_package_path(&modules_root, package)?;
+    remove_global_package_entry(&package_path)?;
+    Ok(())
+}
+
+fn remove_global_package_entry(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let meta = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to stat {}", path.display()))?;
+    if meta.is_dir() && !meta.file_type().is_symlink() {
+        fs::remove_dir_all(path)
+            .with_context(|| format!("failed to remove directory {}", path.display()))?;
+    } else {
+        fs::remove_file(path)
+            .with_context(|| format!("failed to remove {}", path.display()))?;
+    }
     Ok(())
 }
 

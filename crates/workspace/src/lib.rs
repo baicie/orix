@@ -115,7 +115,7 @@ impl WorkspaceSpec {
 }
 
 #[cfg(test)]
-mod tests {
+mod workspace_spec_tests {
     use super::*;
 
     #[test]

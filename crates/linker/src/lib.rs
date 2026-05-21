@@ -1,6 +1,10 @@
 //! node_modules/.orix structure and symlink/hardlink generation.
 
 mod linker;
+mod linker_platform;
+
+#[cfg(test)]
+mod tests;
 
 pub use linker::Linker;
 
