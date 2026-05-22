@@ -222,9 +222,18 @@ pub(crate) async fn try_install_fast_path(
     );
 
     let duration = start.elapsed();
-    info!(
-        duration_ms = duration.as_millis(),
-        "install complete (fast path)"
+    let total_ms = duration.as_millis() as u64;
+    info!(duration_ms = total_ms, "install complete (fast path)");
+    crate::pipeline::perf::log_install_summary(
+        total_ms,
+        graph.len(),
+        None,
+        None,
+        None,
+        None,
+        &fetch_report,
+        &link_report,
+        true,
     );
     send_event(
         &opts.progress_tx,

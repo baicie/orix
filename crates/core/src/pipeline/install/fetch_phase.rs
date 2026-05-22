@@ -71,6 +71,12 @@ pub(crate) async fn fetch_install_graph(
         .with_context(|| "failed to fetch packages")?;
     let _ = fetch_progress_forwarder.await;
     let fetch_ms: Option<u64> = Some(fetch_instant.elapsed().as_millis() as u64);
+    crate::pipeline::perf::log_fetch_phase(
+        &fetch_report,
+        fetch_ms.unwrap_or(0),
+        total_to_fetch,
+        concurrency,
+    );
 
     send_event(
         progress_tx,

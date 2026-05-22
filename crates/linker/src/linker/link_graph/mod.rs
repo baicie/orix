@@ -4,6 +4,8 @@ mod bins;
 mod import_files;
 mod symlinks;
 
+use std::time::Instant;
+
 use crate::linker::prelude::*;
 use crate::linker::{Linker, VIRTUAL_STORE_DIR};
 use crate::linker_platform::*;
@@ -18,6 +20,7 @@ impl Linker {
         workspace: Option<&orix_workspace::Workspace>,
         graph_hash: &str,
     ) -> Result<LinkReport> {
+        let started = Instant::now();
         let mut report = LinkReport {
             hardlinked_files: 0,
             copied_files: 0,
@@ -40,7 +43,17 @@ impl Linker {
             .map(|p| (p.id.name.to_string(), p.id.key()))
             .collect();
 
+        let mut import_files_ms: u64 = 0;
+        let mut bins_ms: u64 = 0;
+        let mut workspace_ms: u64 = 0;
+        let mut packages_imported: u32 = 0;
+        let mut packages_import_skipped: u32 = 0;
+        let mut workspace_packages: u32 = 0;
+        let mut slow_package_logs: u32 = 0;
+        const SLOW_PACKAGE_MS: u64 = 200;
+
         for pkg in graph.packages() {
+            let pkg_started = Instant::now();
             let pkg_key = pkg.id.key();
 
             // Workspace packages: link directly to local source instead of store.
@@ -52,6 +65,7 @@ impl Linker {
                         .iter()
                         .find(|p| p.manifest.name.as_deref() == Some(&*pkg.id.name))
                     {
+                        let ws_started = Instant::now();
                         let top_link = Self::package_path_in_node_modules(
                             &self.node_modules,
                             pkg.id.name.as_str(),
@@ -72,6 +86,8 @@ impl Linker {
                             )?;
                             report.symlinks_created += 1;
                         }
+                        workspace_ms += ws_started.elapsed().as_millis() as u64;
+                        workspace_packages += 1;
                         continue;
                     }
                 }
@@ -85,19 +101,43 @@ impl Linker {
             let store_files = self.store.package_files_path(&pkg.id);
             fs::create_dir_all(&pkg_dir)?;
 
+            let mut pkg_import_ms = 0_u64;
             if !self.is_package_import_complete(&pkg.id, &pkg_dir)? {
+                let t = Instant::now();
                 self.import_package_files(&pkg.id, &pkg_dir, &store_files, &mut report)?;
+                pkg_import_ms = t.elapsed().as_millis() as u64;
+                import_files_ms += pkg_import_ms;
+                packages_imported += 1;
             } else {
                 trace!(pkg = %pkg_key, "package already imported, skipping file import");
+                packages_import_skipped += 1;
             }
 
             // Link bin executables for this package into .orix/<pkg>/bin/
             let link_global_bins = direct_name_to_key
                 .get(pkg.id.name.as_str())
                 .is_some_and(|direct_key| direct_key == &pkg_key);
+            let bins_started = Instant::now();
             self.link_package_bins(&pkg_key, &store_files, link_global_bins, &mut report)?;
+            let pkg_bins_ms = bins_started.elapsed().as_millis() as u64;
+            bins_ms += pkg_bins_ms;
+
+            let pkg_ms = pkg_started.elapsed().as_millis() as u64;
+            if pkg_ms >= SLOW_PACKAGE_MS && slow_package_logs < 20 {
+                slow_package_logs += 1;
+                debug!(
+                    target: "orix::perf",
+                    phase = "link_package",
+                    pkg = %pkg_key,
+                    duration_ms = pkg_ms,
+                    import_files_ms = pkg_import_ms,
+                    bins_ms = pkg_bins_ms,
+                    "slow package link"
+                );
+            }
         }
 
+        let virtual_deps_started = Instant::now();
         // Create package-internal dependency links after all packages have been imported.
         // This keeps optional dependencies from being skipped due to graph iteration order.
         for pkg in graph.packages() {
@@ -166,7 +206,9 @@ impl Linker {
                 }
             }
         }
+        let virtual_deps_ms = virtual_deps_started.elapsed().as_millis() as u64;
 
+        let direct_deps_started = Instant::now();
         // Create top-level symlinks for direct dependencies.
         for (direct_name, direct_key) in direct_name_to_key {
             let target = virtual_store_dir.join(direct_key).join("node_modules");
@@ -197,16 +239,38 @@ impl Linker {
                 report.symlinks_created += 1;
             }
         }
+        let direct_deps_ms = direct_deps_started.elapsed().as_millis() as u64;
 
         // Write marker after successful link
         self.write_marker(graph_hash, graph.len())?;
 
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let files_linked = report.hardlinked_files + report.copied_files;
+        let files_per_sec = if duration_ms == 0 {
+            0.0
+        } else {
+            files_linked as f64 * 1000.0 / duration_ms as f64
+        };
         debug!(
+            target: "orix::perf",
+            phase = "link_graph",
+            duration_ms,
             packages = graph.len(),
+            import_files_ms,
+            bins_ms,
+            virtual_deps_ms,
+            direct_deps_ms,
+            workspace_ms,
+            workspace_packages,
+            packages_imported,
+            packages_import_skipped,
+            slow_package_logs,
             hardlinked_files = report.hardlinked_files,
             copied_files = report.copied_files,
             symlinks_created = report.symlinks_created,
-            "link completed"
+            bytes_saved = report.bytes_saved,
+            files_per_sec,
+            "link_graph complete"
         );
 
         Ok(report)

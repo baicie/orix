@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
@@ -36,13 +37,23 @@ impl Store {
         depnodes: Vec<String>,
         top_integrity: Option<&str>,
     ) -> Result<HashSet<PathBuf>> {
+        let started = Instant::now();
         // Fast path: if already imported, skip all I/O.
         let already_exists = self.contains(pkg_id);
         debug!(pkg = %pkg_id, already_exists, source_dir = %source_dir.display(), "import_package called");
         if already_exists {
+            debug!(
+                target: "orix::perf",
+                phase = "store_import",
+                pkg = %pkg_id,
+                duration_ms = 0_u64,
+                skipped = true,
+                "import_package skipped (already in store)"
+            );
             return Ok(HashSet::new());
         }
 
+        let hash_walk_started = Instant::now();
         // ── Phase 1: Compute hashes and prepare file index (outside lock) ──────────
         // This can run concurrently for different packages without contention.
         #[derive(Debug)]
@@ -101,12 +112,25 @@ impl Store {
             return Ok(HashSet::new());
         }
 
+        let hash_walk_ms = hash_walk_started.elapsed().as_millis() as u64;
+        let write_lock_started = Instant::now();
         // ── Phase 2: Write operations under lock ──────────────────────────────────
         let _guard = self.io_guard.write();
 
         // Re-check after acquiring lock (another thread may have imported it).
         if self.contains(pkg_id) {
             debug!(pkg = %pkg_id, "package already in store, skipping");
+            debug!(
+                target: "orix::perf",
+                phase = "store_import",
+                pkg = %pkg_id,
+                duration_ms = started.elapsed().as_millis() as u64,
+                hash_walk_ms,
+                write_lock_ms = 0_u64,
+                files = file_index.len(),
+                skipped = true,
+                "import_package skipped (race after lock)"
+            );
             return Ok(HashSet::new());
         }
 
@@ -184,6 +208,26 @@ impl Store {
             warn!(pkg = %pkg_id, "{}", err);
         }
 
+        let write_lock_ms = write_lock_started.elapsed().as_millis() as u64;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let files = file_index.len() as u64;
+        let files_per_sec = if duration_ms == 0 {
+            0.0
+        } else {
+            files as f64 * 1000.0 / duration_ms as f64
+        };
+        debug!(
+            target: "orix::perf",
+            phase = "store_import",
+            pkg = %pkg_id,
+            duration_ms,
+            hash_walk_ms,
+            write_lock_ms,
+            files = file_index.len(),
+            new_files = new_files.len(),
+            files_per_sec,
+            "import_package complete"
+        );
         debug!(pkg = %pkg_id, files = file_index.len(), new_files = new_files.len(), "imported package files");
 
         // Build integrity metadata from the file index

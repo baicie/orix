@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -79,8 +80,10 @@ impl Fetcher {
         concurrency: usize,
         progress_tx: Option<mpsc::Sender<FetchEvent>>,
     ) -> Result<FetchReport> {
+        let started = Instant::now();
         let sem = Arc::new(Semaphore::new(concurrency.max(1)));
         let mut handles = Vec::new();
+        let mut scheduled = 0usize;
 
         for pkg in graph.packages() {
             // Skip workspace packages (they have no tarball and live on disk).
@@ -99,6 +102,7 @@ impl Fetcher {
                 continue;
             }
 
+            scheduled += 1;
             let sem = Arc::clone(&sem);
             let cache = Arc::clone(&self.cache);
             let store = Arc::clone(&self.store);
@@ -206,6 +210,24 @@ impl Fetcher {
                 Err(e) => report.failures.push(format!("task cancelled: {}", e)),
             }
         }
+
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let packages_per_sec = if duration_ms == 0 {
+            0.0
+        } else {
+            report.success as f64 * 1000.0 / duration_ms as f64
+        };
+        debug!(
+            target: "orix::perf",
+            phase = "fetcher",
+            duration_ms,
+            scheduled,
+            success = report.success,
+            failures = report.failures.len(),
+            concurrency,
+            packages_per_sec,
+            "fetch_all complete"
+        );
 
         Ok(report)
     }

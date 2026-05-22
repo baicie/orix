@@ -478,14 +478,13 @@ fn remove_global_package_entry(path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let meta = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to stat {}", path.display()))?;
+    let meta =
+        fs::symlink_metadata(path).with_context(|| format!("failed to stat {}", path.display()))?;
     if meta.is_dir() && !meta.file_type().is_symlink() {
         fs::remove_dir_all(path)
             .with_context(|| format!("failed to remove directory {}", path.display()))?;
     } else {
-        fs::remove_file(path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
     Ok(())
 }

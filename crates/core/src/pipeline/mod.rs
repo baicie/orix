@@ -6,6 +6,7 @@ mod fetch;
 mod install;
 mod lifecycle;
 mod lockfile_io;
+mod perf;
 mod prelude;
 mod store_cmd;
 mod types;

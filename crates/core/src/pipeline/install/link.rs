@@ -43,12 +43,21 @@ pub(crate) fn link_install_graph(
             skipped: Some("node_modules layout already valid".to_string()),
         }
     } else {
+        let prune_started = Instant::now();
         if let Err(e) = linker.prune_stale_layout(&graph, &direct_deps) {
             return Err(link_error(
                 progress_tx,
                 format!("failed to prune stale node_modules layout: {e}"),
             ));
         }
+        let prune_ms = prune_started.elapsed().as_millis() as u64;
+        debug!(
+            target: crate::pipeline::perf::PERF_TARGET,
+            phase = "prune_layout",
+            duration_ms = prune_ms,
+            packages = graph.len(),
+            "prune stale layout complete"
+        );
 
         let link_report = linker.link_graph(&graph, &direct_deps, workspace.as_ref(), &graph_hash);
         match link_report {
@@ -62,14 +71,11 @@ pub(crate) fn link_install_graph(
     }
 
     let link_ms: Option<u64> = Some(link_instant.elapsed().as_millis() as u64);
-
-    trace!(
-        hardlinked_files = link_report.hardlinked_files,
-        copied_files = link_report.copied_files,
-        symlinks_created = link_report.symlinks_created,
-        bytes_saved = link_report.bytes_saved,
-        link_ms = link_ms,
-        "linked dependencies"
+    crate::pipeline::perf::log_link_phase(
+        &link_report,
+        link_ms.unwrap_or(0),
+        graph.len(),
+        layout_is_valid,
     );
     emit_windows_link_performance_hint(&config, &link_report);
 

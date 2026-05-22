@@ -21,6 +21,7 @@ use resolve::resolve_install_graph;
 pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallReport> {
     let _span = info_span!("install", root = %project_root.display()).entered();
     let start = Instant::now();
+    let setup_instant = Instant::now();
 
     debug!(
         frozen_lockfile = opts.frozen_lockfile,
@@ -147,6 +148,12 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     } else {
         None
     };
+
+    crate::pipeline::perf::log_setup_phase(
+        setup_instant.elapsed().as_millis() as u64,
+        workspace.as_ref().map(|ws| ws.packages.len()),
+        direct_dependency_count,
+    );
 
     // Fast path: lockfile specifiers match package.json — reuse locked resolution.
     // Only apply when network is not forced and we're not in frozen mode.

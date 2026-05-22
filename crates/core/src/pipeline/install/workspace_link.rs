@@ -17,7 +17,10 @@ pub(crate) fn link_workspace_packages(
     workspace: &Workspace,
     progress_tx: &Option<mpsc::Sender<InstallEvent>>,
 ) -> Result<()> {
+    let started = Instant::now();
     let graph_index = GraphIndex::new(graph);
+    let mut linked_members = 0_u32;
+    let mut skipped_members = 0_u32;
 
     for ws_pkg in &workspace.packages {
         let nm_dir = ws_pkg.abs_path.join("node_modules");
@@ -51,6 +54,7 @@ pub(crate) fn link_workspace_packages(
                 pkg = %ws_pkg.manifest.name.as_deref().unwrap_or("?"),
                 "workspace pkg layout valid, skipping"
             );
+            skipped_members += 1;
             continue;
         }
 
@@ -77,7 +81,18 @@ pub(crate) fn link_workspace_packages(
                 ),
             ));
         }
+        linked_members += 1;
     }
+
+    debug!(
+        target: crate::pipeline::perf::PERF_TARGET,
+        phase = "workspace_link",
+        duration_ms = started.elapsed().as_millis() as u64,
+        members = workspace.packages.len(),
+        linked_members,
+        skipped_members,
+        "workspace member link complete"
+    );
 
     Ok(())
 }

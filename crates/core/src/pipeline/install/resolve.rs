@@ -115,5 +115,28 @@ pub(crate) async fn resolve_install_graph(
     };
 
     let resolve_ms: Option<u64> = resolve_instant.map(|i| i.elapsed().as_millis() as u64);
+    if let Some(ms) = resolve_ms {
+        let old_count = old_lockfile
+            .as_ref()
+            .map(|lf| lf.packages.len())
+            .unwrap_or(0);
+        crate::pipeline::perf::log_resolve_phase(
+            graph.len(),
+            ms,
+            direct_dependency_count,
+            graph.len().saturating_sub(old_count),
+            old_count.saturating_sub(graph.len()),
+            false,
+        );
+    } else {
+        crate::pipeline::perf::log_resolve_phase(
+            graph.len(),
+            0,
+            direct_dependency_count,
+            0,
+            0,
+            true,
+        );
+    }
     Ok((graph, resolve_ms))
 }

@@ -75,6 +75,13 @@ pub(crate) async fn finish_install(
 
         lockfile_changed = Lockfile::diff_has_changes(&diff);
         lockfile_ms = Some(lockfile_instant.elapsed().as_millis() as u64);
+        crate::pipeline::perf::log_lockfile_phase(
+            lockfile_ms.unwrap_or(0),
+            lockfile_changed,
+            diff.added.len(),
+            diff.removed.len(),
+            diff.changed.len(),
+        );
         if lockfile_changed {
             info!(
                 added = diff.added.len(),
@@ -132,7 +139,19 @@ pub(crate) async fn finish_install(
     }
 
     let duration = start.elapsed();
-    info!(duration_ms = duration.as_millis(), "install complete");
+    let total_ms = duration.as_millis() as u64;
+    info!(duration_ms = total_ms, "install complete");
+    crate::pipeline::perf::log_install_summary(
+        total_ms,
+        graph.len(),
+        resolve_ms,
+        fetch_ms,
+        link_ms,
+        lockfile_ms,
+        &fetch_report,
+        &link_report,
+        false,
+    );
     send_event(
         &opts.progress_tx,
         InstallEvent::Finished {
