@@ -69,9 +69,13 @@ pub(crate) fn link_workspace_packages(
             ));
         }
 
-        if let Err(e) =
-            pkg_linker.link_graph(&pkg_graph, &pkg_deps, Some(workspace), &pkg_graph_hash)
-        {
+        if let Err(e) = pkg_linker.link_graph(
+            &pkg_graph,
+            &pkg_deps,
+            Some(workspace),
+            &pkg_graph_hash,
+            None,
+        ) {
             return Err(link_error(
                 progress_tx,
                 format!(

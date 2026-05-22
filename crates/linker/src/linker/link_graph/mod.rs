@@ -19,6 +19,7 @@ impl Linker {
         direct_deps: &std::collections::HashSet<String>,
         workspace: Option<&orix_workspace::Workspace>,
         graph_hash: &str,
+        mut progress: crate::LinkProgressCallback<'_>,
     ) -> Result<LinkReport> {
         let started = Instant::now();
         let mut report = LinkReport {
@@ -51,6 +52,9 @@ impl Linker {
         let mut workspace_packages: u32 = 0;
         let mut slow_package_logs: u32 = 0;
         const SLOW_PACKAGE_MS: u64 = 200;
+
+        let total_packages = graph.len();
+        let mut packages_done = 0usize;
 
         for pkg in graph.packages() {
             let pkg_started = Instant::now();
@@ -134,6 +138,11 @@ impl Linker {
                     bins_ms = pkg_bins_ms,
                     "slow package link"
                 );
+            }
+
+            packages_done += 1;
+            if let Some(callback) = progress.as_deref_mut() {
+                callback(packages_done, total_packages, pkg.id.name.as_str());
             }
         }
 

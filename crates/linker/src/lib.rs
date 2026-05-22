@@ -10,6 +10,9 @@ pub use linker::Linker;
 
 use serde::{Deserialize, Serialize};
 
+/// Optional callback invoked as each package is linked (`done`, `total`, package name).
+pub type LinkProgressCallback<'a> = Option<&'a mut dyn FnMut(usize, usize, &str)>;
+
 /// Report from a link operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkReport {

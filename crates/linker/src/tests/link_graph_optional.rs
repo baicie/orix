@@ -34,7 +34,7 @@ fn link_graph_links_optional_dependencies_after_all_packages_are_imported() -> a
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let native_link = temp
         .path()
@@ -81,7 +81,7 @@ fn link_graph_links_peer_dependencies_when_present_in_graph() -> anyhow::Result<
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup-plugin-esbuild".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let peer_link = temp
         .path()

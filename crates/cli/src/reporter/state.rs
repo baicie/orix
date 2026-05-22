@@ -149,6 +149,9 @@ impl InstallState {
 
             InstallEvent::PhaseStarted { phase } => {
                 self.phase_mut(phase).status = StepStatus::Running;
+                if phase == InstallPhase::Link {
+                    self.recent_packages.clear();
+                }
             }
 
             InstallEvent::ResolveProgress {
@@ -199,6 +202,24 @@ impl InstallState {
                 self.fetch.total = total;
 
                 if let Some(package) = package {
+                    self.push_recent_package(package);
+                }
+            }
+
+            InstallEvent::LinkProgress {
+                done,
+                total,
+                package,
+            } => {
+                self.link.status = if done >= total && total > 0 {
+                    StepStatus::Done
+                } else {
+                    StepStatus::Running
+                };
+                self.link.done = done;
+                self.link.total = total;
+
+                if let Some(package) = package.filter(|name| !name.is_empty()) {
                     self.push_recent_package(package);
                 }
             }
@@ -368,6 +389,37 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_link_progress() {
+        let mut state = InstallState::default();
+        state.apply(InstallEvent::LinkProgress {
+            done: 0,
+            total: 5,
+            package: None,
+        });
+        assert_eq!(state.link.status, StepStatus::Running);
+        assert_eq!(state.link.done, 0);
+        assert_eq!(state.link.total, 5);
+
+        state.apply(InstallEvent::LinkProgress {
+            done: 3,
+            total: 5,
+            package: Some("lodash".to_string()),
+        });
+        assert_eq!(state.link.status, StepStatus::Running);
+        assert_eq!(state.link.done, 3);
+        assert_eq!(
+            state.recent_packages.back().map(String::as_str),
+            Some("lodash")
+        );
+
+        state.apply(InstallEvent::LinkProgress {
+            done: 5,
+            total: 5,
+            package: Some("react".to_string()),
+        });
+        assert_eq!(state.link.status, StepStatus::Done);
+    }
+
     fn test_apply_fetch_progress() {
         let mut state = InstallState::default();
         state.apply(InstallEvent::FetchProgress {

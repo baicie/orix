@@ -21,7 +21,7 @@ fn prune_stale_layout_removes_only_obsolete_virtual_store_entries() -> anyhow::R
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct = HashSet::from(["left-pkg".to_string(), "right-pkg".to_string()]);
-    linker.link_graph(&old_graph, &direct, None, &old_graph.graph_hash())?;
+    linker.link_graph(&old_graph, &direct, None, &old_graph.graph_hash(), None)?;
 
     assert!(temp
         .path()

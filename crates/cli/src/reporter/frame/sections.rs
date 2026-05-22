@@ -116,11 +116,28 @@ impl FrameRenderer {
         }
 
         let link_line =
-            self.render_step(&state.link, "Linking dependencies", "Linked dependencies");
+            self.render_fetch_step(&state.link, "Linking dependencies", "Linked dependencies");
         colored.push_str(&link_line.colored);
         plain.push_str(&link_line.plain);
         colored.push('\n');
         plain.push('\n');
+
+        if self.show_recent_packages
+            && state.link.status == StepStatus::Running
+            && !state.recent_packages.is_empty()
+        {
+            for package in &state.recent_packages {
+                let styled = format!("  {} {}", CHECKMARK, package);
+                colored.push_str(&self.theme.success(&styled));
+                colored.push('\n');
+
+                plain.push_str("  ");
+                plain.push_str(CHECKMARK);
+                plain.push(' ');
+                plain.push_str(package);
+                plain.push('\n');
+            }
+        }
 
         match &state.lockfile_status {
             Some(LockfileStatus::Unchanged) => {

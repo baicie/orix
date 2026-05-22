@@ -87,6 +87,22 @@ pub struct LockfileDiffReport {
     pub importers_changed: Vec<String>,
 }
 
+pub(crate) fn emit_link_progress(
+    tx: &Option<mpsc::Sender<InstallEvent>>,
+    done: usize,
+    total: usize,
+    package: Option<String>,
+) {
+    send_event(
+        tx,
+        InstallEvent::LinkProgress {
+            done,
+            total,
+            package,
+        },
+    );
+}
+
 pub(crate) fn send_event(tx: &Option<mpsc::Sender<InstallEvent>>, event: InstallEvent) {
     tracing::trace!(event = ?event, "emit install event");
 

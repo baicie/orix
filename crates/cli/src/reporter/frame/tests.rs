@@ -83,6 +83,17 @@ fn test_format_duration() {
 }
 
 #[test]
+fn test_render_link_running() {
+    let mut state = make_state();
+    state.link.status = StepStatus::Running;
+    state.link.done = 2;
+    state.link.total = 5;
+
+    let renderer = FrameRenderer::new(80);
+    let frame = renderer.render(&state);
+    assert!(frame.plain.contains("● Linking dependencies 2/5"));
+}
+
 fn test_render_fetch_running() {
     let mut state = make_state();
     state.fetch.status = StepStatus::Running;

@@ -11,6 +11,7 @@ pub struct PlainReporter {
     writer: io::Stderr,
     resolve_progress: ProgressThrottle,
     fetch_progress: ProgressThrottle,
+    link_progress: ProgressThrottle,
 }
 
 impl PlainReporter {
@@ -20,6 +21,7 @@ impl PlainReporter {
             writer: io::stderr(),
             resolve_progress: ProgressThrottle::default(),
             fetch_progress: ProgressThrottle::default(),
+            link_progress: ProgressThrottle::default(),
         }
     }
 
@@ -69,6 +71,12 @@ impl PlainReporter {
             InstallEvent::FetchProgress { done, total, .. } => {
                 if self.fetch_progress.should_emit(done, total) {
                     writeln!(self.writer, "fetching packages: {done}/{total}")?;
+                }
+            }
+
+            InstallEvent::LinkProgress { done, total, .. } => {
+                if self.link_progress.should_emit(done, total) {
+                    writeln!(self.writer, "linking packages: {done}/{total}")?;
                 }
             }
 

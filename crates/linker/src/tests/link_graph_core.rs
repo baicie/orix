@@ -29,7 +29,7 @@ fn link_graph_creates_valid_layout_for_direct_and_transitive_deps() -> anyhow::R
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["react".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let report = linker.validate_layout(&direct_deps)?;
 
@@ -72,7 +72,7 @@ fn link_graph_supports_scoped_direct_dependencies() -> anyhow::Result<()> {
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["@scope/pkg".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let report = linker.validate_layout(&direct_deps)?;
 
@@ -103,7 +103,7 @@ fn link_graph_supports_scoped_transitive_dependencies() -> anyhow::Result<()> {
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["@scope/parent".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let report = linker.validate_layout(&direct_deps)?;
 

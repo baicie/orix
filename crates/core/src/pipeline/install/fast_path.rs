@@ -3,7 +3,7 @@
 use crate::pipeline::fetch::fetch_only_missing;
 use crate::pipeline::prelude::*;
 use crate::pipeline::types::{
-    fetch_failure_hint, link_error, send_event, InstallOpts, InstallReport,
+    emit_link_progress, fetch_failure_hint, link_error, send_event, InstallOpts, InstallReport,
 };
 use crate::reporter::LockfileStatus;
 
@@ -122,6 +122,8 @@ pub(crate) async fn try_install_fast_path(
             phase: InstallPhase::Link,
         },
     );
+    let total_packages = graph.len();
+    emit_link_progress(&opts.progress_tx, 0, total_packages, None);
     let linker = Linker::new(store.clone(), config.node_modules_dir());
     use std::collections::HashSet;
     let direct_deps: HashSet<String> = manifest
@@ -138,6 +140,7 @@ pub(crate) async fn try_install_fast_path(
             .unwrap_or(false)
     {
         debug!(target: "orix", "layout valid, skipping unlink+link");
+        emit_link_progress(&opts.progress_tx, total_packages, total_packages, None);
         LinkReport {
             hardlinked_files: 0,
             copied_files: 0,
@@ -150,11 +153,20 @@ pub(crate) async fn try_install_fast_path(
         linker
             .prune_stale_layout(&graph, &direct_deps)
             .with_context(|| "failed to prune stale node_modules layout")?;
+        let mut on_link_progress = |done: usize, _total: usize, name: &str| {
+            emit_link_progress(
+                &opts.progress_tx,
+                done,
+                total_packages,
+                Some(name.to_string()),
+            );
+        };
         let report = linker.link_graph(
             &graph,
             &direct_deps,
             workspace.as_ref(),
             &graph.graph_hash(),
+            Some(&mut on_link_progress),
         );
         match report {
             Ok(r) => {

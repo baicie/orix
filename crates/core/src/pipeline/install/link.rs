@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use crate::pipeline::prelude::*;
-use crate::pipeline::types::{emit_windows_link_performance_hint, link_error, send_event};
+use crate::pipeline::types::{
+    emit_link_progress, emit_windows_link_performance_hint, link_error, send_event,
+};
 
 pub(crate) fn link_install_graph(
     store: &Store,
@@ -20,6 +22,8 @@ pub(crate) fn link_install_graph(
         },
     );
     let link_instant = Instant::now();
+    let total_packages = graph.len();
+    emit_link_progress(progress_tx, 0, total_packages, None);
     let direct_deps: HashSet<String> = manifest
         .dependencies
         .keys()
@@ -35,6 +39,7 @@ pub(crate) fn link_install_graph(
             .with_context(|| "failed to validate existing node_modules layout")?
             .is_ok();
     let link_report = if layout_is_valid {
+        emit_link_progress(progress_tx, total_packages, total_packages, None);
         LinkReport {
             hardlinked_files: 0,
             copied_files: 0,
@@ -59,7 +64,16 @@ pub(crate) fn link_install_graph(
             "prune stale layout complete"
         );
 
-        let link_report = linker.link_graph(&graph, &direct_deps, workspace.as_ref(), &graph_hash);
+        let mut on_link_progress = |done: usize, _total: usize, name: &str| {
+            emit_link_progress(progress_tx, done, total_packages, Some(name.to_string()));
+        };
+        let link_report = linker.link_graph(
+            &graph,
+            &direct_deps,
+            workspace.as_ref(),
+            &graph_hash,
+            Some(&mut on_link_progress),
+        );
         match link_report {
             Ok(r) => r,
             Err(e) => return Err(link_error(progress_tx, e.to_string())),

@@ -33,7 +33,7 @@ fn link_graph_creates_parent_dirs_for_scoped_bin_names() -> anyhow::Result<()> {
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["@antfu/eslint-config".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     // Scoped bin names are flattened to avoid @ and / in Windows filenames.
     // The shim should be eslint-config (not @antfu/eslint-config).
@@ -88,7 +88,7 @@ fn link_graph_makes_package_bins_executable() -> anyhow::Result<()> {
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let shim = temp.path().join("node_modules").join(".bin").join("rollup");
     let target_metadata = fs::metadata(&shim)?;
@@ -113,7 +113,7 @@ fn link_graph_keeps_bins_inside_package_for_relative_requires() -> anyhow::Resul
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let shim = temp.path().join("node_modules").join(".bin").join("rollup");
     let shim_target = fs::read_link(&shim)?;
@@ -176,7 +176,7 @@ fn link_graph_prefers_direct_version_for_top_level_bins() -> anyhow::Result<()> 
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let direct_link = temp.path().join("node_modules").join("rollup");
     let direct_expected = temp
@@ -225,7 +225,7 @@ fn link_graph_selects_internal_dependency_by_declared_range() -> anyhow::Result<
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup-pluginutils".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let dep_link = temp
         .path()

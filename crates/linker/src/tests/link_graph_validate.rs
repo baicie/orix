@@ -60,7 +60,7 @@ fn link_graph_creates_windows_cmd_shim_for_bins() -> anyhow::Result<()> {
 
     let linker = Linker::new(store, temp.path().join("node_modules"));
     let direct_deps = HashSet::from(["rollup".to_string()]);
-    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash())?;
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
 
     let shim = temp
         .path()

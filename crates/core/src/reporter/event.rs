@@ -105,6 +105,16 @@ pub enum InstallEvent {
         package: Option<String>,
     },
 
+    /// Link progress update (emitted as each package is linked into node_modules).
+    LinkProgress {
+        /// Packages linked so far.
+        done: usize,
+        /// Total packages to link.
+        total: usize,
+        /// Currently linked package name (for display).
+        package: Option<String>,
+    },
+
     /// A single package was fetched and imported into the store.
     PackageFetched {
         /// Package name.
