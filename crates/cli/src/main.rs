@@ -313,6 +313,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Command::Prune(args) => {
+            run_prune(&dir, args.keep_lockfile, args.dry_run, &config_overrides);
+        }
     }
 
     Ok(())

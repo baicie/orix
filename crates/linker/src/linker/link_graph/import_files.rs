@@ -1,5 +1,6 @@
 //! Import package files from the store.
 
+#[cfg_attr(not(unix), allow(unused_imports))]
 use anyhow::Context;
 
 use crate::linker::prelude::*;

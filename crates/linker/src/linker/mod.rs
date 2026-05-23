@@ -4,8 +4,10 @@ mod layout;
 mod link_graph;
 pub(crate) mod prelude;
 
-use super::linker_platform::*;
 use prelude::*;
+
+#[cfg(not(windows))]
+use super::linker_platform::{normal_components, path_starts_with_lexically};
 
 pub(crate) const VIRTUAL_STORE_DIR: &str = ".orix";
 pub(crate) const METADATA_FILE: &str = "metadata.json";

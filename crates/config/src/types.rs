@@ -1,7 +1,5 @@
 //! Configuration types.
 
-#[cfg(windows)]
-use std::path::Component;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

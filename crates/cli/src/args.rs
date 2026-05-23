@@ -71,6 +71,8 @@ pub enum Command {
     Import(ImportArgs),
     Export(ExportArgs),
     Deploy(DeployArgs),
+    /// Remove node_modules and the lockfile.
+    Prune(PruneArgs),
 }
 
 #[derive(Subcommand)]
@@ -191,6 +193,17 @@ pub struct DeployArgs {
     /// Run deploy hooks (predeploy, postdeploy).
     #[arg(long)]
     pub hooks: bool,
+}
+
+/// Prune command arguments.
+#[derive(Args, Debug)]
+pub struct PruneArgs {
+    /// Do not remove the lockfile.
+    #[arg(long)]
+    pub keep_lockfile: bool,
+    /// Preview changes without deleting anything.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(ValueEnum, Clone, Default)]

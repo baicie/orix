@@ -426,10 +426,18 @@ fn run_npm_test(skip_build: bool, pack_dir: &Path) -> Result<()> {
 
 /// Global npm prefix (`npm root -g`), e.g. `~/.nvm/.../lib/node_modules`.
 fn npm_global_modules_root(npm: &str) -> Result<PathBuf> {
-    let output = Command::new(npm)
-        .args(["root", "-g"])
-        .output()
-        .with_context(|| format!("failed to run `{npm} root -g`"))?;
+    let output = if cfg!(windows) {
+        // Windows: npm is a .cmd wrapper. Use `cmd /c` so cmd.exe resolves it.
+        Command::new("cmd")
+            .args(["/c", npm, "root", "-g"])
+            .output()
+            .with_context(|| format!("failed to run `cmd /c {npm} root -g`"))?
+    } else {
+        Command::new(npm)
+            .args(["root", "-g"])
+            .output()
+            .with_context(|| format!("failed to run `{npm} root -g`"))?
+    };
     if !output.status.success() {
         bail!(
             "`{npm} root -g` failed: {}",
@@ -481,12 +489,50 @@ fn remove_global_package_entry(path: &Path) -> Result<()> {
     let meta =
         fs::symlink_metadata(path).with_context(|| format!("failed to stat {}", path.display()))?;
     if meta.is_dir() && !meta.file_type().is_symlink() {
-        fs::remove_dir_all(path)
-            .with_context(|| format!("failed to remove directory {}", path.display()))?;
+        remove_dir_all_with_retry(path, 3)?;
     } else {
-        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
+        // Regular file, symlink, or junction — remove by type.
+        if meta.file_type().is_symlink() || meta.is_dir() {
+            fs::remove_dir(path).with_context(|| format!("failed to remove {}", path.display()))?;
+        } else {
+            fs::remove_file(path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
     }
     Ok(())
+}
+
+/// Retry-capable directory removal for Windows, where files can be locked
+/// briefly by antivirus or indexers.
+#[cfg(windows)]
+fn remove_dir_all_with_retry(path: &Path, retries: u32) -> Result<()> {
+    use std::thread;
+    use std::time::Duration;
+
+    for attempt in 0..=retries {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < retries => {
+                let delay = Duration::from_millis(500 * (1 << attempt));
+                eprintln!(
+                    "  [attempt {}] could not remove {}: {e}; retrying in {delay:?}...",
+                    attempt + 1,
+                    path.display()
+                );
+                thread::sleep(delay);
+            }
+            Err(e) => {
+                anyhow::bail!("failed to remove directory {}: {e}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn remove_dir_all_with_retry(path: &Path, _retries: u32) -> Result<()> {
+    fs::remove_dir_all(path)
+        .with_context(|| format!("failed to remove directory {}", path.display()))
 }
 
 #[derive(Debug, Clone, Copy)]

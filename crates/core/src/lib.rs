@@ -2,10 +2,10 @@
 
 pub use crate::pipeline::{
     add, cache_clean, cache_clean_with_overrides, cache_path, cache_path_with_overrides, deploy,
-    export_pnpm_lockfile, import_pnpm_lockfile, install, remove, store_path,
+    export_pnpm_lockfile, import_pnpm_lockfile, install, prune, remove, store_path,
     store_path_with_overrides, store_prune, store_prune_with_overrides, store_verify,
     store_verify_with_overrides, CacheCleanReport, DepType, DeployOpts, DeployReport, ExportReport,
-    ImportReport, InstallOpts, InstallReport, RemoveReport,
+    ImportReport, InstallOpts, InstallReport, PruneReport, RemoveReport,
 };
 
 pub mod error;

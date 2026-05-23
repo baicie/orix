@@ -4,7 +4,8 @@ use anyhow::Context;
 
 use crate::linker::prelude::*;
 use crate::linker::{Linker, VIRTUAL_STORE_DIR};
-use crate::linker_platform::*;
+#[cfg_attr(windows, allow(unused_imports))]
+use crate::linker_platform::{path_exists_or_symlink, relative_path};
 use tracing::trace;
 
 impl Linker {

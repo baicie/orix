@@ -11,6 +11,7 @@ use super::lifecycle::run_project_lifecycle;
 use super::prelude::*;
 use super::types::*;
 
+use orix_config::ConfigOverrides;
 use fast_path::try_install_fast_path;
 use fetch_phase::fetch_install_graph;
 use finish::finish_install;
@@ -19,6 +20,15 @@ use resolve::resolve_install_graph;
 
 /// Run the full install pipeline for a project root.
 pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallReport> {
+    install_with_overrides(project_root, opts, &ConfigOverrides::default()).await
+}
+
+/// Run the full install pipeline with explicit configuration overrides.
+pub async fn install_with_overrides(
+    project_root: &Path,
+    opts: &InstallOpts,
+    overrides: &ConfigOverrides,
+) -> Result<InstallReport> {
     let _span = info_span!("install", root = %project_root.display()).entered();
     let start = Instant::now();
     let setup_instant = Instant::now();
@@ -43,17 +53,8 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
         "install options"
     );
 
-    let config = Config::load_with_overrides(
-        project_root,
-        &ConfigOverrides {
-            registry: opts.registry.clone(),
-            store_dir: opts.store_dir.clone(),
-            cache_dir: opts.cache_dir.clone(),
-            ignore_scripts: Some(opts.ignore_scripts),
-            allow_scripts: None,
-        },
-    )
-    .with_context(|| "failed to load configuration")?;
+    let config = Config::load_with_overrides(project_root, overrides)
+        .with_context(|| "failed to load configuration")?;
 
     trace!(
         registry = %config.registry,
