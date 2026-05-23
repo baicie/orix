@@ -41,6 +41,20 @@ pub(crate) fn package_path_in_node_modules(root: &Path, package_name: &str) -> P
         .fold(root.to_path_buf(), |path, part| path.join(part))
 }
 
+/// Return the canonical environment variable name for PATH on this platform
+/// if `key` refers to PATH.
+pub(crate) fn path_env_key(key: &str) -> Option<&'static str> {
+    #[cfg(windows)]
+    {
+        key.eq_ignore_ascii_case("PATH").then_some("Path")
+    }
+
+    #[cfg(not(windows))]
+    {
+        (key == "PATH").then_some("PATH")
+    }
+}
+
 /// Topological install order: dependencies before dependents.
 pub fn graph_install_order(graph: &orix_domain::DependencyGraph) -> Vec<PackageId> {
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -222,6 +236,21 @@ mod tests {
         let sanitized = sanitize_path_env(&path);
         assert!(!sanitized.contains("D:;"));
         assert!(sanitized.contains("node_modules"));
+    }
+
+    #[test]
+    fn path_env_key_matches_platform_path_name() {
+        assert_eq!(
+            path_env_key("PATH"),
+            Some(if cfg!(windows) { "Path" } else { "PATH" })
+        );
+
+        if cfg!(windows) {
+            assert_eq!(path_env_key("Path"), Some("Path"));
+            assert_eq!(path_env_key("path"), Some("Path"));
+        } else {
+            assert_eq!(path_env_key("Path"), None);
+        }
     }
 
     #[test]

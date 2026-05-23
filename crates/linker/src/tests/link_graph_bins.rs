@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
 
+#[cfg(unix)]
 use anyhow::Context;
 use orix_domain::DependencyGraph;
 use orix_store::Store;
@@ -147,6 +147,45 @@ fn link_graph_keeps_bins_inside_package_for_relative_requires() -> anyhow::Resul
         .join("bin")
         .join("rollup")
         .exists());
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn link_graph_windows_shim_uses_node_compatible_path() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let store = Store::open(temp.path().join("store"))?;
+    import_package_with_rollup_style_bin(&store, temp.path())?;
+
+    let mut graph = DependencyGraph::new();
+    graph.insert(resolved_package("rollup", "4.0.0", Vec::new())?);
+
+    let linker = Linker::new(store, temp.path().join("node_modules"));
+    let direct_deps = HashSet::from(["rollup".to_string()]);
+    linker.link_graph(&graph, &direct_deps, None, &graph.graph_hash(), None)?;
+
+    let shim = temp
+        .path()
+        .join("node_modules")
+        .join(".bin")
+        .join("rollup.cmd");
+    let cmd = fs::read_to_string(&shim)?;
+    assert!(
+        !cmd.contains(r"\\?\"),
+        "node entry path in .cmd shim should not use Windows verbatim syntax: {cmd}"
+    );
+
+    let output = std::process::Command::new("cmd")
+        .args(["/D", "/S", "/C"])
+        .arg(&shim)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "rollup shim should execute successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
     Ok(())
 }
 

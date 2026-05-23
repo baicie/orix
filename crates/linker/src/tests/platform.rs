@@ -2,6 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::linker_platform::is_bare_drive_path;
+#[cfg(windows)]
+use crate::linker_platform::relative_path;
 use crate::Linker;
 
 #[test]

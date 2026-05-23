@@ -12,7 +12,7 @@ use super::linker_platform::{normal_components, path_starts_with_lexically};
 pub(crate) const VIRTUAL_STORE_DIR: &str = ".orix";
 pub(crate) const METADATA_FILE: &str = "metadata.json";
 /// Bump when link layout semantics change (forces relink on next install).
-pub(crate) const LINK_PROTOCOL_VERSION: u32 = 2;
+pub(crate) const LINK_PROTOCOL_VERSION: u32 = 3;
 
 /// Marker written to node_modules/.orix/metadata.json after a successful link.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

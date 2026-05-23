@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
 
 use orix_domain::DependencyGraph;
 use orix_store::Store;

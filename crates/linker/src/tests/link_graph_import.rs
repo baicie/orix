@@ -1,15 +1,9 @@
 use std::collections::HashSet;
-use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
 
-use anyhow::Context;
 use orix_domain::DependencyGraph;
 use orix_store::Store;
 
 use super::helpers::*;
-use crate::linker_platform::normal_components;
 use crate::Linker;
 
 #[test]

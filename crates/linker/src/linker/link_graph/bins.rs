@@ -110,6 +110,7 @@ impl Linker {
                             package_bin.display()
                         )
                     })?;
+                    let absolute_bin = Self::windows_shim_target(&absolute_bin);
 
                     Self::create_windows_bin_shims(&global_bin_dir, shim_bin_name, &absolute_bin)
                         .with_context(|| {
@@ -152,6 +153,18 @@ impl Linker {
     #[cfg(not(unix))]
     fn ensure_bin_executable(_path: &Path) -> io::Result<()> {
         Ok(())
+    }
+
+    #[cfg(windows)]
+    fn windows_shim_target(path: &Path) -> PathBuf {
+        let raw = path.display().to_string();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+        path.to_path_buf()
     }
 
     #[cfg(windows)]

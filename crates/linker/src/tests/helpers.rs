@@ -1,19 +1,10 @@
-use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Version};
+use orix_domain::{PackageId, PackageName, ResolvedPackage, Version};
 use orix_store::Store;
-
-use anyhow::Context;
-
-use crate::linker::Linker;
-use crate::linker_platform::*;
-use crate::{LayoutReport, LinkReport};
-
-const VIRTUAL_STORE_DIR: &str = ".orix";
 
 pub(crate) fn pkg_id(name: &str, version: &str) -> anyhow::Result<PackageId> {
     Ok(PackageId::new(
@@ -120,7 +111,6 @@ pub(crate) fn import_package_with_manifest(
     Ok(id)
 }
 
-#[cfg(unix)]
 pub(crate) fn import_package_with_rollup_style_bin(
     store: &Store,
     temp_root: &Path,

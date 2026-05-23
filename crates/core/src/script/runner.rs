@@ -11,7 +11,8 @@ use tracing::debug;
 
 use super::types::{success_status, LifecycleEvent, ScriptError, ScriptOutput, PATH_SEP};
 use super::util::{
-    dependency_scripts_allowed, normalize_script_args, sanitize_path_env, shell_args_join,
+    dependency_scripts_allowed, normalize_script_args, path_env_key, sanitize_path_env,
+    shell_args_join,
 };
 
 /// Script runner for a single package context.
@@ -214,16 +215,18 @@ impl ScriptRunner {
 
         // Copy existing environment, excluding variables we'll override.
         for (k, v) in std::env::vars() {
-            if !matches!(
-                k.as_str(),
-                "PATH"
-                    | "npm_lifecycle_event"
-                    | "npm_package_name"
-                    | "npm_package_version"
-                    | "npm_config_user_agent"
-                    | "INIT_CWD"
-                    | "ORIX"
-            ) {
+            let key = k.as_str();
+            if path_env_key(key).is_none()
+                && !matches!(
+                    key,
+                    "npm_lifecycle_event"
+                        | "npm_package_name"
+                        | "npm_package_version"
+                        | "npm_config_user_agent"
+                        | "INIT_CWD"
+                        | "ORIX"
+                )
+            {
                 env.insert(k, v);
             }
         }
@@ -257,10 +260,13 @@ impl ScriptRunner {
             combined.push(PATH_SEP);
             combined.push(&existing);
             let path_str = combined.into_string().unwrap_or_default();
-            env.insert("PATH".to_string(), sanitize_path_env(&path_str));
+            env.insert(
+                path_env_key("PATH").unwrap_or("PATH").to_string(),
+                sanitize_path_env(&path_str),
+            );
         } else {
             env.insert(
-                "PATH".to_string(),
+                path_env_key("PATH").unwrap_or("PATH").to_string(),
                 extra_path.into_string().unwrap_or_default(),
             );
         }

@@ -225,6 +225,23 @@ impl Linker {
                 report
                     .broken
                     .push(format!("missing direct dependency {}", path.display()));
+                continue;
+            }
+
+            if !self.direct_dep_is_in_virtual_store(&path) {
+                continue;
+            }
+
+            for bin_name in direct_package_bin_names(&path)? {
+                for shim_path in self.expected_bin_shims(&bin_name) {
+                    if !shim_path.exists() {
+                        report.broken.push(format!(
+                            "missing bin shim for {}: {}",
+                            dep,
+                            shim_path.display()
+                        ));
+                    }
+                }
             }
         }
 
@@ -298,7 +315,7 @@ impl Linker {
             let Ok(link_canon) = resolved.canonicalize() else {
                 return true;
             };
-            return link_canon != expected_canon;
+            link_canon != expected_canon
         }
 
         #[cfg(not(windows))]
@@ -364,4 +381,64 @@ impl Linker {
             .split('/')
             .fold(root.to_path_buf(), |path, part| path.join(part))
     }
+
+    fn direct_dep_is_in_virtual_store(&self, path: &Path) -> bool {
+        let virtual_store = self.node_modules.join(VIRTUAL_STORE_DIR);
+        let Ok(resolved) = path.canonicalize() else {
+            return false;
+        };
+        let Ok(resolved_virtual_store) = virtual_store.canonicalize() else {
+            return false;
+        };
+
+        normal_components(&resolved).starts_with(&normal_components(&resolved_virtual_store))
+    }
+
+    fn expected_bin_shims(&self, bin_name: &str) -> Vec<PathBuf> {
+        let flat_name = std::path::Path::new(bin_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(bin_name);
+        let bin_dir = self.node_modules.join(".bin");
+
+        #[cfg(windows)]
+        {
+            vec![
+                bin_dir.join(format!("{flat_name}.cmd")),
+                bin_dir.join(format!("{flat_name}.ps1")),
+            ]
+        }
+
+        #[cfg(not(windows))]
+        {
+            vec![bin_dir.join(flat_name)]
+        }
+    }
+}
+
+fn direct_package_bin_names(package_dir: &Path) -> Result<Vec<String>> {
+    let pkg_json_path = package_dir.join("package.json");
+    if !pkg_json_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(&pkg_json_path)
+        .with_context(|| format!("failed to read {}", pkg_json_path.display()))?;
+    let pkg_json: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", pkg_json_path.display()))?;
+    let Some(bin_value) = pkg_json.get("bin") else {
+        return Ok(Vec::new());
+    };
+
+    let names = match bin_value {
+        serde_json::Value::String(_) => pkg_json
+            .get("name")
+            .and_then(|name| name.as_str())
+            .map(|name| vec![name.to_string()])
+            .unwrap_or_default(),
+        serde_json::Value::Object(entries) => entries.keys().cloned().collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(names)
 }
