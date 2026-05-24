@@ -279,7 +279,7 @@ async fn run_parallel(
 }
 
 /// Simple topological sort of workspace packages based on dependency order.
-fn topological_sort<'a>(packages: &'a [WorkspacePackage]) -> Vec<&'a WorkspacePackage> {
+fn topological_sort(packages: &[WorkspacePackage]) -> Vec<&WorkspacePackage> {
     use std::collections::{HashMap, HashSet};
 
     let pkg_names: HashSet<_> = packages
@@ -371,7 +371,7 @@ fn find_workspace_manifest(
     use orix_workspace::WorkspaceSelector;
 
     let parsed = WorkspaceSelector::parse(selector);
-    let packages = orix_core::filter_workspace_packages(ws, &[parsed.clone()]);
+    let packages = orix_core::filter_workspace_packages(ws, std::slice::from_ref(&parsed));
 
     if packages.is_empty() {
         anyhow::bail!("workspace package not found: {}", selector);

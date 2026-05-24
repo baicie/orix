@@ -47,12 +47,12 @@ fn test_render_done() {
 }
 
 #[test]
-fn test_render_body_omits_command_header_but_keeps_summary() {
+fn test_render_body_omits_static_header_and_summary() {
     let renderer = FrameRenderer::new(80);
     let frame = renderer.render_body(&make_state());
 
     assert!(!frame.plain.contains("orix install"));
-    assert!(frame.plain.contains("Packages: +2 direct, +6 total"));
+    assert!(!frame.plain.contains("Packages: +2 direct, +6 total"));
     assert!(frame.plain.contains("Done in 0.21s"));
 }
 
@@ -94,6 +94,7 @@ fn test_render_link_running() {
     assert!(frame.plain.contains("● Linking dependencies 2/5"));
 }
 
+#[test]
 fn test_render_fetch_running() {
     let mut state = make_state();
     state.fetch.status = StepStatus::Running;

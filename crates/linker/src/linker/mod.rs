@@ -11,10 +11,16 @@ use super::linker_platform::{normal_components, path_starts_with_lexically};
 
 pub(crate) const VIRTUAL_STORE_DIR: &str = ".orix";
 pub(crate) const METADATA_FILE: &str = "metadata.json";
+pub(crate) const PACKAGE_MARKER_FILE: &str = ".orix-package.json";
 /// Bump when link layout semantics change (forces relink on next install).
-pub(crate) const LINK_PROTOCOL_VERSION: u32 = 3;
+pub(crate) const LINK_PROTOCOL_VERSION: u32 = 4;
+pub(crate) const PACKAGE_LINK_MARKER_VERSION: u32 = 1;
 
 /// Marker written to node_modules/.orix/metadata.json after a successful link.
+///
+/// This file tracks the state of the node_modules layout to enable incremental
+/// relinking: when the graph hash hasn't changed, we skip the expensive
+/// unlink+link pass entirely.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct LinkerMarker {
     /// Hash of the dependency graph at link time.
@@ -26,6 +32,78 @@ pub(crate) struct LinkerMarker {
     /// Layout protocol generation; mismatch invalidates cached layout.
     #[serde(default)]
     pub link_protocol_version: u32,
+    /// Importer states for workspace support.
+    /// Key is the importer path (e.g., ".", "packages/foo", "apps/web").
+    #[serde(default)]
+    pub importers: std::collections::HashMap<String, ImporterState>,
+    /// Virtual store directory path.
+    #[serde(default = "default_virtual_store_dir")]
+    pub virtual_store_dir: String,
+    /// Linker version for future compatibility.
+    #[serde(default = "default_linker_version")]
+    pub linker_version: u32,
+}
+
+impl Default for LinkerMarker {
+    fn default() -> Self {
+        Self {
+            graph_hash: String::new(),
+            orix_version: env!("CARGO_PKG_VERSION").to_string(),
+            package_count: 0,
+            link_protocol_version: LINK_PROTOCOL_VERSION,
+            importers: std::collections::HashMap::new(),
+            virtual_store_dir: default_virtual_store_dir(),
+            linker_version: default_linker_version(),
+        }
+    }
+}
+
+fn default_virtual_store_dir() -> String {
+    format!("{}/", VIRTUAL_STORE_DIR)
+}
+
+fn default_linker_version() -> u32 {
+    1
+}
+
+/// State for a single importer in the workspace.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImporterState {
+    /// Hash of the direct dependencies at link time.
+    pub direct_deps_hash: String,
+    /// Whether this importer's direct links are valid.
+    pub links_valid: bool,
+    /// Whether .bin shims are valid.
+    pub bin_shims_valid: bool,
+    /// Last update timestamp.
+    #[serde(default)]
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PackageLinkMarker {
+    pub package_key: String,
+    pub integrity: String,
+    pub file_count: usize,
+    pub marker_version: u32,
+}
+
+impl Default for ImporterState {
+    fn default() -> Self {
+        Self {
+            direct_deps_hash: String::new(),
+            links_valid: true,
+            bin_shims_valid: true,
+            updated_at: current_timestamp(),
+        }
+    }
+}
+
+fn current_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// The linker creates the Orix virtual node_modules structure using hardlinks and symlinks.
@@ -150,6 +228,7 @@ impl Linker {
             orix_version: env!("CARGO_PKG_VERSION").to_string(),
             package_count,
             link_protocol_version: LINK_PROTOCOL_VERSION,
+            ..Default::default()
         };
         let json = serde_json::to_string_pretty(&marker)?;
         let path = self.marker_path();

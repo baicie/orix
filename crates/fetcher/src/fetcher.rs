@@ -1,4 +1,9 @@
 //! Package tarball fetcher.
+//!
+//! P4 optimization: Check store before fetching to enable layered reuse:
+//! - store hit -> skip tarball fetch, extract, import entirely
+//! - tarball hit -> extract and import (but skip download)
+//! - tarball miss -> download, extract, import
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -99,6 +104,13 @@ impl Fetcher {
                     reason = %mismatch,
                     "Skipping platform-incompatible package"
                 );
+                continue;
+            }
+
+            // P4: Check if package already exists in store before fetching tarball.
+            // This enables layered reuse: store hit -> skip fetch entirely.
+            if !self.force && self.store.contains(&pkg.id) {
+                debug!(package = %pkg.id, "store hit, skipping fetch");
                 continue;
             }
 
@@ -236,8 +248,12 @@ impl Fetcher {
 /// Report from a fetch operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FetchReport {
-    /// Number of packages successfully fetched.
+    /// Number of packages successfully fetched (downloaded + extracted + imported).
     pub success: usize,
-    /// Error messages for failed packages.
+    /// Number of packages served from tarball cache (extracted + imported, no download).
+    pub cached: usize,
+    /// Number of packages already in store (completely skipped, no fetch/extract/import).
+    pub store_hits: usize,
+    /// Number of packages that failed.
     pub failures: Vec<String>,
 }

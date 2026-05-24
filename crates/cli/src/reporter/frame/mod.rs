@@ -100,7 +100,6 @@ impl FrameRenderer {
         let mut colored = String::new();
         let mut plain = String::new();
 
-        self.push_summary(&mut colored, &mut plain, state);
         self.push_phases(&mut colored, &mut plain, state);
 
         if state.failed {

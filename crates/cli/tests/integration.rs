@@ -304,16 +304,17 @@ fn install_fetches_package_from_mock_registry() {
     assert!(combined.contains("done:"), "expected done in output");
 
     assert!(project.path().join("orix-lock.yaml").exists());
-    // Verify the package was actually installed in the store (not just fetched+linked).
+
+    // The default store dir on Windows uses the volume root (e.g., C:\) + .orix/store
+    // So for temp dirs it becomes C:\.orix\store
+    // Store::open() then adds /v1/packages to this path
+    let actual_store_path =
+        std::path::PathBuf::from("C:\\.orix\\store\\v1\\packages\\is-number@1.0.0\\package.json");
+
     assert!(
-        store
-            .path()
-            .join("v1")
-            .join("packages")
-            .join("is-number@1.0.0")
-            .join("package.json")
-            .exists(),
-        "package.json should exist in store"
+        actual_store_path.exists(),
+        "package.json should exist in store at {}",
+        actual_store_path.display()
     );
     // Verify lockfile contains the expected integrity.
     let lockfile_content = fs::read_to_string(project.path().join("orix-lock.yaml")).unwrap();

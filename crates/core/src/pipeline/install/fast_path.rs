@@ -18,15 +18,29 @@ pub(crate) async fn try_install_fast_path(
     direct_dependency_count: usize,
     start: Instant,
 ) -> Result<Option<InstallReport>> {
-    if opts.frozen_lockfile || opts.force {
+    if opts.force {
         return Ok(None);
     }
-    if old_lockfile.validate(&manifest, ".").is_ok()
-        && !super::lockfile_matches_importers(old_lockfile, manifest, workspace)
-    {
-        info!("package.json dependency specifiers changed; re-resolving from registry");
-    }
-    if !super::lockfile_matches_importers(old_lockfile, manifest, workspace) {
+    let mismatches = super::lockfile_importer_mismatches(old_lockfile, manifest, workspace);
+    if !mismatches.is_empty() {
+        let preview = mismatches
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
+        if opts.frozen_lockfile {
+            anyhow::bail!(
+                "frozen lockfile validation failed for {} importer(s): {}",
+                mismatches.len(),
+                preview
+            );
+        }
+        info!(
+            mismatches = mismatches.len(),
+            preview = %preview,
+            "package.json dependency specifiers changed; re-resolving from registry"
+        );
         return Ok(None);
     }
 
@@ -135,7 +149,7 @@ pub(crate) async fn try_install_fast_path(
     let graph_hash = graph.graph_hash();
     let link_report = if linker.is_layout_valid(&graph_hash)
         && linker
-            .validate_layout(&direct_deps)
+            .validate_direct_layout(&direct_deps)
             .map(|r| r.is_ok())
             .unwrap_or(false)
     {
@@ -189,7 +203,7 @@ pub(crate) async fn try_install_fast_path(
     );
 
     let layout_report = linker
-        .validate_layout(&direct_deps)
+        .validate_direct_layout(&direct_deps)
         .with_context(|| "failed to validate node_modules layout")?;
     if !layout_report.is_ok() {
         anyhow::bail!(
@@ -202,7 +216,7 @@ pub(crate) async fn try_install_fast_path(
     let updated_lockfile =
         super::update_lockfile_importers(&base_lockfile, manifest, workspace, &graph);
     let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
-    let lockfile_changed = Lockfile::diff_has_changes(&diff);
+    let lockfile_changed = Lockfile::diff_has_changes(&diff) || base_lockfile != updated_lockfile;
 
     if lockfile_changed {
         send_event(

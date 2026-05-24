@@ -15,7 +15,7 @@ pub(crate) async fn resolve_install_graph(
     let mut resolve_instant: Option<Instant> = None;
     let graph = if opts.frozen_lockfile {
         if let Some(ref lf) = old_lockfile {
-            lf.validate_frozen(&manifest, ".")
+            lf.validate_frozen(manifest, ".")
                 .with_context(|| "frozen lockfile validation failed")?;
 
             let g = resolve_from_lockfile_packages(&lf.packages);
@@ -60,9 +60,18 @@ pub(crate) async fn resolve_install_graph(
         let graph = if let Some(ref ws) = workspace {
             let mut resolver = if let Some(ref token) = config.auth_token {
                 info!(registry = %config.registry, "using authenticated registry");
-                Resolver::with_auth(config.registry.clone(), token)
+                Resolver::with_auth_disk_cache(
+                    config.registry.clone(),
+                    token,
+                    config.cache_dir.clone(),
+                    config.concurrency,
+                )
             } else {
-                Resolver::new(config.registry.clone())
+                Resolver::with_disk_cache(
+                    config.registry.clone(),
+                    config.cache_dir.clone(),
+                    config.concurrency,
+                )
             }
             .with_concurrency(config.concurrency)
             .with_progress(resolve_progress_tx);
@@ -78,15 +87,24 @@ pub(crate) async fn resolve_install_graph(
         } else {
             let mut resolver = if let Some(ref token) = config.auth_token {
                 info!(registry = %config.registry, "using authenticated registry");
-                Resolver::with_auth(config.registry.clone(), token)
+                Resolver::with_auth_disk_cache(
+                    config.registry.clone(),
+                    token,
+                    config.cache_dir.clone(),
+                    config.concurrency,
+                )
             } else {
-                Resolver::new(config.registry.clone())
+                Resolver::with_disk_cache(
+                    config.registry.clone(),
+                    config.cache_dir.clone(),
+                    config.concurrency,
+                )
             }
             .with_concurrency(config.concurrency)
             .with_progress(resolve_progress_tx);
 
             resolver
-                .resolve_manifest(&manifest)
+                .resolve_manifest(manifest)
                 .await
                 .with_context(|| "failed to resolve dependencies")?
         };

@@ -420,6 +420,7 @@ mod tests {
         assert_eq!(state.link.status, StepStatus::Done);
     }
 
+    #[test]
     fn test_apply_fetch_progress() {
         let mut state = InstallState::default();
         state.apply(InstallEvent::FetchProgress {

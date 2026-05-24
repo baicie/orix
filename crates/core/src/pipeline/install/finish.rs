@@ -5,6 +5,7 @@ use crate::pipeline::prelude::*;
 use crate::pipeline::types::{send_event, InstallOpts, InstallReport, LockfileDiffReport};
 use crate::reporter::LockfileStatus;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn finish_install(
     opts: &InstallOpts,
     config: &Config,
@@ -25,20 +26,20 @@ pub(crate) async fn finish_install(
     _progress_tx: &Option<mpsc::Sender<InstallEvent>>,
 ) -> Result<InstallReport> {
     let mut lockfile_ms: Option<u64> = None;
-    run_dependency_lifecycles(&graph, &config, project_root, &opts.progress_tx).await?;
+    run_dependency_lifecycles(graph, config, project_root, &opts.progress_tx).await?;
 
     // Phase: Run install lifecycle (after link, before lockfile write)
     run_project_lifecycle(
         LifecycleEvent::Install,
-        &manifest,
-        &config,
+        manifest,
+        config,
         project_root,
         &opts.progress_tx,
     )
     .await?;
 
     let layout_report = linker
-        .validate_layout(&direct_deps)
+        .validate_direct_layout(direct_deps)
         .with_context(|| "failed to validate node_modules layout")?;
     if !layout_report.is_ok() {
         anyhow::bail!(
@@ -119,8 +120,8 @@ pub(crate) async fn finish_install(
 
     run_project_lifecycle(
         LifecycleEvent::Postinstall,
-        &manifest,
-        &config,
+        manifest,
+        config,
         project_root,
         &opts.progress_tx,
     )
@@ -132,8 +133,8 @@ pub(crate) async fn finish_install(
     {
         run_project_lifecycle(
             LifecycleEvent::Prepare,
-            &manifest,
-            &config,
+            manifest,
+            config,
             project_root,
             &opts.progress_tx,
         )

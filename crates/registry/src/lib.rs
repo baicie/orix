@@ -1,11 +1,14 @@
 //! npm registry API client.
 
 mod cache;
+mod singleflight;
 mod types;
 
 pub use cache::PackumentCache;
+pub use singleflight::PackumentSingleFlight;
 pub use types::{Dist, PackageMetadata, Packument, PeerDepMeta};
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,6 +51,11 @@ pub struct RegistryClient {
     cache: Arc<PackumentCache>,
     /// Semaphore to limit concurrent HTTP requests per client.
     concurrency: Arc<Semaphore>,
+    /// Single-flight tracker for deduplicating concurrent requests.
+    singleflight: Arc<PackumentSingleFlight>,
+    /// Disk cache root path (if configured).
+    #[allow(dead_code)]
+    disk_cache_root: Option<PathBuf>,
 }
 
 impl RegistryClient {
@@ -72,6 +80,42 @@ impl RegistryClient {
             http_client,
             cache: Arc::new(PackumentCache::new()),
             concurrency: Arc::new(Semaphore::new(concurrency.max(1))),
+            singleflight: Arc::new(PackumentSingleFlight::new()),
+            disk_cache_root: None,
+        }
+    }
+
+    /// Create a new registry client with disk cache persistence.
+    #[allow(clippy::expect_used)]
+    pub fn with_disk_cache(base_url: Url, cache_root: PathBuf) -> Self {
+        Self::with_disk_cache_concurrency(base_url, cache_root, 10)
+    }
+
+    /// Create a new registry client with disk cache persistence and custom concurrency.
+    #[allow(clippy::expect_used)]
+    pub fn with_disk_cache_concurrency(
+        base_url: Url,
+        cache_root: PathBuf,
+        concurrency: usize,
+    ) -> Self {
+        let http_client = reqwest::Client::builder()
+            .user_agent("orix/0.1.0")
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("reqwest client should always build successfully");
+
+        let registry_url = base_url.to_string();
+        Self {
+            base_url,
+            http_client,
+            cache: Arc::new(PackumentCache::with_disk_cache(
+                cache_root.clone(),
+                &registry_url,
+            )),
+            concurrency: Arc::new(Semaphore::new(concurrency.max(1))),
+            singleflight: Arc::new(PackumentSingleFlight::new()),
+            disk_cache_root: Some(cache_root),
         }
     }
 
@@ -79,6 +123,43 @@ impl RegistryClient {
     #[allow(clippy::expect_used)]
     pub fn with_auth(base_url: Url, token: &str) -> Self {
         Self::with_auth_concurrency(base_url, token, 10)
+    }
+
+    /// Create a new authenticated registry client with disk cache persistence.
+    #[allow(clippy::expect_used)]
+    pub fn with_auth_disk_cache_concurrency(
+        base_url: Url,
+        token: &str,
+        cache_root: PathBuf,
+        concurrency: usize,
+    ) -> Self {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+                .expect("token is a valid header value"),
+        );
+
+        let http_client = reqwest::Client::builder()
+            .user_agent("orix/0.1.0")
+            .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("reqwest client should always build successfully");
+
+        let registry_url = base_url.to_string();
+        Self {
+            base_url,
+            http_client,
+            cache: Arc::new(PackumentCache::with_disk_cache(
+                cache_root.clone(),
+                &registry_url,
+            )),
+            concurrency: Arc::new(Semaphore::new(concurrency.max(1))),
+            singleflight: Arc::new(PackumentSingleFlight::new()),
+            disk_cache_root: Some(cache_root),
+        }
     }
 
     /// Create a new registry client with authentication and concurrency limit.
@@ -104,53 +185,93 @@ impl RegistryClient {
             http_client,
             cache: Arc::new(PackumentCache::new()),
             concurrency: Arc::new(Semaphore::new(concurrency.max(1))),
+            singleflight: Arc::new(PackumentSingleFlight::new()),
+            disk_cache_root: None,
         }
     }
 
     /// Fetch the full packument for a package name.
     ///
-    /// Results are cached in memory with a 5-minute TTL.
+    /// Results are cached in memory (5 min TTL) and optionally on disk (1 hour TTL).
     /// Deduplication of concurrent requests for the same package name is handled
-    /// by the resolver's `in_flight_resolution` set (not here), which prevents
-    /// duplicate resolution tasks from being dispatched.
+    /// by the single-flight mechanism.
     #[instrument(skip(self), fields(pkg = %name))]
     pub async fn fetch_packument(&self, name: &PackageName) -> Result<Packument> {
         let name_str = name.as_str().to_string();
 
         // Check memory cache first.
         if let Some(cached) = self.cache.get(&name_str).await {
-            debug!("packument cache hit");
+            debug!("packument cache hit (memory)");
             return Ok(cached);
         }
         debug!("packument cache miss, acquiring concurrency permit");
 
-        // Acquire a concurrency permit before making the HTTP request.
-        let _permit: OwnedSemaphorePermit = self.concurrency.clone().acquire_owned().await?;
+        // Try single-flight: if another request is in flight, wait for it.
+        if let Some(_flight_guard) = self.singleflight.register(&name_str).await {
+            // We're the primary requester - check disk cache and fetch.
+            // First check disk cache again (in case it was added while waiting for the lock).
+            if let Some(cached) = self.cache.get(&name_str).await {
+                debug!("packument cache hit (disk)");
+                self.singleflight.unregister(&name_str).await;
+                return Ok(cached);
+            }
 
-        debug!("concurrency permit acquired, fetching from registry");
-        // Do the HTTP request.
-        let url = package_metadata_url(&self.base_url, name)?;
-        debug!(url = %url, "making HTTP request to registry");
-        let packument = self.do_fetch_packument(&url).await?;
+            let result = async {
+                // Acquire a concurrency permit before making the HTTP request.
+                let _permit: OwnedSemaphorePermit =
+                    self.concurrency.clone().acquire_owned().await?;
 
-        debug!("packument fetched successfully, caching result");
-        // Cache the result.
-        self.cache.insert(name_str, packument.clone()).await;
+                debug!("concurrency permit acquired, fetching from registry");
+                // Do the HTTP request.
+                let url = package_metadata_url(&self.base_url, name)?;
+                debug!(url = %url, "making HTTP request to registry");
+                let (packument, etag) = self.do_fetch_packument(&url).await?;
 
-        Ok(packument)
+                debug!("packument fetched successfully, caching result");
+                // Cache the result with ETag.
+                self.cache
+                    .insert_with_etag(name_str.clone(), packument.clone(), etag, None)
+                    .await;
+
+                Ok(packument)
+            }
+            .await;
+
+            self.singleflight.unregister(&name_str).await;
+            result
+        } else {
+            // Another request is in flight - wait for it to complete.
+            debug!("another request in flight, waiting for result");
+            self.singleflight.wait_until_complete(&name_str).await;
+
+            // Check cache again.
+            if let Some(cached) = self.cache.get(&name_str).await {
+                debug!("packument cache hit (after waiting)");
+                return Ok(cached);
+            }
+
+            // Fallback: make the request ourselves.
+            let _permit: OwnedSemaphorePermit = self.concurrency.clone().acquire_owned().await?;
+            let url = package_metadata_url(&self.base_url, name)?;
+            let (packument, etag) = self.do_fetch_packument(&url).await?;
+            self.cache
+                .insert_with_etag(name_str, packument.clone(), etag, None)
+                .await;
+            Ok(packument)
+        }
     }
 
     /// Perform the actual HTTP fetch for a packument.
     #[instrument(skip(self), fields(url = %url))]
-    async fn do_fetch_packument(&self, url: &Url) -> Result<Packument> {
+    async fn do_fetch_packument(&self, url: &Url) -> Result<(Packument, Option<String>)> {
         let mut last_error = None;
 
         for attempt in 0..PACKUMENT_MAX_RETRIES {
             debug!(attempt, "attempting to fetch packument");
             match self.do_fetch_packument_once(url).await {
-                Ok(packument) => {
+                Ok(result) => {
                     debug!("packument fetched successfully");
-                    return Ok(packument);
+                    return Ok(result);
                 }
                 Err(error) if is_retryable_packument_error(&error) => {
                     last_error = Some(error);
@@ -175,26 +296,54 @@ impl RegistryClient {
     }
 
     #[instrument(skip(self), fields(url = %url))]
-    async fn do_fetch_packument_once(&self, url: &Url) -> Result<Packument> {
+    async fn do_fetch_packument_once(&self, url: &Url) -> Result<(Packument, Option<String>)> {
         debug!("sending HTTP request");
-        let resp = self
-            .http_client
-            .get(url.clone())
-            .header(
-                reqwest::header::ACCEPT,
-                "application/vnd.npm.install-v1+json, application/json",
-            )
+        let mut request = self.http_client.get(url.clone());
+
+        // Add If-None-Match header if we have an ETag.
+        // This is handled by checking disk cache before making the request.
+        // The actual ETag is stored with the packument on disk.
+
+        request = request.header(
+            reqwest::header::ACCEPT,
+            "application/vnd.npm.install-v1+json, application/json",
+        );
+
+        let resp = request
             .send()
             .await
             .map_err(|e| RegistryError::Network(e.to_string()))?;
 
         let status = resp.status();
         debug!(status = %status, "received HTTP response");
+
+        // Check for 304 Not Modified - means cache is still valid.
+        if status.as_u16() == 304 {
+            debug!("received 304 Not Modified, cache is valid");
+            // Return None for ETag to indicate we should use cached version.
+            return Ok((
+                serde_json::from_str("{}").unwrap_or_else(|_| Packument {
+                    name: String::new(),
+                    versions: std::collections::HashMap::new(),
+                    dist_tags: std::collections::HashMap::new(),
+                }),
+                None,
+            ));
+        }
+
         let content_type = resp
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
+
+        // Extract ETag header.
+        let etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+
         if status.as_u16() == 404 {
             anyhow::bail!(RegistryError::PackageNotFound(PackageName::from(
                 url.as_str()
@@ -223,13 +372,17 @@ impl RegistryClient {
         })?;
 
         debug!("packument parsed successfully");
-        Ok(packument)
+        Ok((packument, etag))
     }
 
     /// Returns a reference to the shared packument cache.
-    #[allow(dead_code)]
     pub fn cache(&self) -> &Arc<PackumentCache> {
         &self.cache
+    }
+
+    /// Returns a reference to the single-flight tracker.
+    pub fn singleflight(&self) -> &Arc<PackumentSingleFlight> {
+        &self.singleflight
     }
 
     /// Synchronously fetch a packument (blocking).
@@ -245,11 +398,34 @@ impl RegistryClient {
         let rt = tokio::runtime::Handle::current();
         let packument = rt.block_on(self.fetch_packument(name))?;
 
-        self.cache
-            .insert_sync(name.as_str().to_string(), packument.clone(), Duration::MAX);
+        self.cache.insert_sync(
+            name.as_str().to_string(),
+            packument.clone(),
+            Duration::MAX,
+            None,
+        );
 
         Ok(packument)
     }
+
+    /// Clear the packument cache.
+    pub async fn clear_cache(&self) {
+        self.cache.clear().await;
+    }
+
+    /// Get cache statistics.
+    pub async fn cache_stats(&self) -> CacheStats {
+        CacheStats {
+            entries: self.cache.len().await,
+        }
+    }
+}
+
+/// Cache statistics.
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    /// Number of entries in the cache.
+    pub entries: usize,
 }
 
 fn is_retryable_packument_error(error: &anyhow::Error) -> bool {

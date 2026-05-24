@@ -1,9 +1,10 @@
 //! Install progress events and types.
 
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Installation phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InstallPhase {
     /// Resolving dependencies from registry.
     Resolve,

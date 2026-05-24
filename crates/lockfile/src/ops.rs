@@ -76,108 +76,27 @@ impl Lockfile {
 
         for (name, raw) in &manifest.dependencies {
             if let Some(pkg) = graph.packages().find(|p| p.id.name.as_str() == name) {
-                let deps: BTreeMap<String, String> = pkg
-                    .dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let opt_deps: BTreeMap<String, String> = pkg
-                    .optional_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let peer_deps: BTreeMap<String, String> = pkg
-                    .peer_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
                 importer.dependencies.insert(
                     name.clone(),
-                    ResolvedDep {
-                        version: pkg.id.version.to_string(),
-                        specifier: raw.clone(),
-                        id: Some(format!("registry.npmjs.org/{}/{}", name, pkg.id.version)),
-                        dev: Some(false),
-                        optional: Some(false),
-                        engines: pkg.engines.clone(),
-                        os: Some(pkg.os.clone()),
-                        cpu: Some(pkg.cpu.clone()),
-                        dependencies: deps,
-                        optional_dependencies: opt_deps,
-                        peer_dependencies: peer_deps,
-                    },
+                    resolved_importer_dep(pkg.id.version.to_string(), raw.clone()),
                 );
             }
         }
 
         for (name, raw) in &manifest.dev_dependencies {
             if let Some(pkg) = graph.packages().find(|p| p.id.name.as_str() == name) {
-                let deps: BTreeMap<String, String> = pkg
-                    .dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let opt_deps: BTreeMap<String, String> = pkg
-                    .optional_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let peer_deps: BTreeMap<String, String> = pkg
-                    .peer_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
                 importer.dev_dependencies.insert(
                     name.clone(),
-                    ResolvedDep {
-                        version: pkg.id.version.to_string(),
-                        specifier: raw.clone(),
-                        id: Some(format!("registry.npmjs.org/{}/{}", name, pkg.id.version)),
-                        dev: Some(true),
-                        optional: Some(false),
-                        engines: pkg.engines.clone(),
-                        os: Some(pkg.os.clone()),
-                        cpu: Some(pkg.cpu.clone()),
-                        dependencies: deps,
-                        optional_dependencies: opt_deps,
-                        peer_dependencies: peer_deps,
-                    },
+                    resolved_importer_dep(pkg.id.version.to_string(), raw.clone()),
                 );
             }
         }
 
         for (name, raw) in &manifest.optional_dependencies {
             if let Some(pkg) = graph.packages().find(|p| p.id.name.as_str() == name) {
-                let deps: BTreeMap<String, String> = pkg
-                    .dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let opt_deps: BTreeMap<String, String> = pkg
-                    .optional_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
-                let peer_deps: BTreeMap<String, String> = pkg
-                    .peer_dependencies
-                    .iter()
-                    .map(|(n, c)| (n.to_string(), c.clone()))
-                    .collect();
                 importer.optional_dependencies.insert(
                     name.clone(),
-                    ResolvedDep {
-                        version: pkg.id.version.to_string(),
-                        specifier: raw.clone(),
-                        id: Some(format!("registry.npmjs.org/{}/{}", name, pkg.id.version)),
-                        dev: Some(false),
-                        optional: Some(true),
-                        engines: pkg.engines.clone(),
-                        os: Some(pkg.os.clone()),
-                        cpu: Some(pkg.cpu.clone()),
-                        dependencies: deps,
-                        optional_dependencies: opt_deps,
-                        peer_dependencies: peer_deps,
-                    },
+                    resolved_importer_dep(pkg.id.version.to_string(), raw.clone()),
                 );
             }
         }
@@ -220,8 +139,8 @@ impl Lockfile {
                     optional_dependencies: opt_deps,
                     peer_dependencies: peer_deps,
                     engines: pkg.engines.clone(),
-                    os: Some(pkg.os.clone()),
-                    cpu: Some(pkg.cpu.clone()),
+                    os: non_empty_vec(pkg.os.clone()),
+                    cpu: non_empty_vec(pkg.cpu.clone()),
                 },
             );
         }
@@ -417,6 +336,30 @@ impl Lockfile {
         let before = self.packages.len();
         self.packages.retain(|key, _| referenced_keys.contains(key));
         before - self.packages.len()
+    }
+}
+
+fn resolved_importer_dep(version: String, specifier: String) -> ResolvedDep {
+    ResolvedDep {
+        version,
+        specifier,
+        id: None,
+        dev: None,
+        optional: None,
+        engines: None,
+        os: None,
+        cpu: None,
+        dependencies: BTreeMap::new(),
+        optional_dependencies: BTreeMap::new(),
+        peer_dependencies: BTreeMap::new(),
+    }
+}
+
+fn non_empty_vec(values: Vec<String>) -> Option<Vec<String>> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
     }
 }
 

@@ -3,6 +3,7 @@
 //! Dependency resolution engine.
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
@@ -60,6 +61,44 @@ impl Resolver {
             skipped_optional: Vec::new(),
             progress_tx: None,
             resolve_concurrency: DEFAULT_RESOLVE_CONCURRENCY,
+        }
+    }
+
+    /// Creates a new resolver with persistent registry metadata cache.
+    pub fn with_disk_cache(registry_url: Url, cache_root: PathBuf, concurrency: usize) -> Self {
+        Self {
+            registry: RegistryClient::with_disk_cache_concurrency(
+                registry_url,
+                cache_root,
+                concurrency,
+            ),
+            memo: Default::default(),
+            resolved_ids: Default::default(),
+            skipped_optional: Vec::new(),
+            progress_tx: None,
+            resolve_concurrency: concurrency.max(1),
+        }
+    }
+
+    /// Creates an authenticated resolver with persistent registry metadata cache.
+    pub fn with_auth_disk_cache(
+        registry_url: Url,
+        token: &str,
+        cache_root: PathBuf,
+        concurrency: usize,
+    ) -> Self {
+        Self {
+            registry: RegistryClient::with_auth_disk_cache_concurrency(
+                registry_url,
+                token,
+                cache_root,
+                concurrency,
+            ),
+            memo: Default::default(),
+            resolved_ids: Default::default(),
+            skipped_optional: Vec::new(),
+            progress_tx: None,
+            resolve_concurrency: concurrency.max(1),
         }
     }
 

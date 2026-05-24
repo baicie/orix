@@ -1,6 +1,7 @@
 //! Workspace package linking during install.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, VersionConstraint,
@@ -18,7 +19,9 @@ pub(crate) fn link_workspace_packages(
 ) -> Result<()> {
     let started = Instant::now();
     let graph_index = GraphIndex::new(graph);
+    let graph_hash = graph.graph_hash();
     let mut linked_members = 0_u32;
+    let mut skipped_members = 0_u32;
 
     for ws_pkg in &workspace.packages {
         let nm_dir = ws_pkg.abs_path.join("node_modules");
@@ -33,6 +36,11 @@ pub(crate) fn link_workspace_packages(
             .map(|(name, raw)| (name.clone(), raw.clone()))
             .collect();
         let pkg_deps: HashSet<String> = pkg_specs.iter().map(|(name, _)| name.clone()).collect();
+        let importer_hash = workspace_importer_hash(&pkg_specs, &graph_hash);
+        if workspace_marker_matches(&nm_dir, &importer_hash) {
+            skipped_members += 1;
+            continue;
+        }
 
         if let Err(e) = pkg_linker.prune_stale_direct_links(&pkg_deps) {
             return Err(link_error(
@@ -56,6 +64,7 @@ pub(crate) fn link_workspace_packages(
                 ),
             ));
         }
+        write_workspace_marker(&nm_dir, &importer_hash)?;
         linked_members += 1;
     }
 
@@ -65,11 +74,57 @@ pub(crate) fn link_workspace_packages(
         duration_ms = started.elapsed().as_millis() as u64,
         members = workspace.packages.len(),
         linked_members,
-        skipped_members = 0_u32,
+        skipped_members,
         "workspace member link complete"
     );
 
     Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WorkspaceLinkMarker {
+    importer_hash: String,
+    marker_version: u32,
+}
+
+const WORKSPACE_LINK_MARKER_VERSION: u32 = 1;
+const WORKSPACE_LINK_MARKER_FILE: &str = ".orix-workspace-link.json";
+
+fn workspace_marker_path(node_modules: &Path) -> PathBuf {
+    node_modules.join(".orix").join(WORKSPACE_LINK_MARKER_FILE)
+}
+
+fn workspace_marker_matches(node_modules: &Path, importer_hash: &str) -> bool {
+    let path = workspace_marker_path(node_modules);
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_str::<WorkspaceLinkMarker>(&content) else {
+        return false;
+    };
+    marker.marker_version == WORKSPACE_LINK_MARKER_VERSION && marker.importer_hash == importer_hash
+}
+
+fn write_workspace_marker(node_modules: &Path, importer_hash: &str) -> Result<()> {
+    let marker = WorkspaceLinkMarker {
+        importer_hash: importer_hash.to_string(),
+        marker_version: WORKSPACE_LINK_MARKER_VERSION,
+    };
+    let path = workspace_marker_path(node_modules);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string(&marker)?)?;
+    Ok(())
+}
+
+fn workspace_importer_hash(specs: &[(String, String)], graph_hash: &str) -> String {
+    let mut specs = specs.to_vec();
+    specs.sort();
+    let mut hasher = DefaultHasher::new();
+    graph_hash.hash(&mut hasher);
+    specs.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn link_workspace_direct_deps(

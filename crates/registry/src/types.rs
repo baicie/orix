@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 
 use serde::de::IgnoredAny;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// The full packument for a package — metadata for all versions plus dist-tags.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Packument {
     /// Package name.
     pub name: String,
@@ -22,7 +22,7 @@ pub struct Packument {
 /// serde defaults to `deny_unknown_fields = false`, so any fields present in the
 /// npm packument but not listed here are silently ignored. This avoids the
 /// hit-and-miss cycle of adding fields every time a new npm extension appears.
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct PackageMetadata {
     /// Package name.
     pub name: String,
@@ -105,7 +105,7 @@ pub struct PackageMetadata {
 }
 
 /// Metadata for peer dependency optional marker.
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, Serialize)]
 pub struct PeerDepMeta {
     /// Whether this peer dependency is optional.
     #[serde(default)]
@@ -113,7 +113,7 @@ pub struct PeerDepMeta {
 }
 
 /// Node/npm engine constraints.
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, Serialize)]
 pub struct Engines {
     /// Minimum Node version constraint.
     #[serde(default)]
@@ -124,7 +124,7 @@ pub struct Engines {
 }
 
 /// Directories map (lib, bin, doc, etc.).
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, Serialize)]
 pub struct Directories {
     #[serde(default)]
     pub lib: Option<String>,
@@ -163,14 +163,18 @@ where
     enum BundleDependenciesField {
         List(Vec<String>),
         One(String),
-        Other(IgnoredAny),
+        Bool(bool),
+        Null,
     }
 
     Ok(
         match Option::<BundleDependenciesField>::deserialize(deserializer)? {
             Some(BundleDependenciesField::List(deps)) => deps,
             Some(BundleDependenciesField::One(dep)) => vec![dep],
-            Some(BundleDependenciesField::Other(_)) | None => Vec::new(),
+            Some(BundleDependenciesField::Bool(false)) => Vec::new(),
+            Some(BundleDependenciesField::Null)
+            | Some(BundleDependenciesField::Bool(true))
+            | None => Vec::new(),
         },
     )
 }
@@ -183,19 +187,21 @@ where
     #[serde(untagged)]
     enum OptionalStringField {
         String(String),
-        Other(IgnoredAny),
+        #[allow(dead_code)]
+        Bool(bool),
+        Null,
     }
 
     Ok(
         match Option::<OptionalStringField>::deserialize(deserializer)? {
             Some(OptionalStringField::String(value)) => Some(value),
-            Some(OptionalStringField::Other(_)) | None => None,
+            Some(OptionalStringField::Bool(_)) | Some(OptionalStringField::Null) | None => None,
         },
     )
 }
 
 /// Distribution info for a published package version.
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, Serialize)]
 pub struct Dist {
     /// URL to the tarball.
     pub tarball: String,

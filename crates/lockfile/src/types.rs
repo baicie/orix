@@ -56,31 +56,43 @@ pub struct ResolvedDep {
     #[serde(rename = "specifier", default)]
     pub specifier: String,
     /// Registry package ID.
-    #[serde(rename = "id", default)]
+    #[serde(rename = "id", default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Whether this is a dev dependency.
-    #[serde(rename = "dev", default)]
+    #[serde(rename = "dev", default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<bool>,
     /// Whether this is an optional dependency.
-    #[serde(rename = "optional", default)]
+    #[serde(rename = "optional", default, skip_serializing_if = "Option::is_none")]
     pub optional: Option<bool>,
     /// Node engine constraint.
-    #[serde(rename = "engines", default)]
+    #[serde(rename = "engines", default, skip_serializing_if = "Option::is_none")]
     pub engines: Option<String>,
     /// Supported OS constraints.
-    #[serde(rename = "os", default)]
+    #[serde(rename = "os", default, skip_serializing_if = "Option::is_none")]
     pub os: Option<Vec<String>>,
     /// Supported CPU constraints.
-    #[serde(rename = "cpu", default)]
+    #[serde(rename = "cpu", default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<Vec<String>>,
     /// Transitive dependencies of this package.
-    #[serde(rename = "dependencies", default)]
+    #[serde(
+        rename = "dependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub dependencies: BTreeMap<String, String>,
     /// Transitive optional dependencies.
-    #[serde(rename = "optionalDependencies", default)]
+    #[serde(
+        rename = "optionalDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub optional_dependencies: BTreeMap<String, String>,
     /// Peer dependencies visible from this dependency.
-    #[serde(rename = "peerDependencies", default)]
+    #[serde(
+        rename = "peerDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub peer_dependencies: BTreeMap<String, String>,
 }
 
@@ -88,36 +100,48 @@ pub struct ResolvedDep {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageLock {
     /// Registry package ID.
-    #[serde(rename = "id", default)]
+    #[serde(rename = "id", default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Local path (for workspace packages).
-    #[serde(rename = "local", default)]
+    #[serde(rename = "local", default, skip_serializing_if = "Option::is_none")]
     pub local: Option<String>,
     /// Integrity hash.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
     /// Package name.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Package version.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// Resolution details.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<PackageResolution>,
     /// Transitive dependencies.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, String>,
     /// Transitive optional dependencies.
-    #[serde(rename = "optionalDependencies", default)]
+    #[serde(
+        rename = "optionalDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub optional_dependencies: BTreeMap<String, String>,
     /// Peer dependencies.
-    #[serde(rename = "peerDependencies", default)]
+    #[serde(
+        rename = "peerDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub peer_dependencies: BTreeMap<String, String>,
     /// Node engine constraint.
-    #[serde(rename = "engines", default)]
+    #[serde(rename = "engines", default, skip_serializing_if = "Option::is_none")]
     pub engines: Option<String>,
     /// Supported OS constraints.
-    #[serde(rename = "os", default)]
+    #[serde(rename = "os", default, skip_serializing_if = "Option::is_none")]
     pub os: Option<Vec<String>>,
     /// Supported CPU constraints.
-    #[serde(rename = "cpu", default)]
+    #[serde(rename = "cpu", default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<Vec<String>>,
 }
 
@@ -125,13 +149,16 @@ pub struct PackageLock {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageResolution {
     /// Tarball URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tarball: Option<String>,
     /// Integrity hash.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
     /// Resolution type.
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub resolution_type: Option<String>,
     /// Local file path (for workspace packages).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
 

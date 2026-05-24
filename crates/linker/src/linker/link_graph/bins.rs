@@ -17,6 +17,10 @@ impl Linker {
         link_global_bins: bool,
         report: &mut LinkReport,
     ) -> Result<()> {
+        if !link_global_bins {
+            return Ok(());
+        }
+
         let pkg_json_path = store_files.join("package.json");
         if !pkg_json_path.exists() {
             return Ok(());

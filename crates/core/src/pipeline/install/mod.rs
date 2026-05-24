@@ -7,6 +7,8 @@ mod link;
 mod resolve;
 mod workspace_link;
 
+pub mod streaming_pipeline;
+
 use super::lifecycle::run_project_lifecycle;
 use super::prelude::*;
 use super::types::*;
@@ -256,25 +258,29 @@ pub(super) fn workspace_importer_id(relative_path: &Path) -> String {
     }
 }
 
-pub(super) fn lockfile_matches_importers(
+pub(super) fn lockfile_importer_mismatches(
     lockfile: &Lockfile,
     manifest: &Manifest,
     workspace: &Option<Workspace>,
-) -> bool {
-    if lockfile.validate_frozen(manifest, ".").is_err() {
-        return false;
+) -> Vec<String> {
+    let mut mismatches = Vec::new();
+
+    if let Err(err) = lockfile.validate_frozen(manifest, ".") {
+        mismatches.push(format!(".: {err}"));
     }
 
     let Some(ws) = workspace else {
-        return true;
+        return mismatches;
     };
 
-    ws.packages.iter().all(|pkg| {
+    for pkg in &ws.packages {
         let importer_id = workspace_importer_id(&pkg.relative_path);
-        lockfile
-            .validate_frozen(&pkg.manifest, &importer_id)
-            .is_ok()
-    })
+        if let Err(err) = lockfile.validate_frozen(&pkg.manifest, &importer_id) {
+            mismatches.push(format!("{importer_id}: {err}"));
+        }
+    }
+
+    mismatches
 }
 
 pub(super) fn update_lockfile_importers(

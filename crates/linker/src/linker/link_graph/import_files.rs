@@ -129,6 +129,7 @@ impl Linker {
 
         report.hardlinked_files += hardlink_ok;
         report.copied_files += copy_ok;
+        self.write_package_marker(pkg_id, pkg_dir, &integrity)?;
         trace!(pkg = %pkg_key, hardlink_ok, copy_ok, hardlink_fail, copy_fail, use_copy, "imported package files");
         if hardlink_ok == 0 && copy_ok == 0 && hardlink_fail == 0 && copy_fail == 0 {
             warn!(pkg = %pkg_key, "no files were imported");

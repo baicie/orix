@@ -112,12 +112,15 @@ fn remove_dir_all_with_retry(path: &Path, retries: u32) -> Result<()> {
     {
         use std::thread;
         use std::time::Duration;
+        const MAX_RETRIES: u32 = 3;
+        let retries = retries.min(MAX_RETRIES);
 
         for attempt in 0..=retries {
             let result = remove_dir_recursive_ignore_locked(path);
             match result {
                 Ok(()) => return Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                #[allow(clippy::incompatible_msrv)]
+                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty && cfg!(windows) => {
                     // Some contents couldn't be removed (locked), that's okay
                     info!(
                         path = %path.display(),
@@ -165,7 +168,8 @@ fn remove_dir_recursive_ignore_locked(path: &Path) -> std::io::Result<()> {
     match std::fs::remove_dir(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+        #[allow(clippy::incompatible_msrv)]
+        Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty && cfg!(windows) => {
             // Some contents couldn't be removed (locked), warn and continue
             tracing::warn!(
                 "some files in {} could not be removed (possibly locked by another process)",

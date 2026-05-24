@@ -92,6 +92,10 @@ impl Linker {
                         }
                         workspace_ms += ws_started.elapsed().as_millis() as u64;
                         workspace_packages += 1;
+                        packages_done += 1;
+                        if let Some(callback) = progress.as_deref_mut() {
+                            callback(packages_done, total_packages, pkg.id.name.as_str());
+                        }
                         continue;
                     }
                 }

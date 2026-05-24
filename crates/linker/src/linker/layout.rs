@@ -1,7 +1,10 @@
 //! Layout operations.
 
 use super::prelude::*;
-use super::{Linker, METADATA_FILE, VIRTUAL_STORE_DIR};
+use super::{
+    Linker, PackageLinkMarker, METADATA_FILE, PACKAGE_LINK_MARKER_VERSION, PACKAGE_MARKER_FILE,
+    VIRTUAL_STORE_DIR,
+};
 use crate::linker_platform::*;
 use tracing::{trace, warn};
 
@@ -231,7 +234,7 @@ impl Linker {
     }
 
     /// Validate that direct dependencies and generated symlinks are resolvable.
-    pub fn validate_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
+    pub fn validate_direct_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
         let mut report = LayoutReport::default();
 
         if !self.node_modules.exists() {
@@ -266,6 +269,13 @@ impl Linker {
                 }
             }
         }
+
+        Ok(report)
+    }
+
+    /// Validate that direct dependencies and generated symlinks are resolvable.
+    pub fn validate_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
+        let mut report = self.validate_direct_layout(direct_deps)?;
 
         let virtual_store = self.node_modules.join(VIRTUAL_STORE_DIR);
         if virtual_store.is_dir() {
@@ -362,10 +372,58 @@ impl Linker {
             Err(_) => return Ok(false),
         };
 
-        Ok(integrity
+        if self.package_marker_matches(pkg_id, pkg_dir, &integrity) {
+            return Ok(true);
+        }
+
+        let complete = integrity
             .files
             .iter()
-            .all(|(rel_path, _)| pkg_dir.join(rel_path).exists()))
+            .all(|(rel_path, _)| pkg_dir.join(rel_path).exists());
+
+        if complete {
+            self.write_package_marker(pkg_id, pkg_dir, &integrity)?;
+        }
+
+        Ok(complete)
+    }
+
+    pub(crate) fn write_package_marker(
+        &self,
+        pkg_id: &orix_domain::PackageId,
+        pkg_dir: &Path,
+        integrity: &orix_store::IntegrityMeta,
+    ) -> Result<()> {
+        let marker = PackageLinkMarker {
+            package_key: pkg_id.key(),
+            integrity: integrity.integrity.clone(),
+            file_count: integrity.files.len(),
+            marker_version: PACKAGE_LINK_MARKER_VERSION,
+        };
+        let path = pkg_dir.join(PACKAGE_MARKER_FILE);
+        let json = serde_json::to_string(&marker)?;
+        fs::write(path, json)?;
+        Ok(())
+    }
+
+    fn package_marker_matches(
+        &self,
+        pkg_id: &orix_domain::PackageId,
+        pkg_dir: &Path,
+        integrity: &orix_store::IntegrityMeta,
+    ) -> bool {
+        let path = pkg_dir.join(PACKAGE_MARKER_FILE);
+        let Ok(content) = fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(marker) = serde_json::from_str::<PackageLinkMarker>(&content) else {
+            return false;
+        };
+
+        marker.marker_version == PACKAGE_LINK_MARKER_VERSION
+            && marker.package_key == pkg_id.key()
+            && marker.integrity == integrity.integrity
+            && marker.file_count == integrity.files.len()
     }
 
     /// Whether `src` and `dest` live on the same filesystem volume (hardlink-safe).

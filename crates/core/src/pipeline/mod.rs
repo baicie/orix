@@ -10,6 +10,7 @@ mod perf;
 mod prelude;
 mod prune;
 mod store_cmd;
+mod streaming;
 mod types;
 
 pub use add_remove::{add, remove, DepType};
@@ -22,4 +23,5 @@ pub use store_cmd::{
     store_path_with_overrides, store_prune, store_prune_with_overrides, store_verify,
     store_verify_with_overrides,
 };
+pub use streaming::{should_use_streaming, StreamingConfig};
 pub use types::{CacheCleanReport, InstallOpts, InstallReport, LockfileDiffReport, RemoveReport};
