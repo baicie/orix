@@ -9,6 +9,7 @@ pub(crate) struct ResolverState {
     pub(crate) graph: DependencyGraph,
     pub(crate) memo: BTreeMap<(PackageName, String), PackageId>,
     pub(crate) in_flight: HashSet<(PackageName, String)>,
+    pub(crate) resolved_ids: HashSet<PackageId>,
     pub(crate) discovered: usize,
     pub(crate) resolved: usize,
 }

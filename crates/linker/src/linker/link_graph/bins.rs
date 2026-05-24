@@ -140,6 +140,92 @@ impl Linker {
         Ok(())
     }
 
+    pub(crate) fn link_package_dir_bins(
+        &self,
+        package_dir: &Path,
+        report: &mut LinkReport,
+    ) -> Result<()> {
+        let pkg_json_path = package_dir.join("package.json");
+        if !pkg_json_path.exists() {
+            return Ok(());
+        }
+
+        let pkg_json_content = std::fs::read_to_string(&pkg_json_path)?;
+        let pkg_json: serde_json::Value =
+            serde_json::from_str(&pkg_json_content).unwrap_or_default();
+
+        let bin_value = match pkg_json.get("bin") {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+
+        let pkg_name = pkg_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        if pkg_name.is_empty() {
+            return Ok(());
+        }
+
+        let bin_entries: Vec<(String, String)> = match bin_value {
+            serde_json::Value::String(s) => vec![(pkg_name.to_string(), s.clone())],
+            serde_json::Value::Object(m) => m
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                .collect(),
+            _ => return Ok(()),
+        };
+
+        let global_bin_dir = self.node_modules.join(".bin");
+        for (bin_name, bin_path) in bin_entries {
+            if bin_name.is_empty() || bin_path.is_empty() {
+                continue;
+            }
+
+            let package_bin = package_dir.join(&bin_path);
+            if !package_bin.exists() {
+                continue;
+            }
+            Self::ensure_bin_executable(&package_bin).with_context(|| {
+                format!("failed to make bin executable: {}", package_bin.display())
+            })?;
+
+            let shim_bin_name = std::path::Path::new(&bin_name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&bin_name);
+
+            #[cfg(windows)]
+            {
+                let absolute_bin = package_bin.canonicalize().with_context(|| {
+                    format!(
+                        "failed to resolve bin target {} for shim",
+                        package_bin.display()
+                    )
+                })?;
+                let absolute_bin = Self::windows_shim_target(&absolute_bin);
+                Self::create_windows_bin_shims(&global_bin_dir, shim_bin_name, &absolute_bin)
+                    .with_context(|| format!("failed to create Windows bin shim for {bin_name}"))?;
+                report.symlinks_created += 2;
+            }
+
+            #[cfg(not(windows))]
+            {
+                let shim_link = global_bin_dir.join(shim_bin_name);
+                if !path_exists_or_symlink(&shim_link) {
+                    if let Some(parent) = shim_link.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    let rel = relative_path(
+                        shim_link.parent().unwrap_or(std::path::Path::new(".")),
+                        &package_bin,
+                    );
+                    std::os::unix::fs::symlink(&rel, &shim_link)?;
+                    report.symlinks_created += 1;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[cfg(unix)]
     fn ensure_bin_executable(path: &Path) -> io::Result<()> {
         let metadata = fs::metadata(path)?;

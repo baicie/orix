@@ -3,7 +3,10 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use crate::{detect_workspace_cycles, Catalog, Workspace, WorkspacePackage};
+    use crate::{
+        detect_workspace_cycles, filter_workspace_packages, Catalog, Workspace, WorkspacePackage,
+        WorkspaceSelector,
+    };
 
     fn ws_with_pkgs(pkg_specs: Vec<(&str, Vec<&str>)>) -> Workspace {
         ws_with_pkg_deps(
@@ -283,5 +286,206 @@ mod tests {
 
         let ws = Workspace::discover(root).unwrap();
         assert!(ws.packages.is_empty());
+    }
+
+    #[test]
+    fn workspace_selector_parse_package_name() {
+        let sel = WorkspaceSelector::parse("@scope/pkg");
+        assert!(matches!(sel, WorkspaceSelector::PackageName(n) if n == "@scope/pkg"));
+
+        let sel = WorkspaceSelector::parse("lodash");
+        assert!(matches!(sel, WorkspaceSelector::PackageName(n) if n == "lodash"));
+    }
+
+    #[test]
+    fn workspace_selector_parse_relative_path() {
+        let sel = WorkspaceSelector::parse("./example");
+        #[allow(clippy::unwrap_used)]
+        if let WorkspaceSelector::RelativePath(p) = &sel {
+            assert_eq!(p, &PathBuf::from("./example"));
+        } else {
+            unreachable!("expected RelativePath, got {:?}", sel);
+        }
+
+        let sel = WorkspaceSelector::parse("../utils");
+        #[allow(clippy::unwrap_used)]
+        if let WorkspaceSelector::RelativePath(p) = &sel {
+            assert_eq!(p, &PathBuf::from("../utils"));
+        } else {
+            unreachable!("expected RelativePath, got {:?}", sel);
+        }
+    }
+
+    #[test]
+    fn workspace_selector_parse_glob() {
+        let sel = WorkspaceSelector::parse("./qiankun/*");
+        assert!(matches!(sel, WorkspaceSelector::Glob(p) if p == "./qiankun/*"));
+
+        let sel = WorkspaceSelector::parse("./packages/*/src");
+        assert!(matches!(sel, WorkspaceSelector::Glob(p) if p == "./packages/*/src"));
+    }
+
+    #[test]
+    fn workspace_selector_matches_package_name() {
+        let pkg = WorkspacePackage {
+            relative_path: PathBuf::from("packages/app"),
+            abs_path: PathBuf::from("/root/packages/app"),
+            manifest: orix_manifest::Manifest {
+                name: Some("@org/app".to_string()),
+                ..Default::default()
+            },
+        };
+
+        let sel = WorkspaceSelector::parse("@org/app");
+        assert!(sel.matches(&pkg, &PathBuf::from("/root")));
+
+        let sel = WorkspaceSelector::parse("@org/other");
+        assert!(!sel.matches(&pkg, &PathBuf::from("/root")));
+    }
+
+    #[test]
+    fn workspace_selector_matches_relative_path() {
+        let pkg = WorkspacePackage {
+            relative_path: PathBuf::from("packages/app"),
+            abs_path: PathBuf::from("/root/packages/app"),
+            manifest: orix_manifest::Manifest {
+                name: Some("app".to_string()),
+                ..Default::default()
+            },
+        };
+
+        let sel = WorkspaceSelector::parse("./packages/app");
+        assert!(sel.matches(&pkg, &PathBuf::from("/root")));
+
+        let sel = WorkspaceSelector::parse("./packages/other");
+        assert!(!sel.matches(&pkg, &PathBuf::from("/root")));
+    }
+
+    #[test]
+    fn workspace_selector_matches_glob() {
+        let pkgs = vec![
+            WorkspacePackage {
+                relative_path: PathBuf::from("qiankun/app-a"),
+                abs_path: PathBuf::from("/root/qiankun/app-a"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("app-a".to_string()),
+                    ..Default::default()
+                },
+            },
+            WorkspacePackage {
+                relative_path: PathBuf::from("qiankun/app-b"),
+                abs_path: PathBuf::from("/root/qiankun/app-b"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("app-b".to_string()),
+                    ..Default::default()
+                },
+            },
+            WorkspacePackage {
+                relative_path: PathBuf::from("packages/web"),
+                abs_path: PathBuf::from("/root/packages/web"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("web".to_string()),
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let ws = Workspace {
+            root: PathBuf::from("/root"),
+            packages: pkgs,
+            lockfile_path: PathBuf::from("orix-lock.yaml"),
+            catalog: Catalog::new(),
+            catalogs: HashMap::new(),
+        };
+
+        let sel = WorkspaceSelector::parse("./qiankun/*");
+        let filtered = filter_workspace_packages(&ws, &[sel]);
+        assert_eq!(filtered.len(), 2);
+
+        let names: Vec<_> = filtered
+            .iter()
+            .filter_map(|p| p.manifest.name.clone())
+            .collect();
+        assert!(names.contains(&"app-a".to_string()));
+        assert!(names.contains(&"app-b".to_string()));
+        assert!(!names.contains(&"web".to_string()));
+    }
+
+    #[test]
+    fn filter_workspace_packages_empty_selector_returns_all() {
+        let pkgs = vec![
+            WorkspacePackage {
+                relative_path: PathBuf::from("pkg-a"),
+                abs_path: PathBuf::from("/root/pkg-a"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("pkg-a".to_string()),
+                    ..Default::default()
+                },
+            },
+            WorkspacePackage {
+                relative_path: PathBuf::from("pkg-b"),
+                abs_path: PathBuf::from("/root/pkg-b"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("pkg-b".to_string()),
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let ws = Workspace {
+            root: PathBuf::from("/root"),
+            packages: pkgs,
+            lockfile_path: PathBuf::from("orix-lock.yaml"),
+            catalog: Catalog::new(),
+            catalogs: HashMap::new(),
+        };
+
+        let filtered = filter_workspace_packages(&ws, &[]);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn filter_workspace_packages_multiple_selectors() {
+        let pkgs = vec![
+            WorkspacePackage {
+                relative_path: PathBuf::from("packages/app"),
+                abs_path: PathBuf::from("/root/packages/app"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("@org/app".to_string()),
+                    ..Default::default()
+                },
+            },
+            WorkspacePackage {
+                relative_path: PathBuf::from("packages/lib"),
+                abs_path: PathBuf::from("/root/packages/lib"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("@org/lib".to_string()),
+                    ..Default::default()
+                },
+            },
+            WorkspacePackage {
+                relative_path: PathBuf::from("playground/demo"),
+                abs_path: PathBuf::from("/root/playground/demo"),
+                manifest: orix_manifest::Manifest {
+                    name: Some("demo".to_string()),
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let ws = Workspace {
+            root: PathBuf::from("/root"),
+            packages: pkgs,
+            lockfile_path: PathBuf::from("orix-lock.yaml"),
+            catalog: Catalog::new(),
+            catalogs: HashMap::new(),
+        };
+
+        let selectors = vec![
+            WorkspaceSelector::parse("./packages/*"),
+            WorkspaceSelector::parse("./playground/demo"),
+        ];
+        let filtered = filter_workspace_packages(&ws, &selectors);
+        assert_eq!(filtered.len(), 3);
     }
 }

@@ -17,6 +17,7 @@ orix-registry = { workspace = true }
 orix-manifest = { workspace = true }
 orix-workspace = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

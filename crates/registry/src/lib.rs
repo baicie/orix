@@ -12,6 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tracing::{debug, error, instrument};
 use url::Url;
 
 use orix_domain::{package_metadata_url, PackageName};
@@ -112,21 +113,27 @@ impl RegistryClient {
     /// Deduplication of concurrent requests for the same package name is handled
     /// by the resolver's `in_flight_resolution` set (not here), which prevents
     /// duplicate resolution tasks from being dispatched.
+    #[instrument(skip(self), fields(pkg = %name))]
     pub async fn fetch_packument(&self, name: &PackageName) -> Result<Packument> {
         let name_str = name.as_str().to_string();
 
         // Check memory cache first.
         if let Some(cached) = self.cache.get(&name_str).await {
+            debug!("packument cache hit");
             return Ok(cached);
         }
+        debug!("packument cache miss, acquiring concurrency permit");
 
         // Acquire a concurrency permit before making the HTTP request.
         let _permit: OwnedSemaphorePermit = self.concurrency.clone().acquire_owned().await?;
 
+        debug!("concurrency permit acquired, fetching from registry");
         // Do the HTTP request.
         let url = package_metadata_url(&self.base_url, name)?;
+        debug!(url = %url, "making HTTP request to registry");
         let packument = self.do_fetch_packument(&url).await?;
 
+        debug!("packument fetched successfully, caching result");
         // Cache the result.
         self.cache.insert(name_str, packument.clone()).await;
 
@@ -134,22 +141,32 @@ impl RegistryClient {
     }
 
     /// Perform the actual HTTP fetch for a packument.
+    #[instrument(skip(self), fields(url = %url))]
     async fn do_fetch_packument(&self, url: &Url) -> Result<Packument> {
         let mut last_error = None;
 
         for attempt in 0..PACKUMENT_MAX_RETRIES {
+            debug!(attempt, "attempting to fetch packument");
             match self.do_fetch_packument_once(url).await {
-                Ok(packument) => return Ok(packument),
+                Ok(packument) => {
+                    debug!("packument fetched successfully");
+                    return Ok(packument);
+                }
                 Err(error) if is_retryable_packument_error(&error) => {
                     last_error = Some(error);
+                    debug!(attempt, "retryable error, will retry");
                     if attempt + 1 < PACKUMENT_MAX_RETRIES {
                         tokio::time::sleep(packument_retry_delay(attempt)).await;
                     }
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    error!(error = %error, "non-retryable error");
+                    return Err(error);
+                }
             }
         }
 
+        error!("exhausted all retries");
         Err(last_error
             .unwrap_or_else(|| anyhow::anyhow!("packument request did not run"))
             .context(format!(
@@ -157,7 +174,9 @@ impl RegistryClient {
             )))
     }
 
+    #[instrument(skip(self), fields(url = %url))]
     async fn do_fetch_packument_once(&self, url: &Url) -> Result<Packument> {
+        debug!("sending HTTP request");
         let resp = self
             .http_client
             .get(url.clone())
@@ -170,6 +189,7 @@ impl RegistryClient {
             .map_err(|e| RegistryError::Network(e.to_string()))?;
 
         let status = resp.status();
+        debug!(status = %status, "received HTTP response");
         let content_type = resp
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -185,10 +205,15 @@ impl RegistryClient {
             anyhow::bail!(RegistryError::Http(status.as_u16(), text));
         }
 
+        debug!("reading response body");
         let body = resp
             .bytes()
             .await
             .with_context(|| format!("failed to read response body from {url}"))?;
+        debug!(
+            body_size = body.len(),
+            "response body received, parsing JSON"
+        );
         let packument: Packument = serde_json::from_slice(&body).map_err(|e| {
             RegistryError::Other(format!(
                 "failed to decode packument JSON from {url}: {e}; content-type: {}; body prefix: {}",
@@ -197,6 +222,7 @@ impl RegistryClient {
             ))
         })?;
 
+        debug!("packument parsed successfully");
         Ok(packument)
     }
 

@@ -8,4 +8,6 @@ mod types;
 mod tests;
 
 pub use cycles::detect_workspace_cycles;
-pub use types::{Catalog, CatalogSpec, Workspace, WorkspacePackage};
+pub use types::{
+    filter_workspace_packages, Catalog, CatalogSpec, Workspace, WorkspacePackage, WorkspaceSelector,
+};

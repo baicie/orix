@@ -36,9 +36,7 @@ pub(crate) fn run_prune(
     } else {
         println!(
             " {} Removed {} items from node_modules ({} bytes)",
-            CHECKMARK,
-            report.items_removed,
-            report.node_modules_bytes
+            CHECKMARK, report.items_removed, report.node_modules_bytes
         );
         if report.lockfile_removed {
             println!(" {} Removed orix-lock.yaml", CROSS);

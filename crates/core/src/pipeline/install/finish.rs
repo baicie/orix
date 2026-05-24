@@ -13,6 +13,7 @@ pub(crate) async fn finish_install(
     graph: &orix_domain::DependencyGraph,
     linker: &Linker,
     direct_deps: &std::collections::HashSet<String>,
+    workspace: &Option<Workspace>,
     fetch_report: orix_fetcher::FetchReport,
     link_report: LinkReport,
     old_lockfile: &Option<Lockfile>,
@@ -59,7 +60,8 @@ pub(crate) async fn finish_install(
             .as_ref()
             .cloned()
             .unwrap_or_else(Lockfile::empty);
-        let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
+        let updated_lockfile =
+            super::update_lockfile_importers(&base_lockfile, manifest, workspace, graph);
 
         let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
         let diff_report = LockfileDiffReport {

@@ -1,8 +1,7 @@
 //! Workspace package linking during install.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-use anyhow::Context;
 use orix_domain::{
     ConstraintKind, DependencyGraph, PackageId, PackageName, ResolvedPackage, VersionConstraint,
 };
@@ -20,7 +19,6 @@ pub(crate) fn link_workspace_packages(
     let started = Instant::now();
     let graph_index = GraphIndex::new(graph);
     let mut linked_members = 0_u32;
-    let mut skipped_members = 0_u32;
 
     for ws_pkg in &workspace.packages {
         let nm_dir = ws_pkg.abs_path.join("node_modules");
@@ -35,28 +33,6 @@ pub(crate) fn link_workspace_packages(
             .map(|(name, raw)| (name.clone(), raw.clone()))
             .collect();
         let pkg_deps: HashSet<String> = pkg_specs.iter().map(|(name, _)| name.clone()).collect();
-        let pkg_graph = graph_index.subgraph_for_direct_specs(&pkg_specs);
-        let pkg_graph_hash = pkg_graph.graph_hash();
-
-        let layout_is_valid = pkg_linker.is_layout_valid(&pkg_graph_hash)
-            && pkg_linker
-                .validate_layout(&pkg_deps)
-                .with_context(|| {
-                    format!(
-                        "failed to validate existing node_modules layout for {}",
-                        ws_pkg.manifest.name.as_deref().unwrap_or("?")
-                    )
-                })?
-                .is_ok();
-        if layout_is_valid {
-            debug!(
-                target: "orix",
-                pkg = %ws_pkg.manifest.name.as_deref().unwrap_or("?"),
-                "workspace pkg layout valid, skipping"
-            );
-            skipped_members += 1;
-            continue;
-        }
 
         if let Err(e) = pkg_linker.prune_stale_direct_links(&pkg_deps) {
             return Err(link_error(
@@ -69,13 +45,8 @@ pub(crate) fn link_workspace_packages(
             ));
         }
 
-        if let Err(e) = pkg_linker.link_graph(
-            &pkg_graph,
-            &pkg_deps,
-            Some(workspace),
-            &pkg_graph_hash,
-            None,
-        ) {
+        if let Err(e) = link_workspace_direct_deps(&pkg_linker, &graph_index, workspace, &pkg_specs)
+        {
             return Err(link_error(
                 progress_tx,
                 format!(
@@ -94,9 +65,44 @@ pub(crate) fn link_workspace_packages(
         duration_ms = started.elapsed().as_millis() as u64,
         members = workspace.packages.len(),
         linked_members,
-        skipped_members,
+        skipped_members = 0_u32,
         "workspace member link complete"
     );
+
+    Ok(())
+}
+
+fn link_workspace_direct_deps(
+    linker: &Linker,
+    graph_index: &GraphIndex,
+    workspace: &Workspace,
+    specs: &[(String, String)],
+) -> Result<()> {
+    let root_virtual_store = workspace.root.join("node_modules").join(".orix");
+    let mut report = LinkReport {
+        hardlinked_files: 0,
+        copied_files: 0,
+        symlinks_created: 0,
+        bytes_saved: 0,
+        skipped: None,
+    };
+
+    for (name, raw) in specs {
+        let Some(dep_key) =
+            graph_index.select_dependency_key(&PackageName::from(name.as_str()), raw)
+        else {
+            continue;
+        };
+        let target = Linker::package_path_in_node_modules(
+            &root_virtual_store.join(dep_key).join("node_modules"),
+            name,
+        );
+        if !target.exists() {
+            continue;
+        }
+
+        linker.link_direct_package_from(name, &target, &mut report)?;
+    }
 
     Ok(())
 }
@@ -126,10 +132,11 @@ impl GraphIndex {
         }
     }
 
+    #[cfg(test)]
     fn subgraph_for_direct_specs(&self, specs: &[(String, String)]) -> DependencyGraph {
         let mut subgraph = DependencyGraph::new();
         let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
+        let mut queue = std::collections::VecDeque::new();
 
         for (name, raw) in specs {
             if let Some(key) = self.select_dependency_key(&PackageName::from(name.as_str()), raw) {

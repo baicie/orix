@@ -11,11 +11,11 @@ use super::lifecycle::run_project_lifecycle;
 use super::prelude::*;
 use super::types::*;
 
-use orix_config::ConfigOverrides;
 use fast_path::try_install_fast_path;
 use fetch_phase::fetch_install_graph;
 use finish::finish_install;
 use link::link_install_graph;
+use orix_config::ConfigOverrides;
 use resolve::resolve_install_graph;
 
 /// Run the full install pipeline for a project root.
@@ -233,6 +233,7 @@ pub async fn install_with_overrides(
         &graph,
         &linker,
         &direct_deps,
+        &workspace,
         fetch_report,
         link_report,
         &old_lockfile,
@@ -244,4 +245,50 @@ pub async fn install_with_overrides(
         &opts.progress_tx,
     )
     .await
+}
+
+pub(super) fn workspace_importer_id(relative_path: &Path) -> String {
+    let id = relative_path.to_string_lossy().replace('\\', "/");
+    if id.is_empty() {
+        ".".to_string()
+    } else {
+        id
+    }
+}
+
+pub(super) fn lockfile_matches_importers(
+    lockfile: &Lockfile,
+    manifest: &Manifest,
+    workspace: &Option<Workspace>,
+) -> bool {
+    if lockfile.validate_frozen(manifest, ".").is_err() {
+        return false;
+    }
+
+    let Some(ws) = workspace else {
+        return true;
+    };
+
+    ws.packages.iter().all(|pkg| {
+        let importer_id = workspace_importer_id(&pkg.relative_path);
+        lockfile
+            .validate_frozen(&pkg.manifest, &importer_id)
+            .is_ok()
+    })
+}
+
+pub(super) fn update_lockfile_importers(
+    base_lockfile: &Lockfile,
+    manifest: &Manifest,
+    workspace: &Option<Workspace>,
+    graph: &orix_domain::DependencyGraph,
+) -> Lockfile {
+    let mut lockfile = base_lockfile.update(manifest, graph, ".");
+    if let Some(ws) = workspace {
+        for pkg in &ws.packages {
+            let importer_id = workspace_importer_id(&pkg.relative_path);
+            lockfile = lockfile.update(&pkg.manifest, graph, &importer_id);
+        }
+    }
+    lockfile
 }

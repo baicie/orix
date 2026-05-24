@@ -114,8 +114,18 @@ fn remove_dir_all_with_retry(path: &Path, retries: u32) -> Result<()> {
         use std::time::Duration;
 
         for attempt in 0..=retries {
-            match std::fs::remove_dir_all(path) {
+            let result = remove_dir_recursive_ignore_locked(path);
+            match result {
                 Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                    // Some contents couldn't be removed (locked), that's okay
+                    info!(
+                        path = %path.display(),
+                        "some files in {} could not be removed (possibly locked), skipping",
+                        path.display()
+                    );
+                    return Ok(());
+                }
                 Err(e) if attempt < retries => {
                     let delay = Duration::from_millis(500 * (1 << attempt));
                     debug!(
@@ -127,18 +137,80 @@ fn remove_dir_all_with_retry(path: &Path, retries: u32) -> Result<()> {
                     thread::sleep(delay);
                 }
                 Err(e) => {
-                    anyhow::bail!("failed to remove directory {}: {}", path.display(), e);
+                    anyhow::bail!(
+                        "failed to remove {}: {}. Try closing any programs that may be \
+                        holding files open (IDE, antivirus, etc.) and try again.",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
+        Ok(())
     }
 
     #[cfg(not(windows))]
     {
-        let _ = (path, retries);
+        let _ = retries;
         std::fs::remove_dir_all(path)
             .with_context(|| format!("failed to remove directory {}", path.display()))?;
     }
+}
 
+/// Remove a directory and all its contents recursively, skipping locked files/dirs.
+#[cfg(windows)]
+fn remove_dir_recursive_ignore_locked(path: &Path) -> std::io::Result<()> {
+    remove_dir_contents_ignore_locked(path)?;
+    // Try to remove the directory itself; if locked, it's okay
+    match std::fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+            // Some contents couldn't be removed (locked), warn and continue
+            tracing::warn!(
+                "some files in {} could not be removed (possibly locked by another process)",
+                path.display()
+            );
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Remove all contents of a directory recursively, skipping locked files/dirs on Windows.
+#[cfg(windows)]
+fn remove_dir_contents_ignore_locked(path: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            match remove_dir_recursive_ignore_locked(&entry_path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    // Directory is locked, skip it but warn
+                    tracing::warn!(
+                        "could not remove locked directory: {}",
+                        entry_path.display()
+                    );
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already gone, continue
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            match std::fs::remove_file(&entry_path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    // File is locked, skip it but warn
+                    tracing::warn!("could not remove locked file: {}", entry_path.display());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already gone, continue
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
     Ok(())
 }

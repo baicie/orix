@@ -12,11 +12,62 @@ pub(crate) fn path_exists_or_symlink(path: &Path) -> bool {
 
 pub(crate) fn remove_link_path(path: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
-    if meta.is_dir() {
-        fs::remove_dir(path)
+    if metadata_is_directory_link(&meta) {
+        remove_dir_link_path(path)
     } else {
         fs::remove_file(path)
     }
+}
+
+#[cfg(windows)]
+fn metadata_is_directory_link(meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+    meta.is_dir() || meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
+}
+
+#[cfg(not(windows))]
+fn metadata_is_directory_link(meta: &fs::Metadata) -> bool {
+    meta.is_dir()
+}
+
+#[cfg(windows)]
+fn remove_dir_link_path(path: &Path) -> io::Result<()> {
+    match fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(first_error) => {
+            let cmd_path = cmd_compatible_path(path);
+            let status = std::process::Command::new("cmd")
+                .args(["/c", "rmdir"])
+                .arg(cmd_path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+
+            match status {
+                Ok(status) if status.success() => Ok(()),
+                Ok(_) | Err(_) => Err(first_error),
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn cmd_compatible_path(path: &Path) -> PathBuf {
+    let path_str = path.as_os_str().to_string_lossy();
+    if let Some(rest) = path_str.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = path_str.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(not(windows))]
+fn remove_dir_link_path(path: &Path) -> io::Result<()> {
+    fs::remove_dir(path)
 }
 
 /// True for paths like `D:` that make Node resolve modules to a drive root (`EISDIR`).

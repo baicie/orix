@@ -40,6 +40,15 @@ pub struct Cli {
     #[arg(long, global = true, default_value = "auto")]
     pub color: ColorChoice,
 
+    /// Run the script in a specific workspace package.
+    #[arg(long, global = true)]
+    pub workspace: Option<String>,
+
+    /// Filter workspace packages by selector.
+    /// Supports: ./path, ./glob/*, package-name
+    #[arg(long = "filter", global = true)]
+    pub filter: Vec<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -151,6 +160,13 @@ pub struct RunArgs {
     /// Run the script recursively across all workspace packages.
     #[arg(long, short = 'r')]
     pub recursive: bool,
+    /// Run workspace scripts in parallel (requires --recursive).
+    #[arg(long)]
+    pub parallel: bool,
+    /// Filter workspace packages by selector.
+    /// Supports: ./path, ./glob/*, package-name
+    #[arg(long = "filter")]
+    pub filter: Vec<String>,
     /// Maximum number of concurrent workspace scripts (for --recursive).
     #[arg(long, default_value = "4")]
     pub concurrency: usize,

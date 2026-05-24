@@ -1488,6 +1488,8 @@ dependencies = [
  "dirs",
  "flate2",
  "orix-core",
+ "orix-manifest",
+ "orix-workspace",
  "predicates",
  "sha2 0.11.0",
  "tar",
@@ -1625,6 +1627,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -1638,6 +1641,7 @@ dependencies = [
  "orix-registry",
  "orix-workspace",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -1676,6 +1680,8 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

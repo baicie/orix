@@ -67,15 +67,14 @@ pub(crate) async fn resolve_install_graph(
             .with_concurrency(config.concurrency)
             .with_progress(resolve_progress_tx);
 
-            let mut merged = orix_domain::DependencyGraph::new();
-            for pkg in std::iter::once(manifest).chain(ws.packages.iter().map(|p| &p.manifest)) {
-                let sub = resolver
-                    .resolve_manifest_with_workspace(pkg, Some(ws))
-                    .await
-                    .with_context(|| "failed to resolve workspace dependencies")?;
-                merged.merge(sub);
-            }
-            merged
+            let manifests: Vec<&Manifest> = std::iter::once(manifest)
+                .chain(ws.packages.iter().map(|pkg| &pkg.manifest))
+                .collect();
+
+            resolver
+                .resolve_manifests_with_workspace(&manifests, Some(ws))
+                .await
+                .with_context(|| "failed to resolve workspace dependencies")?
         } else {
             let mut resolver = if let Some(ref token) = config.auth_token {
                 info!(registry = %config.registry, "using authenticated registry");

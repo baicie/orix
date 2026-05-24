@@ -132,59 +132,82 @@ impl Workspace {
     fn find_packages(root: &Path, patterns: &[String]) -> Result<Vec<WorkspacePackage>> {
         let mut packages = Vec::new();
         let mut seen = HashSet::new();
+        let include_patterns: Vec<glob::Pattern> = patterns
+            .iter()
+            .filter(|pattern| !pattern.starts_with('!'))
+            .map(|pattern| glob::Pattern::new(pattern))
+            .collect::<Result<_, _>>()?;
         let exclude_patterns: Vec<glob::Pattern> = patterns
             .iter()
             .filter_map(|pattern| pattern.strip_prefix('!'))
-            .map(|pattern| glob::Pattern::new(&root.join(pattern).display().to_string()))
+            .map(glob::Pattern::new)
             .collect::<Result<_, _>>()?;
 
-        for pattern in patterns {
-            if pattern.starts_with('!') {
+        for entry in walkdir::WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| should_descend_workspace_entry(entry.path()))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_dir() {
                 continue;
             }
 
-            let full_pattern = root.join(pattern);
-
-            for entry in glob::glob(&full_pattern.display().to_string())? {
-                let pkg_path = entry?;
-                if path_contains_node_modules(&pkg_path)
-                    || exclude_patterns
-                        .iter()
-                        .any(|pattern| pattern.matches_path(&pkg_path))
-                {
-                    continue;
-                }
-
-                let manifest_path = pkg_path.join("package.json");
-
-                if !manifest_path.exists() {
-                    continue;
-                }
-
-                let manifest = Manifest::read(&manifest_path)
-                    .with_context(|| format!("failed to read {}", manifest_path.display()))?;
-                let name = manifest.name.clone().unwrap_or_default();
-
-                let key = (name.clone(), pkg_path.clone());
-                if !seen.insert(key) {
-                    anyhow::bail!(
-                        "package '{}' at '{}' matches multiple workspace globs",
-                        name,
-                        pkg_path.display()
-                    );
-                }
-
-                let relative_path = pkg_path
-                    .strip_prefix(root)
-                    .with_context(|| format!("path {} not under root", pkg_path.display()))?
-                    .to_path_buf();
-
-                packages.push(WorkspacePackage {
-                    relative_path,
-                    abs_path: pkg_path,
-                    manifest,
-                });
+            let pkg_path = entry.path();
+            if pkg_path == root || path_contains_node_modules(pkg_path) {
+                continue;
             }
+
+            let relative_path = pkg_path
+                .strip_prefix(root)
+                .with_context(|| format!("path {} not under root", pkg_path.display()))?
+                .to_path_buf();
+            let relative_pattern = relative_path.to_string_lossy().replace('\\', "/");
+
+            if !include_patterns
+                .iter()
+                .any(|pattern| pattern.matches(&relative_pattern))
+                || exclude_patterns
+                    .iter()
+                    .any(|pattern| pattern.matches(&relative_pattern))
+            {
+                continue;
+            }
+
+            let manifest_path = pkg_path.join("package.json");
+
+            if !manifest_path.exists() {
+                continue;
+            }
+
+            // Skip packages that fail to parse - be tolerant of malformed package.json
+            let manifest = match Manifest::read(&manifest_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(
+                        "skipping package at {}: failed to parse package.json: {}",
+                        manifest_path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+            let name = manifest.name.clone().unwrap_or_default();
+
+            let key = (name.clone(), pkg_path.to_path_buf());
+            if !seen.insert(key) {
+                anyhow::bail!(
+                    "package '{}' at '{}' matches multiple workspace globs",
+                    name,
+                    pkg_path.display()
+                );
+            }
+
+            packages.push(WorkspacePackage {
+                relative_path,
+                abs_path: pkg_path.to_path_buf(),
+                manifest,
+            });
         }
 
         packages.sort_by_key(|p| p.relative_path.clone());
@@ -219,4 +242,11 @@ impl Workspace {
 fn path_contains_node_modules(path: &Path) -> bool {
     path.components()
         .any(|component| component.as_os_str() == "node_modules")
+}
+
+fn should_descend_workspace_entry(path: &Path) -> bool {
+    !path.components().any(|component| {
+        let name = component.as_os_str();
+        name == "node_modules" || name == ".git" || name == "target"
+    })
 }

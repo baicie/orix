@@ -24,7 +24,9 @@ pub use orix_lockfile::{Lockfile, PnpmImportError, PnpmLockfile};
 pub use orix_manifest::Manifest;
 pub use orix_resolver::Resolver;
 pub use orix_store::Store;
-pub use orix_workspace::Workspace;
+pub use orix_workspace::{
+    filter_workspace_packages, Workspace, WorkspacePackage, WorkspaceSelector,
+};
 
 // Script runner exports.
 pub use crate::script::{

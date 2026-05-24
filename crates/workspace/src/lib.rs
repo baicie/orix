@@ -4,7 +4,10 @@
 
 mod workspace;
 
-pub use workspace::{detect_workspace_cycles, Catalog, CatalogSpec, Workspace, WorkspacePackage};
+pub use workspace::{
+    detect_workspace_cycles, filter_workspace_packages, Catalog, CatalogSpec, Workspace,
+    WorkspacePackage, WorkspaceSelector,
+};
 
 use std::path::PathBuf;
 

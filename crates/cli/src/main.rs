@@ -196,13 +196,19 @@ async fn main() -> Result<()> {
         }
 
         Command::Run(args) => {
-            if let Err(e) = run_script(&dir, &args).await {
+            let workspace_arg = cli.workspace.clone().or(args.workspace.clone());
+            let filter_arg = if args.filter.is_empty() {
+                cli.filter.clone()
+            } else {
+                args.filter.clone()
+            };
+            if let Err(e) = run_script(&dir, &args, workspace_arg, filter_arg).await {
                 eprintln!("{}", errors::format_error(&e, &dir));
                 std::process::exit(1);
             }
         }
 
-        Command::Script(mut parts) => {
+        Command::Script(parts) => {
             let script = match parts.first() {
                 Some(s) => s.clone(),
                 None => {
@@ -213,16 +219,19 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             };
-            parts.remove(0);
+            let script_args = normalize_script_args(parts[1..].to_vec());
             let args = RunArgs {
                 script,
-                args: normalize_script_args(parts),
+                args: script_args,
                 if_present: false,
                 workspace: None,
                 recursive: false,
+                parallel: false,
+                filter: Vec::new(),
                 concurrency: 4,
             };
-            if let Err(e) = run_script(&dir, &args).await {
+            if let Err(e) = run_script(&dir, &args, cli.workspace.clone(), cli.filter.clone()).await
+            {
                 eprintln!("{}", errors::format_error(&e, &dir));
                 std::process::exit(1);
             }

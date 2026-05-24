@@ -32,6 +32,7 @@ const DEFAULT_RESOLVE_CONCURRENCY: usize = 10;
 pub struct Resolver {
     registry: RegistryClient,
     memo: BTreeMap<(PackageName, String), PackageId>,
+    resolved_ids: HashSet<PackageId>,
     skipped_optional: Vec<SkippedOptionalDep>,
     progress_tx: Option<mpsc::Sender<ResolveProgressEvent>>,
     resolve_concurrency: usize,
@@ -43,6 +44,7 @@ impl Resolver {
         Self {
             registry: RegistryClient::new(registry_url),
             memo: Default::default(),
+            resolved_ids: Default::default(),
             skipped_optional: Vec::new(),
             progress_tx: None,
             resolve_concurrency: DEFAULT_RESOLVE_CONCURRENCY,
@@ -54,6 +56,7 @@ impl Resolver {
         Self {
             registry: RegistryClient::with_auth(registry_url, token),
             memo: Default::default(),
+            resolved_ids: Default::default(),
             skipped_optional: Vec::new(),
             progress_tx: None,
             resolve_concurrency: DEFAULT_RESOLVE_CONCURRENCY,
@@ -136,17 +139,56 @@ impl Resolver {
         workspace: Option<&Workspace>,
     ) -> Result<DependencyGraph> {
         let mut graph = DependencyGraph::new();
+        let mut to_resolve: Vec<(PackageName, VersionConstraint)> = Vec::new();
 
-        let all_deps: Vec<_> = manifest
+        self.collect_manifest_deps_with_workspace(
+            manifest,
+            workspace,
+            &mut graph,
+            &mut to_resolve,
+        )?;
+
+        self.resolve_batch(&mut graph, to_resolve, workspace)
+            .await?;
+        Ok(graph)
+    }
+
+    /// Resolve multiple manifests with workspace awareness in one batch.
+    pub async fn resolve_manifests_with_workspace(
+        &mut self,
+        manifests: &[&Manifest],
+        workspace: Option<&Workspace>,
+    ) -> Result<DependencyGraph> {
+        let mut graph = DependencyGraph::new();
+        let mut to_resolve: Vec<(PackageName, VersionConstraint)> = Vec::new();
+
+        for manifest in manifests {
+            self.collect_manifest_deps_with_workspace(
+                manifest,
+                workspace,
+                &mut graph,
+                &mut to_resolve,
+            )?;
+        }
+
+        self.resolve_batch(&mut graph, to_resolve, workspace)
+            .await?;
+        Ok(graph)
+    }
+
+    fn collect_manifest_deps_with_workspace(
+        &mut self,
+        manifest: &Manifest,
+        workspace: Option<&Workspace>,
+        graph: &mut DependencyGraph,
+        to_resolve: &mut Vec<(PackageName, VersionConstraint)>,
+    ) -> Result<()> {
+        for (name, raw) in manifest
             .dependencies
             .iter()
             .chain(manifest.dev_dependencies.iter())
             .chain(manifest.optional_dependencies.iter())
-            .collect();
-
-        let mut to_resolve: Vec<(PackageName, VersionConstraint)> = Vec::new();
-
-        for (name, raw) in all_deps {
+        {
             let key = (PackageName::from(name.as_str()), raw.clone());
             if self.memo.contains_key(&key) {
                 continue;
@@ -207,6 +249,11 @@ impl Resolver {
                         self.memo.insert(key, pkg_id);
                         continue;
                     }
+                    anyhow::bail!(
+                        "workspace dependency '{}' with spec '{}' was not found in the workspace",
+                        name,
+                        raw
+                    );
                 }
             }
 
@@ -241,10 +288,7 @@ impl Resolver {
 
             to_resolve.push((PackageName::from(name.as_str()), constraint));
         }
-
-        self.resolve_batch(&mut graph, to_resolve, workspace)
-            .await?;
-        Ok(graph)
+        Ok(())
     }
 
     /// Returns the list of optional dependencies that were skipped due to platform mismatch.
@@ -268,10 +312,14 @@ impl Resolver {
         to_resolve: Vec<(PackageName, VersionConstraint)>,
         _workspace: Option<&Workspace>,
     ) -> Result<()> {
+        let mut resolved_ids = std::mem::take(&mut self.resolved_ids);
+        resolved_ids.extend(graph.package_ids().cloned());
+
         let mut state = ResolverState {
             graph: DependencyGraph::new(),
             memo: std::mem::take(&mut self.memo),
             in_flight: HashSet::new(),
+            resolved_ids,
             discovered: 0,
             resolved: 0,
         };
@@ -291,6 +339,7 @@ impl Resolver {
         }
 
         self.memo = state.memo;
+        self.resolved_ids = state.resolved_ids;
         Ok(())
     }
 }
@@ -493,6 +542,26 @@ mod tests {
         };
         assert_eq!(event.discovered, 10);
         assert_eq!(event.resolved, 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_workspace_protocol_dependency_errors_before_registry() -> anyhow::Result<()> {
+        let mut resolver = resolver()?;
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("@bonree/common".to_string(), "workspace:*".to_string());
+        let workspace = Workspace::default();
+
+        let error = resolver
+            .resolve_manifest_with_workspace(&manifest, Some(&workspace))
+            .await
+            .expect_err("missing workspace dependency should fail locally");
+
+        assert!(error
+            .to_string()
+            .contains("workspace dependency '@bonree/common'"));
         Ok(())
     }
 }

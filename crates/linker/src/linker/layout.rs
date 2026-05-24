@@ -208,6 +208,28 @@ impl Linker {
         Ok(1)
     }
 
+    /// Link a direct dependency to an existing package directory, then expose its bins.
+    pub fn link_direct_package_from(
+        &self,
+        pkg_name: &str,
+        package_dir: &Path,
+        report: &mut LinkReport,
+    ) -> Result<()> {
+        let link_path = Self::package_path_in_node_modules(&self.node_modules, pkg_name);
+        if Self::dir_link_needs_repair(&link_path, package_dir) {
+            if path_exists_or_symlink(&link_path) {
+                remove_link_path(&link_path)?;
+            }
+            if let Some(parent) = link_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            Self::create_dir_link(package_dir, &link_path)?;
+            report.symlinks_created += 1;
+        }
+
+        self.link_package_dir_bins(package_dir, report)
+    }
+
     /// Validate that direct dependencies and generated symlinks are resolvable.
     pub fn validate_layout(&self, direct_deps: &HashSet<String>) -> Result<LayoutReport> {
         let mut report = LayoutReport::default();
@@ -376,7 +398,8 @@ impl Linker {
         }
     }
 
-    pub(crate) fn package_path_in_node_modules(root: &Path, package_name: &str) -> PathBuf {
+    /// Return the filesystem path for a package name under a node_modules root.
+    pub fn package_path_in_node_modules(root: &Path, package_name: &str) -> PathBuf {
         package_name
             .split('/')
             .fold(root.to_path_buf(), |path, part| path.join(part))

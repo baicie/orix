@@ -22,11 +22,11 @@ pub(crate) async fn try_install_fast_path(
         return Ok(None);
     }
     if old_lockfile.validate(&manifest, ".").is_ok()
-        && old_lockfile.validate_frozen(&manifest, ".").is_err()
+        && !super::lockfile_matches_importers(old_lockfile, manifest, workspace)
     {
         info!("package.json dependency specifiers changed; re-resolving from registry");
     }
-    if old_lockfile.validate_frozen(&manifest, ".").is_err() {
+    if !super::lockfile_matches_importers(old_lockfile, manifest, workspace) {
         return Ok(None);
     }
 
@@ -199,7 +199,8 @@ pub(crate) async fn try_install_fast_path(
     }
 
     let base_lockfile = old_lockfile.clone();
-    let updated_lockfile = base_lockfile.update(&manifest, &graph, ".");
+    let updated_lockfile =
+        super::update_lockfile_importers(&base_lockfile, manifest, workspace, &graph);
     let diff = Lockfile::diff(&base_lockfile, &updated_lockfile);
     let lockfile_changed = Lockfile::diff_has_changes(&diff);
 

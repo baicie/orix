@@ -19,6 +19,7 @@ anyhow = { workspace = true }
 orix-domain = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros", "time"] }
 parking_lot = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros"] }

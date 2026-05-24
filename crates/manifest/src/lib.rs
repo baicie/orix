@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub use orix_domain::{PackageName, Version, VersionConstraint};
 
@@ -60,6 +61,9 @@ pub struct Manifest {
     /// Type module ("module" or "commonjs").
     #[serde(rename = "type", default)]
     pub module_type: Option<String>,
+    /// Unknown fields preserved for round-trip serialization.
+    #[serde(flatten, default)]
+    pub extra_fields: BTreeMap<String, Value>,
 }
 
 /// Node/npm engine constraints.
@@ -346,5 +350,75 @@ mod tests {
         };
         let chain = manifest.lifecycle_chain("build");
         assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn test_extra_fields_preserved_in_roundtrip() -> anyhow::Result<()> {
+        let json = r#"{
+            "name": "my-pkg",
+            "version": "1.0.0",
+            "simple-git-hooks": {
+                "pre-commit": "pnpm lint-staged"
+            },
+            "lint-staged": {
+                "*.js": "eslint"
+            },
+            "custom-field": "preserve-me"
+        }"#;
+
+        let manifest: Manifest = serde_json::from_str(json)?;
+        assert!(manifest.extra_fields.contains_key("simple-git-hooks"));
+        assert!(manifest.extra_fields.contains_key("lint-staged"));
+        assert!(manifest.extra_fields.contains_key("custom-field"));
+
+        let output = serde_json::to_string_pretty(&manifest)?;
+        let reparsed: Manifest = serde_json::from_str(&output)?;
+        assert!(reparsed.extra_fields.contains_key("simple-git-hooks"));
+        assert!(reparsed.extra_fields.contains_key("lint-staged"));
+        assert!(reparsed.extra_fields.contains_key("custom-field"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_extra_fields_nested_objects_preserved() -> anyhow::Result<()> {
+        let tmp = tempfile::NamedTempFile::with_suffix(".json")?;
+        let json = r#"{
+            "name": "test",
+            "engines": {
+                "node": ">=18"
+            },
+            "unknown": {
+                "nested": {
+                    "deep": "value"
+                }
+            }
+        }"#;
+        std::fs::write(tmp.path(), json)?;
+
+        let manifest = Manifest::read(tmp.path())?;
+        assert!(manifest.extra_fields.contains_key("unknown"));
+        if let Some(nested) = manifest.extra_fields.get("unknown") {
+            assert!(nested.get("nested").is_some());
+        }
+
+        let output = serde_json::to_string_pretty(&manifest)?;
+        assert!(output.contains("unknown"));
+        assert!(output.contains("nested"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_extra_fields_empty_when_all_known() -> anyhow::Result<()> {
+        let json = r#"{
+            "name": "my-pkg",
+            "version": "1.0.0",
+            "dependencies": {
+                "lodash": "^4.0.0"
+            }
+        }"#;
+
+        let manifest: Manifest = serde_json::from_str(json)?;
+        assert!(manifest.extra_fields.is_empty());
+        Ok(())
     }
 }
