@@ -39,7 +39,7 @@ fn make_client(config: &RegistryConfig) -> Client {
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static("rpnpm/<version>"),
+        HeaderValue::from_static("orix/<version>"),
     );
 
     // 来自 .npmrc 的认证 token
@@ -164,7 +164,7 @@ pub async fn extract_tarball(
 tarball 在本地缓存以避免重复安装时重新下载：
 
 ```
-~/.rpnpm/cache/tarballs/
+~/.orix/cache/tarballs/
 ├── sha256/<url-哈希>/
 │   └── <package>-<version>.tgz
 ```

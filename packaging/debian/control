@@ -1,0 +1,12 @@
+Package: orix
+Version: $(VERSION)
+Section: utils
+Priority: optional
+Architecture: $(ARCH)
+Maintainer: baicie <2055572879@qq.com>
+Depends: libc6 (>= 2.17)
+Homepage: https://github.com/baicie/orix
+Description: High-performance package manager compatible with pnpm
+  Orix is a blazing fast, disk space efficient package manager for Node.js.
+  It creates a non-flat node_modules directory, handles dependency hoisting
+  intelligently, and is fully compatible with the pnpm ecosystem.

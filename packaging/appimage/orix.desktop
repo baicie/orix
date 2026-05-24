@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Orix
+Comment=High-performance package manager compatible with pnpm
+Exec=orix
+Icon=orix
+Terminal=true
+Type=Application
+Categories=Development;
+Keywords=package;manager;npm;pnpm;node;

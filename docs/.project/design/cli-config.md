@@ -4,73 +4,104 @@
 
 `crates/cli` 是二进制入口点。它解析命令行参数，从 `.npmrc` 加载配置，并将任务委托给核心库。`crates/config` 处理所有配置源：默认值、环境变量、`.npmrc` 和 CLI 参数。
 
+**相关文档**：[CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md)（参数无 `--` 透传、`oi dev` 隐式 run、安装脚本缺口与修复顺序）。
+
 ## CLI 命令
 
 ### Install（安装）
 
 ```bash
 # 从 lockfile 安装所有依赖（快速，冻结）
-rpnpm install
+orix install
 
 # 安装并更新 lockfile 以匹配 package.json
-rpnpm install
+orix install
 
 # 冻结 lockfile（CI/CD）
-rpnpm install --frozen-lockfile
+orix install --frozen-lockfile
 
 # 优先使用离线缓存
-rpnpm install --offline
+orix install --offline
 
 # 强制重新获取所有包
-rpnpm install --force
+orix install --force
 
 # 安装到特定目录（用于 workspace 中的子包）
-rpnpm install --dir packages/my-lib
+orix install --dir packages/my-lib
+
+# 使用自定义全局 store 和 tarball cache，避免默认落到用户目录 / C 盘
+orix --store-dir D:/orix/store --cache-dir D:/orix/cache install
 ```
 
 ### Add（添加）
 
 ```bash
 # 添加生产依赖
-rpnpm add react
-rpnpm add react@18
-rpnpm add "react@^18.2.0"
-rpnpm add react react-dom
+orix add react
+orix add react@18
+orix add "react@^18.2.0"
+orix add react react-dom
 
 # 作为 dev 依赖添加
-rpnpm add -D vite
+orix add -D vite
 
 # 作为可选依赖添加
-rpnpm add -O @emotion/css
+orix add -O @emotion/css
 ```
 
 ### Remove（移除）
 
 ```bash
-rpnpm remove react
-rpnpm remove react react-dom
-rpnpm remove --dir packages/my-lib react
+orix remove react
+orix remove react react-dom
+orix remove --dir packages/my-lib react
 ```
 
 ### Store（Store 管理）
 
 ```bash
 # 清理未使用的包
-rpnpm store prune
+orix store prune
 
 # 显示 store 状态
-rpnpm store status
+orix store status
 
 # store 目录路径
-rpnpm store path
+orix store path
 ```
+
+### Run（脚本执行）
+
+```bash
+# 执行当前 package 的 scripts.build
+orix run build
+
+# 参数透传给主脚本（脚本名之后无需 `--`，与 pnpm 一致）
+orix run dev --host 0.0.0.0
+orix run build -w --config rollup.config.mjs
+
+# 隐式 run：未匹配内置子命令时等同 orix run（见专项设计文档）
+orix dev
+orix dev --host 0.0.0.0
+
+# 在 workspace 子包中执行
+orix run --workspace @scope/ui build
+
+# 递归执行所有 workspace package 中存在的脚本
+orix run --recursive --if-present test
+```
+
+- orix 专属选项（`--recursive`、`--workspace`、`--if-present`）须写在**脚本名之前**；脚本名之后的 `-` 开头参数一律交给脚本。
+- 仍支持 npm 习惯：`orix run dev -- --host`（会剥掉一层 `--`）。
+
+详细执行模型、PATH、环境变量、安全策略和 workspace 拓扑顺序见 [Lifecycle Scripts](./lifecycle-scripts.md)。透传解析、隐式 `run` 与 `postinstall` 修复见 [CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md)。
 
 ### 其他
 
 ```bash
-rpnpm --version
-rpnpm --help
-rpnpm import              # 从 package-lock.json 或 yarn.lock 导入
+orix --version
+orix --help
+orix import              # 从 package-lock.json 或 yarn.lock 导入
 ```
 
 ## CLI 参数
@@ -79,7 +110,7 @@ rpnpm import              # 从 package-lock.json 或 yarn.lock 导入
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "rpnpm")]
+#[command(name = "orix")]
 #[command(version, about = "Fast, disk-space efficient package manager")]
 struct Cli {
     /// 全局：覆盖 registry URL
@@ -93,6 +124,14 @@ struct Cli {
     /// 工作目录（默认：当前目录）
     #[arg(long, short = 'C', default_value = ".", env = "RPNPM_DIR")]
     dir: PathBuf,
+
+    /// 全局 store 目录（默认：~/.orix/store/v1）
+    #[arg(long, global = true, env = "ORIX_STORE")]
+    store_dir: Option<PathBuf>,
+
+    /// tarball cache 目录（默认：系统 cache 目录）
+    #[arg(long, global = true, env = "ORIX_CACHE")]
+    cache_dir: Option<PathBuf>,
 
     /// 全局：输出使用颜色
     #[arg(long, global = true, default_value = "auto")]
@@ -115,6 +154,9 @@ enum Command {
 
     /// 管理包 store
     Store(StoreArgs),
+
+    /// 执行 package.json scripts
+    Run(RunArgs),
 }
 
 #[derive(Args)]
@@ -166,6 +208,28 @@ struct RemoveArgs {
     packages: Vec<String>,
 }
 
+#[derive(Args)]
+struct RunArgs {
+    /// 要执行的 script 名称
+    script: String,
+
+    /// 脚本不存在时成功退出
+    #[arg(long)]
+    if_present: bool,
+
+    /// 在指定 workspace package 中执行
+    #[arg(long)]
+    workspace: Option<String>,
+
+    /// 在所有 workspace package 中按拓扑顺序执行
+    #[arg(long, short = 'r')]
+    recursive: bool,
+
+    /// 传给脚本的剩余参数（脚本名之后；支持 `-` 开头，见 cli-run-passthrough-lifecycle.md）
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
 #[derive(Subcommand)]
 enum StoreArgs {
     /// 从 store 中移除未引用的包
@@ -209,7 +273,7 @@ fetch-timeout=30000
 
 # 缓存设置
 cache-dir=~/.npm
-store-dir=~/.rpnpm/store
+store-dir=~/.orix/store
 
 # 链接设置
 public-hoist-pattern[]=*_eslint-plugin_*
@@ -310,10 +374,10 @@ impl Default for Config {
             registry: Url::parse("https://registry.npmjs.org/").unwrap(),
             store_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".rpnpm/store/v1"),
+                .join(".orix/store/v1"),
             cache_dir: dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("rpnpm/tarballs"),
+                .join("orix/tarballs"),
             auth_token: None,
             concurrency: 10,
             fetch_timeout: Duration::from_secs(30),
@@ -333,7 +397,7 @@ impl Default for Config {
 CLI 在安装期间显示结构化进度：
 
 ```
-rpnpm install
+orix install
 │
 ├─resolve       2/2    ████████████████████ done
 ├─fetch         3/3    ████████████████████ done

@@ -1,6 +1,6 @@
 [package]
-name = "your-cli"
-description = "Command-line interface for your Rust workspace project."
+name = "orix-cli"
+description = "Command-line interface for orix."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,16 +10,31 @@ homepage.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "your"
+name = "orix"
 path = "src/main.rs"
 
 [dependencies]
-your-core.workspace = true
-your-config.workspace = true
-anyhow.workspace = true
-clap.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+dirs = { workspace = true }
+orix-core = { workspace = true }
+orix-manifest = { workspace = true }
+orix-workspace = { workspace = true }
+crossterm = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+flate2 = { workspace = true }
+base64 = { workspace = true }
+predicates = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

@@ -5,17 +5,24 @@ all-features = true
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
-ignore = []
+ignore = [
+  # number_prefix is unmaintained, no safe upgrade available
+  { id = "RUSTSEC-2025-0119" },
+]
 
 [licenses]
 confidence-threshold = 0.8
 allow = [
   "MIT",
   "Apache-2.0",
-  "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
-  "Unicode-DFS-2016",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+  "Zlib",
+  "bzip2-1.0.6",
+  "CC0-1.0",
 ]
 exceptions = []
 

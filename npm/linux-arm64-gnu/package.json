@@ -1,0 +1,23 @@
+{
+  "name": "@orix/orix-linux-arm64-gnu",
+  "version": "0.1.0",
+  "description": "Native binary for @orix/orix on Linux ARM64 glibc",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

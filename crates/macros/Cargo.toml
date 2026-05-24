@@ -1,12 +1,13 @@
 [package]
-name = "your-macros"
-description = "Optional procedural macros for your Rust workspace project."
+name = "orix-macros"
+description = "Procedural macros for the orix package manager."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 authors.workspace = true
 
 [lib]

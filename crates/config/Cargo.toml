@@ -1,6 +1,6 @@
 [package]
-name = "your-config"
-description = "Configuration loading for your Rust workspace project."
+name = "orix-config"
+description = ".npmrc loading and configuration management."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,14 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-toml.workspace = true
+serde = { workspace = true, features = ["derive"] }
+anyhow = { workspace = true }
+url = { workspace = true }
+dirs = { workspace = true }
+orix-domain = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "orix-resolver"
+description = "Dependency resolution with semver matching."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+url = { workspace = true }
+orix-domain = { workspace = true }
+orix-registry = { workspace = true }
+orix-manifest = { workspace = true }
+orix-workspace = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

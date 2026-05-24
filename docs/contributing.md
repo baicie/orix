@@ -3,8 +3,8 @@
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/your-repo.git`
-3. Add the upstream remote: `git remote add upstream https://github.com/your-org/your-repo.git`
+2. Clone your fork: `git clone https://github.com/your-username/orix.git`
+3. Add the upstream remote: `git remote add upstream https://github.com/baicie/orix.git`
 4. Create a feature branch: `git checkout -b feat/your-feature`
 
 ## Development Setup

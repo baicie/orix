@@ -1,0 +1,13 @@
+{
+  "name": "@orix-example/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@orix-example/shared": "workspace:*",
+    "picocolors": "^1.1.1"
+  }
+}

@@ -199,6 +199,8 @@ MVP 不实现完整的 pnpm peer 解析算法。取而代之的是：
 
 未来（第三阶段+）：具有未满足 peer dependencies 的包会得到 `pnpmfile.cjs` 垫片或警告。
 
+完整 peer 上下文、冲突诊断和 lockfile package key 升级见 [生态兼容设计](./ecosystem-compat.md)。
+
 ## 解析缓存
 
 为避免重复的 registry 调用：

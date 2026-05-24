@@ -1,0 +1,6 @@
+#!/bin/sh
+# Preinstall script for Orix .pkg
+# Removes an older symlink-based install before placing the real binary.
+if [ -L "/usr/local/bin/orix" ]; then
+    rm -f "/usr/local/bin/orix" 2>/dev/null || true
+fi

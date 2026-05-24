@@ -1,0 +1,12 @@
+Installation Complete
+====================
+
+Orix has been successfully installed!
+
+To get started, run:
+
+    orix --help
+
+If the `orix` command is not found, please ensure /usr/local/bin (or /opt/homebrew/bin on Apple Silicon) is in your PATH.
+
+For more information, visit: https://github.com/baicie/orix

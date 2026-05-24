@@ -1,22 +1,35 @@
-//! Core business logic.
+//! Install pipeline orchestration for orix.
+
+pub use crate::pipeline::{
+    add, cache_clean, cache_clean_with_overrides, cache_path, cache_path_with_overrides, deploy,
+    export_pnpm_lockfile, import_pnpm_lockfile, install, prune, remove, store_path,
+    store_path_with_overrides, store_prune, store_prune_with_overrides, store_verify,
+    store_verify_with_overrides, CacheCleanReport, DepType, DeployOpts, DeployReport, ExportReport,
+    ImportReport, InstallOpts, InstallReport, PruneReport, RemoveReport,
+};
 
 pub mod error;
+pub mod pipeline;
+pub mod reporter;
+pub mod script;
 
-pub use error::{CoreError, CoreResult};
+pub use error::CoreError;
+pub use orix_config::{Config, ConfigOverrides};
+pub use orix_domain::{
+    DependencyGraph, PackageId, PackageName, ResolvedPackage, Version, VersionConstraint,
+};
+pub use orix_fetcher::{FetchReport, Fetcher, TarballCache};
+pub use orix_linker::{LinkReport, Linker};
+pub use orix_lockfile::{Lockfile, PnpmImportError, PnpmLockfile};
+pub use orix_manifest::Manifest;
+pub use orix_resolver::Resolver;
+pub use orix_store::Store;
+pub use orix_workspace::{
+    filter_workspace_packages, Workspace, WorkspacePackage, WorkspaceSelector,
+};
 
-/// Returns a friendly greeting.
-#[must_use]
-pub fn hello(name: &str) -> String {
-    let normalized = your_utils::normalize_name(name);
-    format!("Hello, {normalized}!")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hello_trims_name() {
-        assert_eq!(hello(" Zeus "), "Hello, Zeus!");
-    }
-}
+// Script runner exports.
+pub use crate::script::{
+    dependency_scripts_allowed, graph_install_order, installed_package_dir, normalize_script_args,
+    LifecycleEvent, ScriptError, ScriptKind, ScriptOutput, ScriptRunner, VIRTUAL_STORE_DIR,
+};

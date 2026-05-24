@@ -1,84 +1,137 @@
-# Rust Workspace Template
+# <img src="packaging/appimage/orix.png" width="48" height="48" style="vertical-align: middle;" /> orix
 
-A production-ready Rust workspace template for multi-crate CLI/library projects.
+High-performance package manager written in Rust, inspired by pnpm's isolated layout approach.
+
+[![build](https://github.com/baicie/orix/actions/workflows/ci.yml/badge.svg)](https://github.com/baicie/orix/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/baicie/orix)](LICENSE)
+[![Rust MSRV 1.80](https://img.shields.io/badge/Rust-1.80%2B-blue?logo=rust)](https://www.rust-lang.org)
 
 ## Features
 
-- Multi-crate Cargo workspace
-- CLI + core + config + utils + optional proc-macro crate
-- `rustfmt`, `clippy`, tests, docs
-- `xtask` development commands
-- GitHub Actions CI on Linux, macOS, and Windows
-- Security checks with `cargo-deny`, `cargo-audit`, and `cargo-machete`
-- Coverage with `cargo llvm-cov`
-- GitHub Release with multi-platform binaries
-- Manual crates.io publishing workflow
-- Dependabot, issue templates, PR template
-- VSCode recommended settings
+- **Global CAS Cache** — Content-addressable storage, tarball files reused across projects
+- **Orix Virtual Store** — Generates `node_modules/.orix` structure with workspace protocol support
+- **Fast Installation** — Concurrent downloads + file-level deduplication + hard links
+- **Lockfile** — Reproducible installs, supports `--frozen-lockfile` for CI verification
+- **Workspace Support** — Monorepo multi-package management with `workspace:*`, `workspace:^`, `workspace:~`, `workspace:>=`, `workspace:file:` protocol variants
+- **Cross-Platform** — Linux, macOS, Windows (with junction fallback)
 
-## Layout
+## Installation
 
-```txt
+### Build from source
+
+```bash
+cargo build -p orix-cli
+./target/debug/orix --help
+```
+
+### Using Cargo install
+
+```bash
+cargo install --path crates/cli
+```
+
+### Download prebuilt binaries
+
+Download the compressed package for your platform from [GitHub Releases](https://github.com/baicie/orix/releases) and extract it.
+
+## Quick Start
+
+```bash
+# Install dependencies
+orix install
+
+# Verify install from lockfile (for CI)
+orix install --frozen-lockfile
+
+# Use local cache only
+orix install --offline
+
+# Specify registry
+orix install --registry https://registry.npmmirror.com
+```
+
+## Project Structure
+
+```
 crates/
-  cli/       # binary crate
-  core/      # core business logic
-  config/    # config loading
-  utils/     # shared helpers
-  macros/    # optional proc-macro crate
-xtask/       # repo automation commands
+├── cli          # CLI entry point
+├── core         # Installation pipeline orchestration
+├── config       # .npmrc configuration loading
+├── domain       # Shared domain types
+├── manifest     # package.json parsing
+├── resolver     # Dependency graph construction + semver resolution
+├── registry     # npm registry API client
+├── fetcher      # tarball download and extraction
+├── store        # Content-addressable global cache
+├── lockfile     # orix-lock.yaml management
+├── linker       # node_modules/.orix structure generation
+├── workspace    # Workspace discovery and circular dependency detection
+├── utils        # Shared utility functions
+└── macros       # Procedural macros (reserved)
 ```
 
-## Quick start
+## Installation Pipeline
 
-```bash
-cargo build --workspace
-cargo test --workspace
-cargo run -p your-cli -- hello Zeus
+```
+orix install
+  → Config.resolve()    Load .npmrc / env / CLI args
+  → Manifest.read()     Parse package.json
+  → Workspace.discover()  Find pnpm-workspace.yaml
+  → Lockfile.read()     Load existing lockfile
+  → Resolver.resolve()  Build dependency graph (with workspace protocol)
+  → Registry.fetch_packument()  Fetch packument
+  → semver match + platform filter
+  → Fetcher.fetch_all()  Concurrent tarball download
+  → Store.import_package()  CAS deduplication + hard link
+  → Lockfile.update()   Write orix-lock.yaml
+  → Linker.link_graph() Generate .orix structure
 ```
 
-## Development commands
+## Development
 
 ```bash
+# Format + linter + tests (full check)
 cargo xtask check
-cargo xtask fmt
-cargo xtask lint
-cargo xtask test
-cargo xtask doc
-cargo xtask security
+
+# Build
+cargo build --workspace
+
+# Test
+cargo test --workspace
+
+# Documentation
+cargo doc --no-deps
 ```
 
-Install optional tools:
+Optional tools:
 
 ```bash
-cargo install cargo-deny cargo-audit cargo-machete cargo-llvm-cov git-cliff
+cargo install cargo-deny cargo-machete cargo-llvm-cov
+cargo machete
+cargo deny check
 ```
 
-## Rename checklist
+## Status
 
-Replace these placeholders:
+orix MVP covers the following capabilities:
 
-- `your`
-- `your-cli`
-- `your-core`
-- `your-config`
-- `your-utils`
-- `your-macros`
-- `your-org/your-repo`
-- author metadata in root `Cargo.toml`
+| Capability | Status |
+|---|---|
+| package.json parsing | ✅ |
+| lockfile generation and frozen-lockfile verification | ✅ |
+| npm registry fetching | ✅ |
+| tarball download, integrity check, extraction | ✅ |
+| CAS global cache | ✅ |
+| node_modules/.orix structure generation | ✅ |
+| Root and child dependency linking | ✅ |
+| Workspace minimal support | ✅ |
 
-## Release
+MVP does not yet cover: full peerDependencies algorithm, full-mode hoist, publish/patch/catalogs, complex lifecycle scripts sandbox.
 
-Create and push a tag:
+## Architecture
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+See the design documents under [docs/.project/design/](docs/.project/design/).
 
-The release workflow builds multi-platform binaries and creates a GitHub Release.
+## License
 
-## Publish crates
-
-Set `CARGO_REGISTRY_TOKEN` in GitHub repository secrets, then run the `Publish crates` workflow manually.
-
-Default mode is dry-run. Disable `dry_run` when ready.
+MIT

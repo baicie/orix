@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<installer-gui-script xmlns:macos="http://www.apple.com/developer/gui_scripting">
+    <title>Orix</title>
+    <organization id="com.baicie.orix" />
+    <product id="orix" version="$(VERSION)" min-spec="$(MIN_MACOS)">
+
+        <background file="background.png" alignment="bottomleft" />
+        <welcome file="Welcome.txt" />
+        <license file="License.txt" />
+        <conclusion file="Conclusion.txt" />
+
+        <volume-check>
+            <allowed-os-versions>
+                <os-version min="$(MIN_MACOS)" />
+            </allowed-os-versions>
+        </volume-check>
+
+        <choices-outline>
+            <line choice="orix">
+                <file choice="bin" />
+            </line>
+        </choices-outline>
+
+        <choice id="orix" title="Orix CLI">
+            <pkg-ref id="com.baicie.orix" />
+        </choice>
+
+        <choice id="bin" title="Executable">
+            <pkg-ref id="com.baicie.orix.bin">
+                <bundle-version orig-path="$(ORIG_PATH)" CFBundleIdentifier="com.baicie.orix.bin" />
+            </pkg-ref>
+        </choice>
+
+        <pkg-ref id="com.baicie.orix" install-kbytes="$(SIZE_KB)" version="$(VERSION)" auth="Root">
+            <bundle-length>$(BIN_SIZE)</bundle-length>
+            <bundle-path>$(INSTALL_TARGET)/orix</bundle-path>
+            <postinstall-script relative="scripts/postinstall">$(POSTINSTALL)</postinstall-script>
+            <preinstall-script relative="scripts/preinstall">$(PREINSTALL)</preinstall-script>
+            <background-picture-design-requirement fill="proportional" scaling="yes" alignment="bottomleft">background.png</background-picture-design-requirement>
+        </pkg-ref>
+
+    </product>
+</installer-gui-script>

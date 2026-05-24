@@ -1,13 +1,17 @@
 [package]
-name = "your-utils"
-description = "Shared utilities for your Rust workspace project."
+name = "orix-utils"
+description = "Shared utilities for the orix package manager."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 authors.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

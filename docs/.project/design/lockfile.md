@@ -2,14 +2,14 @@
 
 ## 概述
 
-`crates/lockfile` 管理 `rpnpm-lock.yaml` lockfile——一个人类可读的、版本控制的完整依赖图快照。lockfile 确保在任何机器上（或 CI 中）运行 `rpnpm install` 都能产生逐字节完全相同的 `node_modules` 布局。
+`crates/lockfile` 管理 `orix-lock.yaml` lockfile——一个人类可读的、版本控制的完整依赖图快照。lockfile 确保在任何机器上（或 CI 中）运行 `orix install` 都能产生逐字节完全相同的 `node_modules` 布局。
 
 ## 文件格式
 
 lockfile 使用 YAML 以提高人类可读性和版本控制友好性。
 
 ```yaml
-# rpnpm-lock.yaml
+# orix-lock.yaml
 lockfileVersion: 1
 saveRemoteCacheURLs: true
 
@@ -135,7 +135,7 @@ pub struct PackageResolution {
 
 ### `Lockfile::read(path: &Path) -> Result<Lockfile>`
 
-使用 `serde_yaml` 解析 `rpnpm-lock.yaml`。如果文件缺失（首次安装）或格式错误则返回错误。
+使用 `serde_yaml` 解析 `orix-lock.yaml`。如果文件缺失（首次安装）或格式错误则返回错误。
 
 ### `Lockfile::write(path: &Path, lockfile: &Lockfile) -> Result<()>`
 
@@ -180,7 +180,7 @@ pub fn validate_frozen(lockfile: &Lockfile, manifest: &Manifest) -> Result<()> {
         if !satisfies_exact(&resolved.version, constraint) {
             anyhow::bail!(
                 "package.json dependency '{}' ({}) does not match lockfile ({}). \
-                 Run rpnpm install without --frozen-lockfile.",
+                 Run orix install without --frozen-lockfile.",
                 name, constraint, resolved.version
             );
         }
@@ -191,7 +191,7 @@ pub fn validate_frozen(lockfile: &Lockfile, manifest: &Manifest) -> Result<()> {
         if !current.importers["."].dependencies.contains_key(name) {
             anyhow::bail!(
                 "package '{}' is in package.json but not in lockfile. \
-                 Run rpnpm install without --frozen-lockfile.",
+                 Run orix install without --frozen-lockfile.",
                 name
             );
         }
@@ -206,13 +206,15 @@ pub fn validate_frozen(lockfile: &Lockfile, manifest: &Manifest) -> Result<()> {
 第三阶段+ 可能添加转换器：
 
 ```
-rpnpm import-pnpm-lock    # 读取 pnpm-lock.yaml → rpnpm-lock.yaml
-rpnpm export-pnpm-lock   # 写入 pnpm-lock.yaml 以兼容 pnpm
+orix import-pnpm-lock    # 读取 pnpm-lock.yaml → orix-lock.yaml
+orix export-pnpm-lock   # 写入 pnpm-lock.yaml 以兼容 pnpm
 ```
 
 这需要实现完整的 pnpm lockfile schema，包括 peer 解析键。
 
+Phase 9 的具体读取、导出、peer suffix package key 和 v1 -> v2 迁移方案见 [生态兼容设计](./ecosystem-compat.md)。
+
 ## 文件位置
 
-- 单工作区根目录：`./rpnpm-lock.yaml`
-- 项目内：与声明依赖的 `package.json` 同级的 `./rpnpm-lock.yaml`
+- 单工作区根目录：`./orix-lock.yaml`
+- 项目内：与声明依赖的 `package.json` 同级的 `./orix-lock.yaml`

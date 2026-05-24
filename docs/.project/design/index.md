@@ -1,6 +1,6 @@
 # 设计概览
 
-本文档包含 rpnpm 各核心组件的详细设计文档。
+本文档包含 orix 各核心组件的详细设计文档。
 
 ## Crate 架构
 
@@ -13,9 +13,12 @@ crates/
 ├── registry         # npm registry API（packument, tarball 元数据）
 ├── fetcher          # tarball 下载，完整性验证，解压
 ├── store            # 内容可寻址包缓存
-├── lockfile         # rpnpm-lock.yaml 读写/diff
+├── lockfile         # orix-lock.yaml 读写/diff
 ├── linker           # node_modules/.pnpm 结构 + 符号链接/硬链接生成
 ├── workspace        # workspace 发现，pnpm-workspace.yaml 解析
+├── domain           # 共享领域类型
+├── utils            # 共享工具函数
+├── macros           # 过程宏预留
 └── core             # 安装管道编排
 ```
 
@@ -26,11 +29,44 @@ crates/
 | [CAS Store](./store.md) | `crates/store` | 内容可寻址全局包缓存。按 SHA-256 哈希对文件去重。 |
 | [Linker](./linker.md) | `crates/linker` | 构建 `node_modules/.pnpm/` 和符号链接树。平台感知（Windows junction 回退）。 |
 | [Resolver](./resolver.md) | `crates/resolver` | 通过 npm registry 查询将 `package.json` 依赖转换为完全解析的依赖图。 |
-| [Lockfile](./lockfile.md) | `crates/lockfile` | 管理 `rpnpm-lock.yaml`：读写、diff、冻结 lockfile 验证。 |
+| [Resolver 性能优化](./resolver-performance.md) | `crates/resolver`, `crates/registry`, `crates/core` | Resolve 阶段卡顿诊断、并发解析、packument 去重与缓存优化方案。 |
+| [Install 性能优化](./install-performance-optimization.md) | `crates/core`, `crates/resolver`, `crates/fetcher`, `crates/store`, `crates/linker` | `orix install` 全链路阶段计时、Resolve 去重、Store import 和 Linker fast path 优化方案。 |
+| [Lockfile](./lockfile.md) | `crates/lockfile` | 管理 `orix-lock.yaml`：读写、diff、冻结 lockfile 验证。 |
 | [Registry & Fetcher](./fetcher.md) | `crates/registry` + `crates/fetcher` | npm registry API 的 HTTP 客户端；tarball 下载、完整性验证、解压。 |
 | [Workspace](./workspace.md) | `crates/workspace` | Monorepo 支持：`pnpm-workspace.yaml` 解析，`workspace:*` 协议解析。 |
 | [CLI & Config](./cli-config.md) | `crates/cli` + `crates/config` | CLI 命令（`install`、`add`、`remove`、`store`），从 `.npmrc` 和环境变量加载配置。 |
 | [安装管道](./core.md) | `crates/core` | 编排完整安装流程：resolve → fetch → store → link → lockfile。 |
+| [Manifest、Domain 与 Utils](./manifest-domain-utils.md) | `crates/manifest` + `crates/domain` + `crates/utils` + `crates/macros` | `package.json` 输入模型、共享领域类型、integrity/parser、路径工具和过程宏边界。 |
+| [Lifecycle Scripts](./lifecycle-scripts.md) | `crates/cli` + `crates/core` + `crates/manifest` + `crates/workspace` | `orix run`、安装 lifecycle、脚本执行器、安全策略和 workspace 作用域。 |
+| [CLI 透传、隐式 run 与 postinstall](./cli-run-passthrough-lifecycle.md) | `crates/cli` + `crates/core` | 脚本参数无 `--` 透传、`oi dev` 隐式 run、项目/依赖 postinstall 根因与修复顺序。 |
+| [生态兼容](./ecosystem-compat.md) | `crates/resolver` + `crates/lockfile` + `crates/workspace` + `crates/fetcher` + `crates/core` | peerDependencies、pnpm-lock.yaml、patch、catalogs 和 deploy。 |
+| [测试、集成与质量](./testing-quality.md) | `tests/` + CI | 测试分层、端到端 fixture、Windows 链接测试、`make check` 和质量工具。 |
+
+## 已知问题
+
+| 文档 | 说明 |
+| --- | --- |
+| [Issues 目录](../isuess/README.md) | Windows link 后系统卡顿、lockfile 不随版本升级更新等结论与修复方案。 |
+
+## TODO 覆盖情况
+
+| TODO Phase | 设计覆盖 |
+| --- | --- |
+| Phase 1 本地 manifest + CLI | [Manifest、Domain 与 Utils](./manifest-domain-utils.md)、[CLI & Config](./cli-config.md) |
+| Phase 2 Registry Resolver | [Resolver](./resolver.md)、[Registry & Fetcher](./fetcher.md) |
+| Phase 3 Fetcher | [Registry & Fetcher](./fetcher.md) |
+| Phase 4 CAS Store | [CAS Store](./store.md) |
+| Phase 5 Linker | [Linker](./linker.md) |
+| Phase 6 Lockfile | [Lockfile](./lockfile.md) |
+| Phase 7 Workspace | [Workspace](./workspace.md) |
+| Phase 8 Lifecycle Scripts | [Lifecycle Scripts](./lifecycle-scripts.md)、[CLI & Config](./cli-config.md)、[安装管道](./core.md) |
+| Phase 9 peerDeps + 生态兼容 | [生态兼容](./ecosystem-compat.md)、[Resolver](./resolver.md)、[Lockfile](./lockfile.md) |
+| Phase 10 Pipeline | [安装管道](./core.md) |
+| Phase 11 Config | [CLI & Config](./cli-config.md) |
+| Phase 12 Utils & Macros | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 13 Domain | [Manifest、Domain 与 Utils](./manifest-domain-utils.md) |
+| Phase 14 测试 | [测试、集成与质量](./testing-quality.md) |
+| Phase 15 集成 & 质量 | [测试、集成与质量](./testing-quality.md) |
 
 ## 设计原则
 
@@ -89,10 +125,23 @@ lockfile.read() → DependencyGraph (来自 lockfile)
                          → Linker
 ```
 
-## 推迟到第三阶段+
+## Phase 8 — Lifecycle Scripts + Script Execution
 
-- 完整的 peerDependencies 解析算法
-- 生命周期脚本（preinstall、postinstall 等）
-- pnpm-lock.yaml 导入/导出
-- `patch` 协议
-- catalogs
+详见 [Lifecycle Scripts](./lifecycle-scripts.md)。覆盖以下功能：
+
+- `orix run <script>` 命令执行 package.json 中定义的脚本
+- 生命周期钩子（preinstall, postinstall, prepare, prepublishOnly 等）
+- `--ignore-scripts` 参数跳过脚本执行
+- workspace 作用域脚本
+
+## Phase 9 — peerDependencies + 生态兼容
+
+详见 [生态兼容](./ecosystem-compat.md)。覆盖以下功能：
+
+- peerDependencies 完整解析算法（hoisting 策略）
+- peerDependencies 冲突检测与报告
+- pnpm-lock.yaml 读取兼容
+- pnpm-lock.yaml 导出兼容
+- `patch` 协议支持
+- catalogs 支持
+- `deploy` 模式

@@ -1,0 +1,24 @@
+{
+  "name": "orix-example-basic-install",
+  "version": "1.0.0",
+  "description": "Basic orix install example with production dependencies.",
+  "dependencies": {
+    "@shopify/hydrogen": "*",
+    "is-even": "^1.0.0",
+    "left-pad": "^1.3.0",
+    "react": "*"
+  },
+  "devDependencies": {},
+  "peerDependencies": {},
+  "optionalDependencies": {},
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": null,
+  "os": [],
+  "cpu": [],
+  "bin": null,
+  "files": [],
+  "private": true,
+  "type": null
+}

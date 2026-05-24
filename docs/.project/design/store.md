@@ -7,7 +7,7 @@
 ## Store 目录布局
 
 ```
-~/.rpnpm/store/v1/
+~/.orix/store/v1/
 ├── files/
 │   └── sha256/
 │       └── <前缀>/<哈希>           # 去重的文件内容
@@ -170,10 +170,10 @@ store 支持多项目并发安装：
 
 ## 清理（Pruning）
 
-可以用 `rpnpm store prune` 删除未使用的包：
+可以用 `orix store prune` 删除未使用的包：
 
 ```
-1. 构建所有 rpnpm-lock.yaml 中引用的 PackageId 集合
+1. 构建所有 orix-lock.yaml 中引用的 PackageId 集合
 2. 遍历 store/packages/
 3. 删除不在引用集合中的条目
 4. 遍历 store/files/

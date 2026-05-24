@@ -5,37 +5,168 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
-  BIN_NAME: your
 
 jobs:
-  build:
+  ci:
+    uses: ./.github/workflows/reusable-ci.yml
+
+  version-sync:
+    name: Version Sync
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync versions
+        run: node scripts/sync-version.mjs ${{ steps.version.outputs.version }}
+
+      - name: Upload synced source
+        uses: actions/upload-artifact@v4
+        with:
+          name: synced-source
+          path: .
+          include-hidden-files: true
+
+  build-linux:
     name: Build / ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    needs: [ci, version-sync]
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: zip
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            archive: tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            archive: tar.gz
-
+          - target: x86_64-unknown-linux-gnu
+            npm_name: linux-x64-gnu
+          - target: x86_64-unknown-linux-musl
+            npm_name: linux-x64-musl
+          - target: aarch64-unknown-linux-gnu
+            npm_name: linux-arm64-gnu
+            linker: aarch64-linux-gnu-gcc
     steps:
-      - uses: actions/checkout@v4
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install target toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get install -y musl-tools
+          else
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --package orix-cli --target ${{ matrix.target }}
+
+      - name: Prepare package directory
+        shell: bash
+        run: |
+          mkdir -p dist/bin
+          cp target/${{ matrix.target }}/release/orix dist/bin/orix
+          chmod 755 dist/bin/orix
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.npm_name }}
+          path: dist
+
+  build-windows:
+    name: Build / x86_64-pc-windows-msvc
+    needs: [ci, version-sync]
+    runs-on: windows-latest
+    steps:
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        shell: pwsh
+        run: cargo build --release --package orix-cli --target x86_64-pc-windows-msvc
+
+      - name: Prepare package directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist/bin" | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/orix.exe" "dist/bin/orix.exe"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-win32-x64-msvc
+          path: dist
+
+  build-macos:
+    name: Build / ${{ matrix.target }}
+    needs: [ci, version-sync]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            npm_name: darwin-x64
+            runner: macos-15
+          - target: aarch64-apple-darwin
+            npm_name: darwin-arm64
+            runner: macos-latest
+    steps:
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,49 +176,321 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Test
-        run: cargo test --workspace --all-features
-
       - name: Build
-        run: cargo build --release --package your-cli --target ${{ matrix.target }}
+        run: cargo build --release --package orix-cli --target ${{ matrix.target }}
 
-      - name: Package Unix
-        if: matrix.archive == 'tar.gz'
-        shell: bash
+      - name: Prepare package directory
         run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/${BIN_NAME} dist/
-          tar -czf ${BIN_NAME}-${{ matrix.target }}.tar.gz -C dist ${BIN_NAME}
+          mkdir -p dist/bin
+          cp target/${{ matrix.target }}/release/orix dist/bin/orix
+          chmod 755 dist/bin/orix
 
-      - name: Package Windows
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist
-          Copy-Item target/${{ matrix.target }}/release/${env:BIN_NAME}.exe dist/
-          Compress-Archive -Path dist/${env:BIN_NAME}.exe -DestinationPath ${env:BIN_NAME}-${{ matrix.target }}.zip
-
-      - name: Upload artifact
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BIN_NAME }}-${{ matrix.target }}
-          path: |
-            *.tar.gz
-            *.zip
+          name: npm-${{ matrix.npm_name }}
+          path: dist
 
-  github-release:
-    name: GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-
+  package-windows-msi:
+    name: Package / Windows MSI
+    needs: build-windows
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Download artifacts
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-win32-x64-msvc
+          path: bin
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $wixVersion = "wix3141rtm"
+          $wixPath = "$env:TEMP\wix-$wixVersion"
+
+          if (-not (Test-Path "$wixPath\candle.exe")) {
+            New-Item -ItemType Directory -Force -Path $wixPath | Out-Null
+            Invoke-WebRequest `
+              -Uri "https://github.com/wixtoolset/wix3/releases/download/$wixVersion/wix314-binaries.zip" `
+              -OutFile "$wixPath\wix.zip" `
+              -UseBasicParsing
+            Expand-Archive -Path "$wixPath\wix.zip" -DestinationPath $wixPath -Force
+          }
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $fileVersion = $env:VERSION
+          $msiVersion = $env:VERSION -replace '^v', ''
+          $wixPath = "$env:TEMP\wix-wix3141rtm"
+
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\dist" | Out-Null
+
+          $wxs = Get-Content "${{ github.workspace }}\packaging\wix\Product.wxs" -Raw
+          $wxs = $wxs -replace '\$\(var\.Version\)', $msiVersion
+          $wxs = $wxs -replace '\$\(var\.SourceDir\)', "${{ github.workspace }}\bin\bin"
+          $wxs | Set-Content -Path "${{ github.workspace }}\packaging\wix\Product_compiled.wxs" -NoNewline
+
+          & "$wixPath\candle.exe" `
+            -nologo `
+            -out "${{ github.workspace }}\packaging\wix\Product_compiled.wixobj" `
+            "${{ github.workspace }}\packaging\wix\Product_compiled.wxs"
+
+          & "$wixPath\light.exe" `
+            -nologo `
+            -ext WixUIExtension `
+            -ext WixUtilExtension `
+            -out "${{ github.workspace }}\dist\orix-$fileVersion-x86_64-pc-windows-msvc.msi" `
+            "${{ github.workspace }}\packaging\wix\Product_compiled.wixobj"
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-msi
+          path: dist/*.msi
+
+  package-deb:
+    name: Package / Linux deb
+    needs: build-linux
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Download Linux x86_64 GNU binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-linux-x64-gnu
+          path: bin
+
+      - name: Build deb
+        run: |
+          set -e
+          package_version="${VERSION#v}"
+          file_version="$VERSION"
+          arch="amd64"
+          deb_dir="${{ github.workspace }}/deb_root"
+
+          rm -rf "$deb_dir"
+          mkdir -p "$deb_dir/DEBIAN" "$deb_dir/usr/bin" "${{ github.workspace }}/dist"
+
+          cp bin/bin/orix "$deb_dir/usr/bin/orix"
+          chmod 755 "$deb_dir/usr/bin/orix"
+
+          sed \
+            -e "s/\$(VERSION)/$package_version/g" \
+            -e "s/\$(ARCH)/$arch/g" \
+            "${{ github.workspace }}/packaging/debian/control" \
+            > "$deb_dir/DEBIAN/control"
+
+          for script in postinst prerm postrm; do
+            src="${{ github.workspace }}/packaging/debian/$script"
+            if [ -f "$src" ]; then
+              cp "$src" "$deb_dir/DEBIAN/$script"
+              chmod 755 "$deb_dir/DEBIAN/$script"
+            fi
+          done
+
+          dpkg-deb \
+            --build \
+            --root-owner-group \
+            "$deb_dir" \
+            "${{ github.workspace }}/dist/orix-$file_version-$arch.deb"
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-deb
+          path: dist/*.deb
+
+  package-binaries:
+    name: Package / Binary archives
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download binaries
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Package archives
+        run: |
+          set -e
+          mkdir -p dist
+
+          package_unix() {
+            local src="$1"
+            local target="$2"
+            local root="orix-${VERSION}-${target}"
+            rm -rf "$root"
+            mkdir -p "$root"
+            cp "$src" "$root/orix"
+            chmod 755 "$root/orix"
+            tar -cJf "dist/${root}.tar.xz" "$root"
+            rm -rf "$root"
+          }
+
+          package_unix artifacts/npm-linux-x64-gnu/bin/orix x86_64-unknown-linux-gnu
+          package_unix artifacts/npm-linux-x64-musl/bin/orix x86_64-unknown-linux-musl
+          package_unix artifacts/npm-linux-arm64-gnu/bin/orix aarch64-unknown-linux-gnu
+          package_unix artifacts/npm-darwin-x64/bin/orix x86_64-apple-darwin
+          package_unix artifacts/npm-darwin-arm64/bin/orix aarch64-apple-darwin
+
+          win_root="orix-${VERSION}-x86_64-pc-windows-msvc"
+          rm -rf "$win_root"
+          mkdir -p "$win_root"
+          cp artifacts/npm-win32-x64-msvc/bin/orix.exe "$win_root/orix.exe"
+          zip -qr "dist/${win_root}.zip" "$win_root"
+          rm -rf "$win_root"
+
+      - name: Upload binary archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            dist/*.tar.xz
+            dist/*.zip
+
+  github-release:
+    name: GitHub Release
+    needs: [package-windows-msi, package-deb, package-binaries, npm-publish]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    steps:
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
           merge-multiple: true
+
+      - name: Generate installers
+        run: |
+          set -e
+
+          cat > artifacts/orix-installer.sh <<'EOF'
+          #!/bin/sh
+          set -e
+
+          repo="baicie/orix"
+          version="${ORIX_VERSION:-latest}"
+          os="$(uname -s)"
+          arch="$(uname -m)"
+
+          case "$os:$arch" in
+            Linux:x86_64) target="x86_64-unknown-linux-gnu" ;;
+            Linux:aarch64|Linux:arm64) target="aarch64-unknown-linux-gnu" ;;
+            Darwin:x86_64) target="x86_64-apple-darwin" ;;
+            Darwin:arm64) target="aarch64-apple-darwin" ;;
+            *) echo "unsupported platform: $os $arch" >&2; exit 1 ;;
+          esac
+
+          if [ "$version" = "latest" ]; then
+            base="https://github.com/$repo/releases/latest/download"
+            asset_version="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" | sed 's#.*/tag/##')"
+          else
+            base="https://github.com/$repo/releases/download/$version"
+            asset_version="$version"
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          archive="orix-${asset_version}-${target}.tar.xz"
+
+          curl --proto '=https' --tlsv1.2 -LsSf "$base/$archive" -o "$tmp/$archive"
+          tar -xJf "$tmp/$archive" -C "$tmp"
+
+          if [ "$os" = "Darwin" ]; then
+            install_dir="$HOME/.orix/bin"
+          else
+            install_dir="$HOME/.local/bin"
+          fi
+
+          mkdir -p "$install_dir"
+          cp "$tmp/orix-${asset_version}-${target}/orix" "$install_dir/orix"
+          chmod 755 "$install_dir/orix"
+
+          echo "Installed orix to $install_dir/orix"
+          case ":$PATH:" in
+            *":$install_dir:"*) ;;
+            *) echo "Add this to your shell profile: export PATH=\"$install_dir:\$PATH\"" ;;
+          esac
+          EOF
+
+          cat > artifacts/orix-installer.ps1 <<'EOF'
+          $ErrorActionPreference = "Stop"
+
+          $repo = "baicie/orix"
+          $version = if ($env:ORIX_VERSION) { $env:ORIX_VERSION } else { "latest" }
+          $target = "x86_64-pc-windows-msvc"
+
+          if ($version -eq "latest") {
+            $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+            $assetVersion = $release.tag_name
+            $base = "https://github.com/$repo/releases/latest/download"
+          } else {
+            $assetVersion = $version
+            $base = "https://github.com/$repo/releases/download/$version"
+          }
+
+          $archive = "orix-$assetVersion-$target.zip"
+          $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("orix-install-" + [System.Guid]::NewGuid())
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\Orix\bin"
+
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+          try {
+            Invoke-WebRequest "$base/$archive" -OutFile (Join-Path $tmp $archive) -UseBasicParsing
+            Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath $tmp -Force
+            Copy-Item (Join-Path $tmp "orix-$assetVersion-$target\orix.exe") (Join-Path $installDir "orix.exe") -Force
+
+            $path = [Environment]::GetEnvironmentVariable("Path", "User")
+            $entries = @()
+            if ($path) { $entries = $path -split ';' | Where-Object { $_ } }
+            if ($entries -notcontains $installDir) {
+              $entries += $installDir
+              [Environment]::SetEnvironmentVariable("Path", ($entries -join ";"), "User")
+              Write-Host "Added $installDir to user PATH. Restart your terminal to use orix."
+            }
+
+            Write-Host "Installed orix to $installDir\orix.exe"
+          } finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+          }
+          EOF
+
+          chmod 755 artifacts/orix-installer.sh
+
+      - name: Generate SHA256SUMS
+        run: |
+          set -e
+          cd artifacts
+          sha256sum * > SHA256SUMS
+
+      - name: List release files
+        run: find artifacts -maxdepth 1 -type f -print | sort
 
       - name: Generate release notes
         uses: orhun/git-cliff-action@v4
@@ -100,7 +503,117 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
           files: artifacts/*
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
+
+  npm-publish:
+    name: Publish npm packages
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
+    steps:
+      - name: Download synced source
+        uses: actions/download-artifact@v4
+        with:
+          name: synced-source
+          path: .
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          scope: "@orix"
+
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Restore platform packages
+        shell: bash
+        run: |
+          rm -rf dist
+          mkdir -p dist
+
+          for dir in artifacts/npm-*; do
+            name="$(basename "$dir" | sed 's/^npm-//')"
+            mkdir -p "dist/$name"
+            cp -R "$dir"/. "dist/$name/"
+          done
+
+      - name: Prepare main package
+        shell: bash
+        run: |
+          mkdir -p dist/main
+          cp -R npm/main/. dist/main/
+          cp README.md dist/main/README.md
+          cp LICENSE dist/main/LICENSE
+
+      - name: Prepare platform packages
+        shell: bash
+        run: |
+          mkdir -p dist/darwin-arm64/bin
+          mkdir -p dist/darwin-x64/bin
+          mkdir -p dist/linux-x64-gnu/bin
+          mkdir -p dist/linux-arm64-gnu/bin
+          mkdir -p dist/linux-x64-musl/bin
+          mkdir -p dist/win32-x64-msvc/bin
+
+          for platform in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu linux-x64-musl win32-x64-msvc; do
+            cp "npm/$platform/package.json" "dist/$platform/package.json"
+            cp "npm/$platform/README.md" "dist/$platform/README.md" 2>/dev/null || true
+            cp "npm/$platform/LICENSE" "dist/$platform/LICENSE" 2>/dev/null || true
+          done
+
+          cp artifacts/npm-darwin-arm64/bin/orix dist/darwin-arm64/bin/orix || true
+          chmod 755 dist/darwin-arm64/bin/orix || true
+          cp artifacts/npm-darwin-x64/bin/orix dist/darwin-x64/bin/orix || true
+          chmod 755 dist/darwin-x64/bin/orix || true
+          cp artifacts/npm-linux-x64-gnu/bin/orix dist/linux-x64-gnu/bin/orix || true
+          chmod 755 dist/linux-x64-gnu/bin/orix || true
+          cp artifacts/npm-linux-arm64-gnu/bin/orix dist/linux-arm64-gnu/bin/orix || true
+          chmod 755 dist/linux-arm64-gnu/bin/orix || true
+          cp artifacts/npm-linux-x64-musl/bin/orix dist/linux-x64-musl/bin/orix || true
+          chmod 755 dist/linux-x64-musl/bin/orix || true
+          cp artifacts/npm-win32-x64-msvc/bin/orix.exe dist/win32-x64-msvc/bin/orix.exe || true
+
+      - name: Verify binary permissions
+        shell: bash
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu linux-x64-musl; do
+            binary="dist/$platform/bin/orix"
+            if [ -f "$binary" ]; then
+              ls -l "$binary"
+              test -x "$binary" || { echo "ERROR: $binary is not executable"; exit 1; }
+            fi
+          done
+
+      - name: Verify npm auth
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config get registry
+          npm whoami
+          npm view @orix/orix version || echo "package not found (may be new)"
+          npm owner ls @orix/orix || echo "owner check failed"
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish ./dist/darwin-arm64 --access public
+          npm publish ./dist/darwin-x64 --access public
+          npm publish ./dist/linux-x64-gnu --access public
+          npm publish ./dist/linux-arm64-gnu --access public
+          npm publish ./dist/linux-x64-musl --access public
+          npm publish ./dist/win32-x64-msvc --access public
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./dist/main --access public

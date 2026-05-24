@@ -9,7 +9,7 @@ pnpm 的关键设计是：包文件放进全局 **content-addressable store**，
 名字可以叫：
 
 ```txt
-rpnpm
+orix
 oxide-pm
 fepm
 rust-pnpm
@@ -43,7 +43,7 @@ deploy
 ## 2. 总体架构
 
 ```txt
-rpnpm
+orix
 ├─ crates/
 │  ├─ cli              # 命令入口
 │  ├─ config           # .npmrc / registry / proxy / store 配置
@@ -52,7 +52,7 @@ rpnpm
 │  ├─ registry         # npm registry API
 │  ├─ fetcher          # tarball 下载、缓存
 │  ├─ store            # content-addressable store
-│  ├─ lockfile         # rpnpm-lock.yaml
+│  ├─ lockfile         # orix-lock.yaml
 │  ├─ linker           # node_modules/.pnpm + symlink/hardlink
 │  ├─ workspace        # workspace 包扫描
 │  ├─ lifecycle        # postinstall 等脚本，后置做
@@ -63,7 +63,7 @@ rpnpm
 核心流程：
 
 ```txt
-rpnpm install
+orix install
 ↓
 读取 package.json / workspace
 ↓
@@ -91,7 +91,7 @@ pnpm 的 store 省空间是因为 hardlink 指向同一份磁盘内容。([pnpm.
 Rust 版可以设计成：
 
 ```txt
-~/.rpnpm/store/v1/
+~/.orix/store/v1/
 ├─ files/
 │  ├─ sha512/
 │  │  ├─ ab/cd/<hash>
@@ -220,10 +220,10 @@ packages:
 命令支持：
 
 ```bash
-rpnpm install
-rpnpm install --frozen-lockfile
-rpnpm add react
-rpnpm remove react
+orix install
+orix install --frozen-lockfile
+orix add react
+orix remove react
 ```
 
 ## 7. Rust 技术选型
@@ -273,7 +273,7 @@ hardlink 优先
 目标：
 
 ```bash
-rpnpm install
+orix install
 ```
 
 实现：
@@ -367,6 +367,19 @@ prepare
 
 但要加白名单或配置，因为脚本执行有安全风险。
 
+### Phase 9：peerDeps + 生态兼容
+
+支持：
+
+```txt
+peerDependencies 完整解析（hoisting 策略）
+pnpm-lock.yaml 读取兼容
+pnpm-lock.yaml 导出兼容
+patch 协议
+catalogs
+deploy
+```
+
 ## 9. 最难的地方
 
 真正难点不是下载包，而是这些：
@@ -405,7 +418,7 @@ pub async fn install(project_root: &Path) -> Result<()> {
         store.import_tarball(package, tarball).await?;
     }
 
-    Lockfile::write(project_root.join("rpnpm-lock.yaml"), &graph)?;
+    Lockfile::write(project_root.join("orix-lock.yaml"), &graph)?;
 
     let linker = Linker::new(store, project_root.join("node_modules"));
     linker.link_graph(&graph, &manifest)?;

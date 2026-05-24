@@ -1,0 +1,6 @@
+#!/bin/sh
+# Postinstall script for Orix .pkg
+# The package installs the CLI directly to /usr/local/bin/orix.
+if [ -f "/usr/local/bin/orix" ]; then
+    chmod 755 "/usr/local/bin/orix" 2>/dev/null || true
+fi

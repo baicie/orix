@@ -37,7 +37,7 @@ documentation = "https://docs.rs/my-awesome-crate"
 readme = "README.md"
 keywords = ["http", "client", "async", "networking"]
 categories = ["network-programming", "web-programming::http-client"]
-authors = ["Your Name <you@example.com>"]
+authors = ["baicie <2055572879@qq.com>"]
 homepage = "https://my-awesome-crate.dev"
 
 # Optional but helpful

@@ -28,23 +28,77 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features
 
-      # Publish in dependency order. Keep package names updated.
-      - name: Publish utils
-        run: cargo publish -p your-utils ${{ inputs.dry_run && '--dry-run' || '' }}
+      # Publish in dependency order: leaf crates first.
+      # Dependency graph: domain -> manifest, resolver, store, lockfile, linker, workspace
+      #                   utils -> domain, manifest, resolver, registry, fetcher, store, lockfile, linker, workspace, config, core
+      #                   config -> none
+      #                   macros -> none
+      - name: Publish orix-domain
+        run: cargo publish -p orix-domain ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish config
-        run: cargo publish -p your-config ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Publish orix-manifest
+        run: cargo publish -p orix-manifest ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish core
-        run: cargo publish -p your-core ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Publish orix-utils
+        run: cargo publish -p orix-utils ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish cli
-        run: cargo publish -p your-cli ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Publish orix-registry
+        run: cargo publish -p orix-registry ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-store
+        run: cargo publish -p orix-store ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-resolver
+        run: cargo publish -p orix-resolver ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-fetcher
+        run: cargo publish -p orix-fetcher ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-lockfile
+        run: cargo publish -p orix-lockfile ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-linker
+        run: cargo publish -p orix-linker ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-workspace
+        run: cargo publish -p orix-workspace ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-config
+        run: cargo publish -p orix-config ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-core
+        run: cargo publish -p orix-core ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-cli
+        run: cargo publish -p orix-cli ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orix-macros
+        run: cargo publish -p orix-macros ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

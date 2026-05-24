@@ -7,7 +7,7 @@
 ## 管道架构
 
 ```
-rpnpm install
+orix install
 │
 ├─ Config.resolve()          # 加载 .npmrc、env、CLI 参数
 │
@@ -91,7 +91,7 @@ pub async fn install(project_root: &Path, opts: &InstallOpts) -> Result<InstallR
     let config = Config::load(project_root)?;
     if opts.frozen_lockfile && !config.lockfile_path().exists() {
         anyhow::bail!(
-            "No lockfile found at {}. Run rpnpm install without --frozen-lockfile first.",
+            "No lockfile found at {}. Run orix install without --frozen-lockfile first.",
             config.lockfile_path().display()
         );
     }
@@ -302,3 +302,5 @@ pub async fn run_lifecycle_scripts(
 ```
 
 脚本在沙箱环境中运行（受限的 PATH，默认无网络访问）。
+
+Phase 8 的完整命令、执行器、安全策略、workspace 作用域和测试计划见 [Lifecycle Scripts](./lifecycle-scripts.md)。
