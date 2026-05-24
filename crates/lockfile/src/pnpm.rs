@@ -180,6 +180,12 @@ pub struct PnpmSnapshot {
     /// Dependencies.
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
+    /// Optional dependencies.
+    #[serde(rename = "optionalDependencies", default)]
+    pub optional_dependencies: BTreeMap<String, String>,
+    /// Peer dependencies.
+    #[serde(rename = "peerDependencies", default)]
+    pub peer_dependencies: BTreeMap<String, String>,
 }
 
 /// Errors that can occur when importing a pnpm lockfile.
@@ -237,10 +243,17 @@ impl PnpmLockfile {
     /// orix's `/pkg@ver` format. Importers are mapped 1:1.
     pub fn into_orix_lockfile(self) -> Lockfile {
         let mut orix_packages: BTreeMap<String, crate::PackageLock> = BTreeMap::new();
+        let mut orix_snapshots: BTreeMap<String, crate::SnapshotLock> = BTreeMap::new();
 
         // Convert packages section (v9 format).
         for (key, pkg) in self.packages {
             let orix_key = normalize_package_key(&key);
+            let snapshot = crate::SnapshotLock {
+                dependencies: pkg.dependencies,
+                optional_dependencies: pkg.optional_dependencies,
+                peer_dependencies: pkg.peer_dependencies,
+                peer_context: BTreeMap::new(),
+            };
             let orix_pkg = crate::PackageLock {
                 id: None,
                 local: pkg.resolution.path.clone(),
@@ -253,9 +266,6 @@ impl PnpmLockfile {
                     resolution_type: None,
                     path: pkg.resolution.path.clone(),
                 }),
-                dependencies: pkg.dependencies,
-                optional_dependencies: pkg.optional_dependencies,
-                peer_dependencies: pkg.peer_dependencies,
                 engines: pkg.engines,
                 os: if pkg.os.is_empty() {
                     None
@@ -268,7 +278,21 @@ impl PnpmLockfile {
                     Some(pkg.cpu)
                 },
             };
+            orix_snapshots.insert(orix_key.clone(), snapshot);
             orix_packages.insert(orix_key, orix_pkg);
+        }
+
+        for (key, snapshot) in self.snapshots {
+            let orix_key = normalize_package_key(&key);
+            orix_snapshots.insert(
+                orix_key,
+                crate::SnapshotLock {
+                    dependencies: snapshot.dependencies,
+                    optional_dependencies: snapshot.optional_dependencies,
+                    peer_dependencies: snapshot.peer_dependencies,
+                    peer_context: BTreeMap::new(),
+                },
+            );
         }
 
         // Convert importers to orix format.
@@ -285,12 +309,12 @@ impl PnpmLockfile {
                     crate::ResolvedDep {
                         version: dep.version.clone(),
                         specifier: dep.specifier.unwrap_or_else(|| dep.version.clone()),
-                        id: Some(format!("/{}@{}", name, dep.version)),
-                        dev: dep.dev.or(Some(false)),
-                        optional: dep.optional.or(Some(false)),
-                        engines: dep.engines,
-                        os: dep.os,
-                        cpu: dep.cpu,
+                        id: None,
+                        dev: None,
+                        optional: None,
+                        engines: None,
+                        os: None,
+                        cpu: None,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
                         peer_dependencies: BTreeMap::new(),
@@ -304,12 +328,12 @@ impl PnpmLockfile {
                     crate::ResolvedDep {
                         version: dep.version.clone(),
                         specifier: dep.specifier.unwrap_or_else(|| dep.version.clone()),
-                        id: Some(format!("/{}@{}", name, dep.version)),
-                        dev: dep.dev.or(Some(true)),
-                        optional: dep.optional.or(Some(false)),
-                        engines: dep.engines,
-                        os: dep.os,
-                        cpu: dep.cpu,
+                        id: None,
+                        dev: None,
+                        optional: None,
+                        engines: None,
+                        os: None,
+                        cpu: None,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
                         peer_dependencies: BTreeMap::new(),
@@ -323,12 +347,12 @@ impl PnpmLockfile {
                     crate::ResolvedDep {
                         version: dep.version.clone(),
                         specifier: dep.specifier.unwrap_or_else(|| dep.version.clone()),
-                        id: Some(format!("/{}@{}", name, dep.version)),
-                        dev: dep.dev.or(Some(false)),
-                        optional: dep.optional.or(Some(true)),
-                        engines: dep.engines,
-                        os: dep.os,
-                        cpu: dep.cpu,
+                        id: None,
+                        dev: None,
+                        optional: None,
+                        engines: None,
+                        os: None,
+                        cpu: None,
                         dependencies: BTreeMap::new(),
                         optional_dependencies: BTreeMap::new(),
                         peer_dependencies: BTreeMap::new(),
@@ -352,6 +376,7 @@ impl PnpmLockfile {
             save_remote_cache_urls: true,
             importers: orix_importers,
             packages: orix_packages,
+            snapshots: orix_snapshots,
             graph_hash: None,
         }
     }
@@ -510,6 +535,12 @@ packages:
         assert_eq!(orix.version, LOCKFILE_VERSION);
         assert!(orix.importers.contains_key("."));
         assert!(orix.packages.contains_key("/react@18.2.0"));
+        assert_eq!(
+            orix.snapshots
+                .get("/react@18.2.0")
+                .and_then(|snapshot| snapshot.dependencies.get("scheduler")),
+            Some(&"0.23.0".to_string())
+        );
 
         let importer = orix.importers.get(".").context("missing root importer")?;
         assert_eq!(
@@ -521,9 +552,9 @@ packages:
             Some(&crate::ResolvedDep {
                 version: "18.2.0".to_string(),
                 specifier: "^18.0.0".to_string(),
-                id: Some("/react@18.2.0".to_string()),
-                dev: Some(false),
-                optional: Some(false),
+                id: None,
+                dev: None,
+                optional: None,
                 engines: None,
                 os: None,
                 cpu: None,

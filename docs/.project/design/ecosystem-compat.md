@@ -411,10 +411,10 @@ packages:
 
 迁移策略：
 
-- v1 lockfile 可读。
-- 写入时默认输出 v2。
-- v1 包键按空 peer context 迁移。
-- `orix lockfile migrate` 可选提供显式迁移命令。
+- 1.0.0 发布前不兼容 orix 自有旧 lockfile 格式。
+- 破坏性格式变更直接提升 lockfileVersion。
+- 读取旧 `orix-lock.yaml` 时直接报错，提示删除后重新安装。
+- 不提供 `orix lockfile migrate`，避免为开发期格式背兼容包袱。
 
 ## 测试计划
 

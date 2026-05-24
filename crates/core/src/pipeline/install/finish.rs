@@ -76,7 +76,7 @@ pub(crate) async fn finish_install(
             .write(&config.lockfile_path())
             .with_context(|| "failed to write lockfile")?;
 
-        lockfile_changed = Lockfile::diff_has_changes(&diff);
+        lockfile_changed = Lockfile::diff_has_changes(&diff) || base_lockfile != updated_lockfile;
         lockfile_ms = Some(lockfile_instant.elapsed().as_millis() as u64);
         crate::pipeline::perf::log_lockfile_phase(
             lockfile_ms.unwrap_or(0),

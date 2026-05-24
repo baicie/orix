@@ -12,7 +12,7 @@ pub use tracing::{debug, info, info_span, trace};
 pub use orix_config::{Config, ConfigOverrides};
 pub use orix_fetcher::{FetchEvent, Fetcher, TarballCache};
 pub use orix_linker::{LinkReport, Linker};
-pub use orix_lockfile::{resolve_from_lockfile_packages, Lockfile, PnpmLockfile};
+pub use orix_lockfile::{resolve_from_lockfile, Lockfile, PnpmLockfile};
 pub use orix_manifest::Manifest;
 pub use orix_resolver::Resolver;
 pub use orix_store::Store;

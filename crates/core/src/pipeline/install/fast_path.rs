@@ -45,7 +45,7 @@ pub(crate) async fn try_install_fast_path(
     }
 
     debug!(target: "orix", "FAST PATH triggered");
-    let graph = resolve_from_lockfile_packages(&old_lockfile.packages);
+    let graph = resolve_from_lockfile(old_lockfile);
     let pkg_count = graph.len();
     info!(packages = pkg_count, "resolved from lockfile (fast path)");
 

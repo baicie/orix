@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Lockfile format version.
-pub const LOCKFILE_VERSION: i32 = 3;
+pub const LOCKFILE_VERSION: i32 = 4;
 
 /// The lockfile root — mirrors pnpm's orix-lock.yaml structure.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,7 +19,11 @@ pub struct Lockfile {
     /// Per-importer dependency resolutions.
     pub importers: BTreeMap<String, ImporterLock>,
     /// Resolved packages keyed by package ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub packages: BTreeMap<String, PackageLock>,
+    /// Logical dependency snapshots keyed by package instance ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub snapshots: BTreeMap<String, SnapshotLock>,
     /// SHA-256 hash of the serialized dependency graph for layout validation.
     /// When set, the linker can skip rebuild if node_modules was generated from the same graph.
     #[serde(
@@ -28,6 +32,35 @@ pub struct Lockfile {
         skip_serializing_if = "Option::is_none"
     )]
     pub graph_hash: Option<String>,
+}
+
+/// Dependency edges for one logical package instance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotLock {
+    /// Transitive dependencies.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<String, String>,
+    /// Transitive optional dependencies.
+    #[serde(
+        rename = "optionalDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub optional_dependencies: BTreeMap<String, String>,
+    /// Peer dependencies.
+    #[serde(
+        rename = "peerDependencies",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub peer_dependencies: BTreeMap<String, String>,
+    /// Resolved peer context for future peer-aware package instances.
+    #[serde(
+        rename = "peerContext",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub peer_context: BTreeMap<String, String>,
 }
 
 /// Dependency resolutions for one importer (root or workspace package).
@@ -117,23 +150,6 @@ pub struct PackageLock {
     /// Resolution details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<PackageResolution>,
-    /// Transitive dependencies.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub dependencies: BTreeMap<String, String>,
-    /// Transitive optional dependencies.
-    #[serde(
-        rename = "optionalDependencies",
-        default,
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    pub optional_dependencies: BTreeMap<String, String>,
-    /// Peer dependencies.
-    #[serde(
-        rename = "peerDependencies",
-        default,
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    pub peer_dependencies: BTreeMap<String, String>,
     /// Node engine constraint.
     #[serde(rename = "engines", default, skip_serializing_if = "Option::is_none")]
     pub engines: Option<String>,

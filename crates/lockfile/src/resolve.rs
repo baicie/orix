@@ -1,19 +1,21 @@
-//! Build dependency graphs from lockfile package entries.
-
-use std::collections::BTreeMap;
+//! Build dependency graphs from lockfile snapshots.
 
 use orix_domain::{DependencyGraph, PackageId, PackageName, ResolvedPackage, Version};
 
-use crate::types::PackageLock;
+use crate::types::Lockfile;
 
-/// Resolve dependencies from a lockfile packages section (frozen/install-from-lock workflow).
-pub fn resolve_from_lockfile_packages(packages: &BTreeMap<String, PackageLock>) -> DependencyGraph {
+/// Resolve dependencies from a lockfile (frozen/install-from-lock workflow).
+pub fn resolve_from_lockfile(lockfile: &Lockfile) -> DependencyGraph {
     let mut graph = DependencyGraph::new();
 
-    for (key, pkg) in packages {
+    for (key, pkg) in &lockfile.packages {
         let tarball = match pkg.resolution.as_ref().and_then(|r| r.tarball.clone()) {
             Some(t) => t,
             None => continue,
+        };
+
+        let Some(snapshot) = lockfile.snapshots.get(key) else {
+            continue;
         };
 
         let integrity = pkg.integrity.clone().unwrap_or_default();
@@ -28,17 +30,17 @@ pub fn resolve_from_lockfile_packages(packages: &BTreeMap<String, PackageLock>) 
 
         let pkg_id = PackageId::new(name.clone(), version);
 
-        let deps: Vec<(PackageName, String)> = pkg
+        let deps: Vec<(PackageName, String)> = snapshot
             .dependencies
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
-        let opt_deps: Vec<(PackageName, String)> = pkg
+        let opt_deps: Vec<(PackageName, String)> = snapshot
             .optional_dependencies
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))
             .collect();
-        let peer_deps: Vec<(PackageName, String)> = pkg
+        let peer_deps: Vec<(PackageName, String)> = snapshot
             .peer_dependencies
             .iter()
             .map(|(k, v)| (PackageName::from(k.as_str()), v.clone()))

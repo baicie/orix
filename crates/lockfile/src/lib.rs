@@ -6,10 +6,10 @@ mod resolve;
 mod types;
 
 pub use pnpm::{PnpmImportError, PnpmLockfile};
-pub use resolve::resolve_from_lockfile_packages;
+pub use resolve::resolve_from_lockfile;
 pub use types::{
     ImporterLock, Lockfile, LockfileDiff, PackageLock, PackageResolution, ResolvedDep,
-    LOCKFILE_VERSION,
+    SnapshotLock, LOCKFILE_VERSION,
 };
 
 #[cfg(test)]
@@ -52,9 +52,6 @@ mod tests {
                 resolution_type: None,
                 path: None,
             }),
-            dependencies: BTreeMap::new(),
-            optional_dependencies: BTreeMap::new(),
-            peer_dependencies: BTreeMap::new(),
             engines: None,
             os: None,
             cpu: None,
@@ -78,6 +75,15 @@ mod tests {
             cpu: Vec::new(),
             depnodes: Vec::new(),
             patch: None,
+        })
+    }
+
+    fn resolved_package_with_deps(name: &str, version: &str) -> anyhow::Result<ResolvedPackage> {
+        Ok(ResolvedPackage {
+            dependencies: vec![(PackageName::from("scheduler"), "0.23.0".to_string())],
+            optional_dependencies: vec![(PackageName::from("fsevents"), "~2.3.3".to_string())],
+            peer_dependencies: vec![(PackageName::from("react"), ">=18".to_string())],
+            ..resolved_package(name, version)?
         })
     }
 
@@ -160,6 +166,30 @@ mod tests {
         let read = Lockfile::read(&path)?;
 
         assert_eq!(read, lockfile);
+        Ok(())
+    }
+
+    #[test]
+    fn read_rejects_old_lockfile_version() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("orix-lock.yaml");
+        std::fs::write(
+            &path,
+            r#"
+lockfileVersion: 3
+saveRemoteCacheURLs: true
+importers: {}
+"#,
+        )?;
+
+        let result = Lockfile::read(&path);
+
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.to_string().contains("Delete orix-lock.yaml")
+                    && error.to_string().contains("expected 4")
+        ));
         Ok(())
     }
 
@@ -287,6 +317,42 @@ mod tests {
     }
 
     #[test]
+    fn update_writes_dependency_edges_to_snapshots() -> anyhow::Result<()> {
+        let mut manifest = Manifest::default();
+        manifest
+            .dependencies
+            .insert("react-dom".to_string(), "^18.2.0".to_string());
+
+        let mut graph = DependencyGraph::new();
+        graph.insert(resolved_package_with_deps("react-dom", "18.2.0")?);
+
+        let lockfile = Lockfile::empty().update(&manifest, &graph, ".");
+        let package = lockfile
+            .packages
+            .get("/react-dom@18.2.0")
+            .ok_or_else(|| anyhow::anyhow!("missing package"))?;
+        let snapshot = lockfile
+            .snapshots
+            .get("/react-dom@18.2.0")
+            .ok_or_else(|| anyhow::anyhow!("missing snapshot"))?;
+
+        assert_eq!(package.name.as_deref(), Some("react-dom"));
+        assert_eq!(
+            snapshot.dependencies.get("scheduler"),
+            Some(&"0.23.0".to_string())
+        );
+        assert_eq!(
+            snapshot.optional_dependencies.get("fsevents"),
+            Some(&"~2.3.3".to_string())
+        );
+        assert_eq!(
+            snapshot.peer_dependencies.get("react"),
+            Some(&">=18".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
     fn retain_only_referenced_packages_removes_unused_entries() {
         let mut lockfile = Lockfile::empty();
 
@@ -300,9 +366,6 @@ mod tests {
                 name: Some("react".to_string()),
                 version: Some("18.2.0".to_string()),
                 resolution: None,
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
@@ -317,9 +380,6 @@ mod tests {
                 name: Some("vite".to_string()),
                 version: Some("5.0.0".to_string()),
                 resolution: None,
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
@@ -354,9 +414,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_from_lockfile_packages_builds_graph() {
-        let mut packages = BTreeMap::new();
-        packages.insert(
+    fn resolve_from_lockfile_builds_graph_from_snapshots() {
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
             "/react@18.2.0".to_string(),
             PackageLock {
                 resolution: Some(PackageResolution {
@@ -367,15 +427,6 @@ mod tests {
                     resolution_type: None,
                     path: None,
                 }),
-                dependencies: BTreeMap::from([("scheduler".to_string(), "0.23.0".to_string())]),
-                optional_dependencies: BTreeMap::from([(
-                    "fsevents".to_string(),
-                    "2.3.3".to_string(),
-                )]),
-                peer_dependencies: BTreeMap::from([(
-                    "esbuild".to_string(),
-                    ">=0.18.0".to_string(),
-                )]),
                 id: None,
                 local: None,
                 integrity: None,
@@ -386,7 +437,22 @@ mod tests {
                 cpu: None,
             },
         );
-        packages.insert(
+        lockfile.snapshots.insert(
+            "/react@18.2.0".to_string(),
+            SnapshotLock {
+                dependencies: BTreeMap::from([("scheduler".to_string(), "0.23.0".to_string())]),
+                optional_dependencies: BTreeMap::from([(
+                    "fsevents".to_string(),
+                    "2.3.3".to_string(),
+                )]),
+                peer_dependencies: BTreeMap::from([(
+                    "esbuild".to_string(),
+                    ">=0.18.0".to_string(),
+                )]),
+                peer_context: BTreeMap::new(),
+            },
+        );
+        lockfile.packages.insert(
             "/scheduler@0.23.0".to_string(),
             PackageLock {
                 resolution: Some(PackageResolution {
@@ -397,9 +463,6 @@ mod tests {
                     resolution_type: None,
                     path: None,
                 }),
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
                 id: None,
                 local: None,
                 integrity: None,
@@ -410,8 +473,11 @@ mod tests {
                 cpu: None,
             },
         );
+        lockfile
+            .snapshots
+            .insert("/scheduler@0.23.0".to_string(), SnapshotLock::default());
 
-        let graph = resolve_from_lockfile_packages(&packages);
+        let graph = resolve_from_lockfile(&lockfile);
 
         assert_eq!(graph.len(), 2);
         let pkg_ids: Vec<_> = graph.packages().map(|p| p.id.key()).collect();
@@ -435,9 +501,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_from_lockfile_packages_skips_packages_without_tarball() {
-        let mut packages = BTreeMap::new();
-        packages.insert(
+    fn resolve_from_lockfile_requires_snapshot_and_tarball() {
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
             "/react@18.2.0".to_string(),
             PackageLock {
                 resolution: Some(PackageResolution {
@@ -451,16 +517,35 @@ mod tests {
                 integrity: None,
                 name: None,
                 version: None,
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
+                engines: None,
+                os: None,
+                cpu: None,
+            },
+        );
+        lockfile
+            .snapshots
+            .insert("/react@18.2.0".to_string(), SnapshotLock::default());
+        lockfile.packages.insert(
+            "/left-pad@1.3.0".to_string(),
+            PackageLock {
+                resolution: Some(PackageResolution {
+                    tarball: Some("https://registry.npmjs.org/left-pad.tgz".to_string()),
+                    integrity: None,
+                    resolution_type: None,
+                    path: None,
+                }),
+                id: None,
+                local: None,
+                integrity: None,
+                name: None,
+                version: None,
                 engines: None,
                 os: None,
                 cpu: None,
             },
         );
         // No tarball — should be skipped
-        packages.insert(
+        lockfile.packages.insert(
             "/vite@5.0.0".to_string(),
             PackageLock {
                 resolution: Some(PackageResolution {
@@ -474,19 +559,20 @@ mod tests {
                 integrity: None,
                 name: None,
                 version: None,
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,
             },
         );
+        lockfile
+            .snapshots
+            .insert("/vite@5.0.0".to_string(), SnapshotLock::default());
 
-        let graph = resolve_from_lockfile_packages(&packages);
+        let graph = resolve_from_lockfile(&lockfile);
 
         assert_eq!(graph.len(), 1);
         assert!(graph.packages().any(|p| p.id.name.as_str() == "react"));
         assert!(!graph.packages().any(|p| p.id.name.as_str() == "vite"));
+        assert!(!graph.packages().any(|p| p.id.name.as_str() == "left-pad"));
     }
 }

@@ -70,15 +70,6 @@ impl PackageInstanceId {
             format!("{}{}", self.package.key(), suffix)
         }
     }
-
-    /// Return a version of this instance ID without peer context
-    /// (for lockfile v1 compatibility).
-    pub fn without_peers(&self) -> PackageInstanceId {
-        PackageInstanceId {
-            package: self.package.clone(),
-            peer_context: PeerContext::default(),
-        }
-    }
 }
 
 /// Peer requirement: describes what a package declares as a peer dependency.

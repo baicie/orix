@@ -6,8 +6,6 @@
 
 #![allow(clippy::unwrap_used, clippy::missing_docs_in_private_items)]
 
-use std::collections::BTreeMap;
-
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use orix_domain::{PackageId, PackageName, ResolvedPackage, Version};
@@ -234,9 +232,6 @@ fn lockfile_serialize(c: &mut Criterion) {
                     resolution_type: None,
                     path: None,
                 }),
-                dependencies: BTreeMap::new(),
-                optional_dependencies: BTreeMap::new(),
-                peer_dependencies: BTreeMap::new(),
                 engines: None,
                 os: None,
                 cpu: None,

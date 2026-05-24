@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::types::{
-    Lockfile, LockfileDiff, PackageLock, PackageResolution, ResolvedDep, LOCKFILE_VERSION,
+    Lockfile, LockfileDiff, PackageLock, PackageResolution, ResolvedDep, SnapshotLock,
+    LOCKFILE_VERSION,
 };
 
 impl Lockfile {
@@ -15,6 +16,7 @@ impl Lockfile {
             save_remote_cache_urls: true,
             importers: Default::default(),
             packages: Default::default(),
+            snapshots: Default::default(),
             graph_hash: None,
         }
     }
@@ -22,8 +24,18 @@ impl Lockfile {
     /// Read a lockfile from a YAML file.
     pub fn read(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        serde_yaml::from_str(&content)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e).into())
+        let lockfile: Self = serde_yaml::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        if lockfile.version != LOCKFILE_VERSION {
+            anyhow::bail!(
+                "Lockfile version {} is not supported by this orix version (expected {}). Delete orix-lock.yaml and run orix install again.",
+                lockfile.version,
+                LOCKFILE_VERSION
+            );
+        }
+
+        Ok(lockfile)
     }
 
     /// Write the lockfile to a YAML file atomically.
@@ -49,8 +61,6 @@ impl Lockfile {
         graph: &orix_domain::DependencyGraph,
         importer_id: &str,
     ) -> Self {
-        use std::collections::BTreeMap;
-
         let mut lockfile = self.clone();
         lockfile.version = LOCKFILE_VERSION;
 
@@ -102,47 +112,12 @@ impl Lockfile {
         }
 
         for pkg in graph.packages() {
-            let key = format!("/{}@{}", pkg.id.name, pkg.id.version);
-            let deps: BTreeMap<String, String> = pkg
-                .dependencies
-                .iter()
-                .map(|(n, c)| (n.to_string(), c.clone()))
-                .collect();
-            let opt_deps: BTreeMap<String, String> = pkg
-                .optional_dependencies
-                .iter()
-                .map(|(n, c)| (n.to_string(), c.clone()))
-                .collect();
-            let peer_deps: BTreeMap<String, String> = pkg
-                .peer_dependencies
-                .iter()
-                .map(|(n, c)| (n.to_string(), c.clone()))
-                .collect();
-            lockfile.packages.insert(
-                key,
-                PackageLock {
-                    id: Some(format!(
-                        "registry.npmjs.org/{}/{}",
-                        pkg.id.name, pkg.id.version
-                    )),
-                    local: None,
-                    integrity: Some(pkg.integrity.clone()),
-                    name: Some(pkg.id.name.to_string()),
-                    version: Some(pkg.id.version.to_string()),
-                    resolution: Some(PackageResolution {
-                        tarball: Some(pkg.tarball.clone()),
-                        integrity: Some(pkg.integrity.clone()),
-                        resolution_type: None,
-                        path: None,
-                    }),
-                    dependencies: deps,
-                    optional_dependencies: opt_deps,
-                    peer_dependencies: peer_deps,
-                    engines: pkg.engines.clone(),
-                    os: non_empty_vec(pkg.os.clone()),
-                    cpu: non_empty_vec(pkg.cpu.clone()),
-                },
-            );
+            lockfile
+                .packages
+                .insert(package_key(pkg), package_lock_from_package(pkg));
+            lockfile
+                .snapshots
+                .insert(snapshot_key(pkg), snapshot_from_package(pkg));
         }
 
         lockfile.graph_hash = Some(graph.graph_hash());
@@ -301,41 +276,112 @@ impl Lockfile {
     /// Remove all packages from the lockfile that are not transitively referenced
     /// by any importer. Returns the number of packages removed.
     pub fn retain_only_referenced_packages(&mut self) -> usize {
-        let mut referenced_keys = std::collections::HashSet::new();
+        use std::collections::{HashSet, VecDeque};
+
+        let mut referenced_keys = HashSet::new();
+        let mut queue = VecDeque::new();
 
         for importer in self.importers.values() {
             for (name, dep) in importer.dependencies.iter() {
-                referenced_keys.insert(format!("/{}@{}", name, dep.version));
-                for (dep_name, dep_ver) in dep.dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
-                }
-                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
-                }
+                queue.push_back(format!("/{}@{}", name, dep.version));
             }
             for (name, dep) in importer.dev_dependencies.iter() {
-                referenced_keys.insert(format!("/{}@{}", name, dep.version));
-                for (dep_name, dep_ver) in dep.dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
-                }
-                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
-                }
+                queue.push_back(format!("/{}@{}", name, dep.version));
             }
             for (name, dep) in importer.optional_dependencies.iter() {
-                referenced_keys.insert(format!("/{}@{}", name, dep.version));
-                for (dep_name, dep_ver) in dep.dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
-                }
-                for (dep_name, dep_ver) in dep.optional_dependencies.iter() {
-                    referenced_keys.insert(format!("/{}@{}", dep_name, dep_ver));
+                queue.push_back(format!("/{}@{}", name, dep.version));
+            }
+        }
+
+        while let Some(key) = queue.pop_front() {
+            if !referenced_keys.insert(key.clone()) {
+                continue;
+            }
+            let Some(snapshot) = self.snapshots.get(&key) else {
+                continue;
+            };
+            for dep_name in snapshot
+                .dependencies
+                .keys()
+                .chain(snapshot.optional_dependencies.keys())
+                .chain(snapshot.peer_dependencies.keys())
+            {
+                for package_key in self.packages.keys() {
+                    if package_key_name(package_key).as_deref() == Some(dep_name.as_str()) {
+                        queue.push_back(package_key.clone());
+                    }
                 }
             }
         }
 
         let before = self.packages.len();
+        let package_keys_before: HashSet<_> = self.packages.keys().cloned().collect();
         self.packages.retain(|key, _| referenced_keys.contains(key));
+        self.snapshots
+            .retain(|key, _| referenced_keys.contains(key) || !package_keys_before.contains(key));
         before - self.packages.len()
+    }
+}
+
+fn package_key(pkg: &orix_domain::ResolvedPackage) -> String {
+    format!("/{}@{}", pkg.id.name, pkg.id.version)
+}
+
+fn snapshot_key(pkg: &orix_domain::ResolvedPackage) -> String {
+    package_key(pkg)
+}
+
+fn snapshot_from_package(pkg: &orix_domain::ResolvedPackage) -> SnapshotLock {
+    SnapshotLock {
+        dependencies: pkg
+            .dependencies
+            .iter()
+            .map(|(name, raw)| (name.to_string(), raw.clone()))
+            .collect(),
+        optional_dependencies: pkg
+            .optional_dependencies
+            .iter()
+            .map(|(name, raw)| (name.to_string(), raw.clone()))
+            .collect(),
+        peer_dependencies: pkg
+            .peer_dependencies
+            .iter()
+            .map(|(name, raw)| (name.to_string(), raw.clone()))
+            .collect(),
+        peer_context: BTreeMap::new(),
+    }
+}
+
+fn package_lock_from_package(pkg: &orix_domain::ResolvedPackage) -> PackageLock {
+    PackageLock {
+        id: Some(format!(
+            "registry.npmjs.org/{}/{}",
+            pkg.id.name, pkg.id.version
+        )),
+        local: None,
+        integrity: Some(pkg.integrity.clone()),
+        name: Some(pkg.id.name.to_string()),
+        version: Some(pkg.id.version.to_string()),
+        resolution: Some(PackageResolution {
+            tarball: Some(pkg.tarball.clone()),
+            integrity: Some(pkg.integrity.clone()),
+            resolution_type: None,
+            path: None,
+        }),
+        engines: pkg.engines.clone(),
+        os: non_empty_vec(pkg.os.clone()),
+        cpu: non_empty_vec(pkg.cpu.clone()),
+    }
+}
+
+fn package_key_name(key: &str) -> Option<String> {
+    let key = key.trim_start_matches('/');
+    let at = key.rfind('@')?;
+    let name = &key[..at];
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
     }
 }
 

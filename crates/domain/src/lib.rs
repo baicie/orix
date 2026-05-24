@@ -221,17 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn package_instance_id_key_without_peers_matches_package_key() -> anyhow::Result<()> {
-        let ctx = PeerContext::default();
-        let instance = PackageInstanceId::new(
-            PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),
-            ctx,
-        );
-        assert_eq!(instance.key(), instance.without_peers().key());
-        Ok(())
-    }
-
-    #[test]
     fn resolver_diagnostic_display_formats_missing_peer() -> anyhow::Result<()> {
         let diag = ResolverDiagnostic::MissingPeer {
             requester: PackageId::new(PackageName::from("react-dom"), Version::parse("18.2.0")?),

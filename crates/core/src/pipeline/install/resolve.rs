@@ -18,7 +18,7 @@ pub(crate) async fn resolve_install_graph(
             lf.validate_frozen(manifest, ".")
                 .with_context(|| "frozen lockfile validation failed")?;
 
-            let g = resolve_from_lockfile_packages(&lf.packages);
+            let g = resolve_from_lockfile(lf);
             info!(packages = g.len(), "resolved from lockfile (frozen mode)");
             g
         } else {

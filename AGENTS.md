@@ -121,6 +121,12 @@ orix install
 
 ## 编码规范
 
+### 版本兼容策略
+
+- 在发布 `1.0.0` 之前，orix 自有格式和内部 API **不做向后兼容**，包括 `orix-lock.yaml`、`node_modules/.orix` metadata、store metadata、CLI 实验参数和 crate public API。
+- 破坏性格式变更应直接提升版本号并给出清晰错误，提示用户删除旧产物后重新生成；不要编写 `normalize`、`migrate`、`legacy fallback`、旧字段兼容读取等代码。
+- 例外仅限明确的产品目标：兼容 npm registry、`package.json` 生态字段、pnpm workspace/lockfile 等外部生态输入。外部兼容必须写在对应设计文档中，不得混同为 orix 旧版本兼容。
+
 ### Rust 风格
 
 - 遵循 idiomatic Rust。
